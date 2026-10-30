@@ -1,0 +1,14 @@
+[package]
+name = "sf2pack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Packs multi-sampled instrument recordings (FLAC) into SoundFont 2 files"
+
+[dependencies]
+anyhow.workspace = true
+claxon = "0.4.3"
+
+[dev-dependencies]
+rustysynth = "1.3.8"

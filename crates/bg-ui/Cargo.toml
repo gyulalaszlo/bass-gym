@@ -1,0 +1,19 @@
+[package]
+name = "bg-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eframe.workspace = true
+egui.workspace = true
+egui-phosphor.workspace = true
+bg-core.workspace = true
+bg-audio.workspace = true
+bg-sound.workspace = true
+bg-dsp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+log.workspace = true

@@ -1,0 +1,5 @@
+/target
+.DS_Store
+
+# SoundFonts are built from samples/ (`cargo soundfonts`)
+/assets/soundfonts/*.sf2

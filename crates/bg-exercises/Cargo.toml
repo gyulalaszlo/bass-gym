@@ -1,0 +1,20 @@
+[package]
+name = "bg-exercises"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bg-core.workspace = true
+bg-audio.workspace = true
+bg-sound.workspace = true
+bg-ui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+
+[dev-dependencies]
+bg-dsp.workspace = true

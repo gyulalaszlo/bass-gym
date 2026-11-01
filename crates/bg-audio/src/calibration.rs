@@ -21,6 +21,8 @@ pub struct CalibrationState {
     pub clicks_done: usize,
     /// Median offset, available when enough clicks matched.
     pub result_ms: Option<f32>,
+    /// A run completed (and wasn't dismissed yet); `result_ms` is `None` if too few notes matched.
+    pub finished: bool,
 }
 
 pub struct Calibration {
@@ -74,11 +76,34 @@ impl SessionLogic for Calibration {
         io.silence();
         self.with_state(|s| {
             s.running = false;
+            s.finished = true;
             if s.offsets_ms.len() >= CALIBRATION_CLICKS / 2 {
                 let mut v = s.offsets_ms.clone();
                 v.sort_by(f32::total_cmp);
                 s.result_ms = Some(v[v.len() / 2]);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_offsets_are_kept() {
+        let state = Arc::new(Mutex::new(CalibrationState::default()));
+        let mut cal = Calibration::new(state.clone());
+        let latency = 0.003;
+        cal.start(&mut SessionIo::offline(0.0, latency));
+        // Notes arrive 7 ms before each measured click (after the configured latency is removed).
+        let clicks: Vec<f64> = cal.clicks[LEAD_IN..].to_vec();
+        for t in clicks {
+            cal.note_on(t - 0.007 - latency, -20.0);
+        }
+        cal.stop(&mut SessionIo::offline(100.0, latency));
+        let s = state.lock().unwrap();
+        assert_eq!(s.offsets_ms.len(), CALIBRATION_CLICKS);
+        assert!((s.result_ms.unwrap() - -7.0).abs() < 0.01, "{:?}", s.result_ms);
     }
 }

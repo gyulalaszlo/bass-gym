@@ -1,6 +1,7 @@
 //! Preset selection / creation for the active exercise type.
 
 use bg_core::preset::{PresetEnvelope, PresetStore, StoredPreset, migrate};
+use bg_ui::widgets::controls::dropdown_sized;
 use bg_ui::{ExerciseType, egui, icons, theme};
 use chrono::Utc;
 use egui::RichText;
@@ -130,13 +131,17 @@ impl PresetBar {
         let dirty = slot.is_dirty();
         let mut result: Option<Result<(), String>> = None;
 
-        // Wraps the buttons onto a second line when the window is narrow.
-        ui.horizontal_wrapped(|ui| {
+        // The selector takes the space the buttons leave (measured on the previous frame),
+        // so the buttons stay at the right edge.
+        let buttons_id = ui.id().with("preset_buttons_width");
+        ui.horizontal(|ui| {
             ui.add_enabled_ui(!locked, |ui| {
                 let label = format!("{}  {}{}", icons::BOOKMARK_SIMPLE, slot.current_name(), if dirty { "  •" } else { "" });
                 let text = RichText::new(label).color(if dirty { theme::amber() } else { theme::cyan() });
                 let mut pick: Option<Option<Uuid>> = None;
-                egui::ComboBox::from_id_salt("preset_select").selected_text(text).width((ui.available_width() - 470.0).max(200.0)).show_ui(ui, |ui| {
+                let buttons_w: f32 = ui.data(|d| d.get_temp(buttons_id)).unwrap_or(560.0);
+                let width = (ui.available_width() - buttons_w - ui.spacing().item_spacing.x).max(140.0);
+                dropdown_sized(ui, "preset_select", text, width, |ui| {
                     if ui.selectable_label(slot.current.is_none(), "Default").clicked() {
                         pick = Some(None);
                     }
@@ -161,6 +166,7 @@ impl PresetBar {
                     }
                 }
 
+                let buttons = ui.horizontal(|ui| {
                 let can_save = dirty && slot.current.is_some();
                 if ui.add_enabled(can_save, egui::Button::new(format!("{} Save", icons::FLOPPY_DISK))).on_hover_text("Overwrite the selected preset").clicked() {
                     result = Some(slot.save(store));
@@ -188,11 +194,17 @@ impl PresetBar {
                         }
                     });
                 });
+                });
+                let w = buttons.response.rect.width();
+                if (w - buttons_w).abs() > 0.5 {
+                    ui.data_mut(|d| d.insert_temp(buttons_id, w));
+                    ui.ctx().request_repaint();
+                }
             });
-            if let Some((msg, ok)) = &self.message {
-                ui.label(RichText::new(msg).small().color(if *ok { theme::green() } else { theme::red() }));
-            }
         });
+        if let Some((msg, ok)) = &self.message {
+            ui.label(RichText::new(msg).small().color(if *ok { theme::green() } else { theme::red() }));
+        }
 
         if let Some(dialog) = &mut self.dialog {
             let mut close = false;

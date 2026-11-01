@@ -7,7 +7,7 @@ cargo run -p bass-gym --release     # app
 cargo test --workspace              # unit + offline end-to-end tests
 ```
 
-Settings, presets and session state are stored in the platform config dir (macOS: `~/Library/Application Support/bass-gym`).
+Settings, presets, session state and the window geometry (`window.ron`) are stored in the platform config dir (macOS: `~/Library/Application Support/bass-gym`).
 
 ## Crates
 
@@ -36,7 +36,7 @@ The packer cuts the silence before each attack (so notes sound on time), trims t
 
 At startup the app registers every `.sf2` in, in this order: the user's folder (`<config dir>/soundfonts`), `soundfonts/` next to the executable, `../Resources/soundfonts` (macOS app bundle) and `assets/soundfonts` in the source tree. When packaging, copy `assets/soundfonts` next to the executable (or into the bundle's `Resources`). Fonts load on first use; the first preset of each file is played.
 
-Debugging aid: `BASS_GYM_SCREENSHOT=<file.ppm>` saves the window after 2 s and quits; `BASS_GYM_SIZE=<w>x<h>`, `BASS_GYM_EXERCISE=<id>` and `BASS_GYM_PREFS=<page id>` set up what is shown.
+Debugging aid: `BASS_GYM_SCREENSHOT=<file.ppm>` saves the window after 2 s and quits; `BASS_GYM_SIZE=<w>x<h>`, `BASS_GYM_EXERCISE=<id>` and `BASS_GYM_PREFS=<page id>` set up what is shown (in screenshot mode the preferences are drawn inside the main window).
 
 ## Extending
 

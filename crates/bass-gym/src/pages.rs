@@ -6,9 +6,10 @@ use bg_audio::{AnalysisConfig, AudioConfig, CALIBRATION_CLICKS, Calibration, Cal
 use bg_core::ScoringThresholds;
 use bg_sound::SoundRole;
 use bg_ui::theme::{PRESETS, Palette, Rgb, ThemePrefs};
+use bg_ui::widgets::controls::{checkbox, dropdown, number_field, slider_field};
 use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{PreferencePage, PrefsCtx, egui, icons, theme};
-use egui::{DragValue, RichText, Slider};
+use egui::{RichText, Slider};
 
 pub const AUDIO: &str = "audio";
 pub const SOUNDS: &str = "sounds";
@@ -73,7 +74,7 @@ impl PreferencePage for AudioPage {
                     .map(|d| d.channels)
                     .unwrap_or(ctx.engine.status().input_channels.max(1));
                 let text = cfg.input_channel.map_or("Mix all".to_owned(), |c| format!("Channel {}", c + 1));
-                egui::ComboBox::from_id_salt("in_ch").selected_text(text).show_ui(ui, |ui| {
+                dropdown(ui, "in_ch", text, |ui| {
                     ui.selectable_value(&mut cfg.input_channel, None, "Mix all");
                     for c in 0..channels {
                         ui.selectable_value(&mut cfg.input_channel, Some(c), format!("Channel {}", c + 1));
@@ -87,7 +88,7 @@ impl PreferencePage for AudioPage {
 
                 ui.label("Sample rate");
                 let text = cfg.sample_rate.map_or("Device default".to_owned(), |r| format!("{r} Hz"));
-                egui::ComboBox::from_id_salt("rate").selected_text(text).show_ui(ui, |ui| {
+                dropdown(ui, "rate", text, |ui| {
                     ui.selectable_value(&mut cfg.sample_rate, None, "Device default");
                     for r in [44_100, 48_000, 88_200, 96_000] {
                         ui.selectable_value(&mut cfg.sample_rate, Some(r), format!("{r} Hz"));
@@ -97,7 +98,7 @@ impl PreferencePage for AudioPage {
 
                 ui.label("Buffer size");
                 let text = cfg.buffer_frames.map_or("Device default".to_owned(), |f| format!("{f} frames"));
-                egui::ComboBox::from_id_salt("buf").selected_text(text).show_ui(ui, |ui| {
+                dropdown(ui, "buf", text, |ui| {
                     ui.selectable_value(&mut cfg.buffer_frames, None, "Device default");
                     for f in [64, 128, 256, 512, 1024] {
                         ui.selectable_value(&mut cfg.buffer_frames, Some(f), format!("{f} frames"));
@@ -145,12 +146,12 @@ impl PreferencePage for AudioPage {
                 lowpass_slider(ui, &mut sounds);
                 ui.end_row();
                 ui.label("Master volume");
-                ui.add(Slider::new(&mut sounds.master, 0.0..=1.0));
+                ui.add(slider_field(&mut sounds.master, 0.0..=1.0));
                 ui.end_row();
                 ui.label(format!("{} Monitor input", icons::EAR));
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut sounds.monitor, "");
-                    ui.add_enabled(sounds.monitor, Slider::new(&mut sounds.monitor_gain, 0.0..=2.0));
+                    checkbox(ui, &mut sounds.monitor, "");
+                    ui.add_enabled(sounds.monitor, slider_field(&mut sounds.monitor_gain, 0.0..=2.0));
                 });
                 ui.end_row();
             });
@@ -178,7 +179,7 @@ fn device_combo(ui: &mut egui::Ui, id: &str, value: &mut Option<String>, list: &
         None => "System default".to_owned(),
         Some(v) => list.iter().find(|d| &d.id == v).map_or_else(|| "(unavailable device)".to_owned(), |d| d.name.clone()),
     };
-    egui::ComboBox::from_id_salt(id).selected_text(text).width(320.0).show_ui(ui, |ui| {
+    dropdown(ui, id, text, |ui| {
         ui.selectable_value(value, None, "System default");
         for d in list {
             ui.selectable_value(value, Some(d.id.clone()), format!("{}  ({} ch, {} Hz)", d.name, d.channels, d.default_rate));
@@ -196,7 +197,12 @@ fn lowpass_slider(ui: &mut egui::Ui, sounds: &mut SoundConfig) {
         if hz >= LOWPASS_OFF as f64 - 1.0 { "Open".to_owned() } else if hz >= 1000.0 { format!("{:.1} kHz", hz / 1000.0) } else { format!("{hz:.0} Hz") }
     };
     let resp = ui
-        .add(Slider::new(&mut pos, 0.0..=max).custom_formatter(fmt).custom_parser(|_| None).text("low-pass"))
+        .horizontal(|ui| {
+            let r = ui.add(Slider::new(&mut pos, 0.0..=max).show_value(false));
+            ui.label(RichText::new(format!("{} low-pass", fmt(pos as f64, 0..=0))).color(theme::cyan()));
+            r
+        })
+        .inner
         .on_hover_text("Darkens the instrument: a lower cutoff removes more of the bright overtones. Remembered per instrument.");
     if resp.changed() {
         sounds.instrument_lowpass.insert(sounds.instrument.clone(), 400.0 * 2f32.powf(pos));
@@ -218,7 +224,7 @@ fn open_folder(dir: &std::path::Path) {
 
 fn sound_combo(ui: &mut egui::Ui, id: &str, value: &mut String, role: SoundRole) {
     let text = bg_sound::source(value).map_or(value.clone(), |s| s.name().to_owned());
-    egui::ComboBox::from_id_salt(id).selected_text(text).width(200.0).show_ui(ui, |ui| {
+    dropdown(ui, id, text, |ui| {
         for s in bg_sound::sources_for(role) {
             ui.selectable_value(value, s.id().to_owned(), s.name());
         }
@@ -228,6 +234,8 @@ fn sound_combo(ui: &mut egui::Ui, id: &str, value: &mut String, role: SoundRole)
 #[derive(Default)]
 pub struct LatencyPage {
     calibration: Arc<Mutex<CalibrationState>>,
+    /// When a measurement was last applied (for a short confirmation).
+    applied_at: Option<f64>,
 }
 
 impl PreferencePage for LatencyPage {
@@ -243,60 +251,97 @@ impl PreferencePage for LatencyPage {
 
     fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut PrefsCtx) {
         let mut cfg: AnalysisConfig = ctx.settings.get(ANALYSIS);
+        cfg.normalize();
         let cal = self.calibration.lock().map(|c| c.clone()).unwrap_or_default();
+        let reset_calibration = |c: &Arc<Mutex<CalibrationState>>| {
+            if let Ok(mut c) = c.lock() {
+                *c = CalibrationState::default();
+            }
+        };
 
-        theme::section(ui, "Latency", |ui| {
-            ui.label(
-                RichText::new(
-                    "The round trip from the click leaving the app to your note coming back in. \
-                     Measure it with a cable from the output to the input (loopback), or by plucking \
-                     a muted string exactly with each click.",
-                )
-                .small()
-                .color(theme::dim()),
+        theme::section(ui, "Latency correction", |ui| {
+            let help = |ui: &mut egui::Ui, text: &str| {
+                ui.add(egui::Label::new(RichText::new(text).small().color(theme::dim())).wrap());
+            };
+            help(
+                ui,
+                "The audio driver reports how long sound takes to leave and to come back into the app, and \
+                 bass-gym already allows for that. This correction is whatever the driver gets wrong: \
+                 positive if the round trip is longer than reported, negative if the driver over-reports \
+                 (common with small buffers). Measure it once per audio setup.",
             );
-            egui::Grid::new("latency").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                ui.label("Measured");
-                ui.add(DragValue::new(&mut cfg.latency_ms).range(0.0..=500.0).speed(0.1).suffix(" ms"));
-                ui.end_row();
-                ui.label("Trim");
-                ui.add(Slider::new(&mut cfg.latency_trim_ms, -50.0..=50.0).suffix(" ms"));
-                ui.end_row();
-                ui.label("Total");
-                ui.label(RichText::new(format!("{:.1} ms", cfg.latency_ms + cfg.latency_trim_ms)).font(theme::mono(16.0)).color(theme::green()));
-                ui.end_row();
-            });
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
+                ui.label("Correction");
+                ui.add(number_field(&mut cfg.latency_ms).range(-200.0..=500.0).step(0.1).decimals(1).suffix("ms").width(64.0))
+                    .on_hover_text("↑ / ↓: ±0.1 ms, Shift: ±1 ms");
+                ui.add_space(12.0);
                 if cal.running {
-                    ui.add(egui::ProgressBar::new(cal.clicks_done as f32 / CALIBRATION_CLICKS as f32).desired_width(200.0).text(format!("{} / {} clicks · {} notes heard", cal.clicks_done, CALIBRATION_CLICKS, cal.offsets_ms.len())));
+                    let text = format!("{} / {} clicks · {} notes heard", cal.clicks_done, CALIBRATION_CLICKS, cal.offsets_ms.len());
+                    ui.add(egui::ProgressBar::new(cal.clicks_done as f32 / CALIBRATION_CLICKS as f32).desired_width(240.0).text(text));
                     if ui.button("Cancel").clicked() {
                         ctx.engine.stop_session();
+                        reset_calibration(&self.calibration);
                     }
                     ui.ctx().request_repaint();
-                } else if ui.add_enabled(!ctx.engine.session_running(), egui::Button::new(format!("{} Measure", icons::GAUGE))).clicked() {
+                } else if ui
+                    .add_enabled(!ctx.engine.session_running(), egui::Button::new(format!("{} Measure", icons::GAUGE)))
+                    .on_hover_text("Plays 4 lead-in clicks, then 16 clicks to measure against")
+                    .clicked()
+                {
+                    self.applied_at = None;
                     ctx.engine.start_session(Box::new(Calibration::new(self.calibration.clone())));
                 }
             });
-            if !cal.running {
-                match (cal.result_ms, cal.offsets_ms.is_empty()) {
-                    (Some(r), _) => {
+
+            let now = ui.input(|i| i.time);
+            if !cal.running && cal.finished {
+                match cal.result_ms {
+                    Some(r) => {
                         let spread = spread(&cal.offsets_ms);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("Result {r:.1} ms (spread ±{spread:.1} ms, {} notes)", cal.offsets_ms.len())).color(theme::green()));
-                            if ui.button(format!("{} Use", icons::CHECK)).clicked() {
-                                cfg.latency_ms = r.max(0.0);
-                                if let Ok(mut c) = self.calibration.lock() {
-                                    c.result_ms = None;
-                                }
+                            ui.label(RichText::new(format!("Measured {r:+.1} ms")).font(theme::mono(16.0)).color(theme::green()));
+                            ui.label(RichText::new(format!("(±{spread:.1} ms, {} of {CALIBRATION_CLICKS} clicks)", cal.offsets_ms.len())).color(theme::dim()));
+                            if ui.button(format!("{} Apply", icons::CHECK)).clicked() {
+                                cfg.latency_ms = (r * 10.0).round() / 10.0;
+                                self.applied_at = Some(now);
+                                reset_calibration(&self.calibration);
+                            }
+                            if ui.button("Discard").clicked() {
+                                reset_calibration(&self.calibration);
                             }
                         });
                     }
-                    (None, false) => {
-                        ui.label(RichText::new(format!("Only {} notes were detected; check the input level and try again.", cal.offsets_ms.len())).color(theme::amber()));
+                    None => {
+                        ui.horizontal(|ui| {
+                            let text = format!(
+                                "{} Only {} of {CALIBRATION_CLICKS} clicks were matched by a note; check the input level and try again.",
+                                icons::WARNING,
+                                cal.offsets_ms.len()
+                            );
+                            ui.label(RichText::new(text).color(theme::amber()));
+                            if ui.small_button(icons::X).on_hover_text("Dismiss").clicked() {
+                                reset_calibration(&self.calibration);
+                            }
+                        });
                     }
-                    _ => {}
+                }
+            } else if let Some(t) = self.applied_at {
+                if now - t < 4.0 {
+                    ui.label(RichText::new(format!("{} Applied", icons::CHECK_CIRCLE)).color(theme::green()));
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+                } else {
+                    self.applied_at = None;
                 }
             }
+
+            ui.add_space(4.0);
+            help(
+                ui,
+                "To measure: connect the output to the input with a cable (loopback), or pluck a muted \
+                 string exactly with each click. Then fine-tune by ear while playing: if your notes show \
+                 up late, raise the value; if they show up early, lower it.",
+            );
         });
 
         ui.add_space(6.0);
@@ -311,16 +356,16 @@ impl PreferencePage for LatencyPage {
             });
             egui::Grid::new("detector").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 ui.label("Noise gate");
-                ui.add(Slider::new(&mut cfg.detector.gate_db, -80.0..=-10.0).suffix(" dBFS"));
+                ui.add(slider_field(&mut cfg.detector.gate_db, -80.0..=-10.0).suffix("dBFS"));
                 ui.end_row();
                 ui.label("Onset sensitivity");
-                ui.add(Slider::new(&mut cfg.detector.onset_rise_db, 2.0..=15.0).suffix(" dB rise")).on_hover_text("Lower = more sensitive");
+                ui.add(slider_field(&mut cfg.detector.onset_rise_db, 2.0..=15.0).suffix("dB rise")).on_hover_text("Lower = more sensitive");
                 ui.end_row();
                 ui.label("Min. gap");
-                ui.add(Slider::new(&mut cfg.detector.min_gap_ms, 20.0..=150.0).suffix(" ms"));
+                ui.add(slider_field(&mut cfg.detector.min_gap_ms, 20.0..=150.0).suffix("ms"));
                 ui.end_row();
                 ui.label("Tuner gate");
-                ui.add(Slider::new(&mut cfg.tuner_gate_db, -90.0..=-20.0).suffix(" dBFS"));
+                ui.add(slider_field(&mut cfg.tuner_gate_db, -90.0..=-20.0).suffix("dBFS"));
                 ui.end_row();
             });
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
@@ -339,10 +384,10 @@ impl PreferencePage for LatencyPage {
             );
             egui::Grid::new("note_end").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                 ui.label("Threshold");
-                ui.add(Slider::new(&mut cfg.detector.release_db, 3.0..=40.0).step_by(0.5).suffix(" dB below peak"));
+                ui.add(slider_field(&mut cfg.detector.release_db, 3.0..=40.0).step_by(0.5).suffix("dB below peak"));
                 ui.end_row();
                 ui.label("End offset");
-                ui.add(Slider::new(&mut cfg.detector.end_offset_ms, -60.0..=60.0).step_by(1.0).suffix(" ms")).on_hover_text("Negative = notes end earlier");
+                ui.add(slider_field(&mut cfg.detector.end_offset_ms, -60.0..=60.0).step_by(1.0).suffix("ms")).on_hover_text("Negative = notes end earlier");
                 ui.end_row();
                 ui.label("Last note");
                 let meter = ctx.engine.meter();
@@ -386,13 +431,13 @@ impl PreferencePage for TunerPage {
         let mut p: TunerPrefs = ctx.settings.get(TunerPrefs::ID);
         egui::Grid::new("tuner_prefs").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label("Reference A4");
-            ui.add(DragValue::new(&mut p.a4).range(415.0..=466.0).speed(0.1).suffix(" Hz"));
+            ui.add(number_field(&mut p.a4).range(415.0..=466.0).step(0.5).suffix("Hz"));
             ui.end_row();
             ui.label(RichText::new("In tune (green) within").color(theme::green()));
-            ui.add(Slider::new(&mut p.in_tune_cents, 0.5..=10.0).suffix(" ¢"));
+            ui.add(slider_field(&mut p.in_tune_cents, 0.5..=10.0).suffix("¢"));
             ui.end_row();
             ui.label(RichText::new("Close (amber) within").color(theme::amber()));
-            ui.add(Slider::new(&mut p.close_cents, p.in_tune_cents..=30.0).suffix(" ¢"));
+            ui.add(slider_field(&mut p.close_cents, p.in_tune_cents..=30.0).suffix("¢"));
             ui.end_row();
         });
         ctx.settings.set(TunerPrefs::ID, &p);
@@ -417,25 +462,25 @@ impl PreferencePage for ScoringPage {
         ui.label(RichText::new("Applies to new sessions.").small().color(theme::dim()));
         egui::Grid::new("scoring").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label(RichText::new("Good timing within").color(theme::green()));
-            ui.add(Slider::new(&mut t.good_ms, 2.0..=40.0).suffix(" ms"));
+            ui.add(slider_field(&mut t.good_ms, 2.0..=40.0).suffix("ms"));
             ui.end_row();
             ui.label(RichText::new("OK timing within").color(theme::amber()));
-            ui.add(Slider::new(&mut t.ok_ms, t.good_ms..=80.0).suffix(" ms"));
+            ui.add(slider_field(&mut t.ok_ms, t.good_ms..=80.0).suffix("ms"));
             ui.end_row();
             ui.label("Matching window");
-            ui.add(Slider::new(&mut t.window_ms, 40.0..=300.0).suffix(" ms")).on_hover_text("Notes further than this from any target count as extra notes");
+            ui.add(slider_field(&mut t.window_ms, 40.0..=300.0).suffix("ms")).on_hover_text("Notes further than this from any target count as extra notes");
             ui.end_row();
             ui.label("Score note length");
-            ui.checkbox(&mut t.score_length, "");
+            checkbox(ui, &mut t.score_length, "");
             ui.end_row();
             ui.label(RichText::new("Good length within").color(theme::green()));
             let mut g = t.length_good * 100.0;
-            ui.add_enabled(t.score_length, Slider::new(&mut g, 5.0..=80.0).suffix(" %"));
+            ui.add_enabled(t.score_length, slider_field(&mut g, 5.0..=80.0).suffix("%"));
             t.length_good = g / 100.0;
             ui.end_row();
             ui.label(RichText::new("OK length within").color(theme::amber()));
             let mut o = t.length_ok * 100.0;
-            ui.add_enabled(t.score_length, Slider::new(&mut o, g..=150.0).suffix(" %"));
+            ui.add_enabled(t.score_length, slider_field(&mut o, g..=150.0).suffix("%"));
             t.length_ok = o / 100.0;
             ui.end_row();
         });

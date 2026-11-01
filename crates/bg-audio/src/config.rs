@@ -25,9 +25,13 @@ impl Default for AudioConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AnalysisConfig {
-    /// Measured round-trip latency (output → player → input), in ms.
+    /// Latency correction, in ms: the part of the round trip (output → player → input)
+    /// that the host's reported latencies don't account for. Negative when the driver
+    /// over-reports its latency.
     pub latency_ms: f32,
-    /// Manual adjustment added to the measured latency, in ms.
+    /// Deprecated manual trim (older settings). Read but never written; [`Self::normalize`]
+    /// folds it into `latency_ms`.
+    #[serde(skip_serializing)]
     pub latency_trim_ms: f32,
     pub detector: NoteDetectorConfig,
     pub tuner_gate_db: f32,
@@ -42,6 +46,12 @@ impl Default for AnalysisConfig {
 impl AnalysisConfig {
     pub fn total_latency(&self) -> f64 {
         (self.latency_ms + self.latency_trim_ms) as f64 / 1000.0
+    }
+
+    /// Folds the deprecated trim into the latency correction.
+    pub fn normalize(&mut self) {
+        self.latency_ms += self.latency_trim_ms;
+        self.latency_trim_ms = 0.0;
     }
 }
 
@@ -87,5 +97,21 @@ impl SoundConfig {
     /// softened, sampled instruments are left alone.
     pub fn lowpass_setting(&self, instrument: &str) -> f32 {
         self.instrument_lowpass.get(instrument).copied().unwrap_or(if instrument == "synth.epiano" { 2_500.0 } else { LOWPASS_OFF })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_folds_trim_into_correction() {
+        let mut c: AnalysisConfig = serde_json::from_str(r#"{"latency_ms": 0.8, "latency_trim_ms": -8.0}"#).unwrap();
+        let total = c.total_latency();
+        c.normalize();
+        assert!((c.latency_ms - -7.2).abs() < 1e-4);
+        assert_eq!(c.latency_trim_ms, 0.0);
+        assert!((c.total_latency() - total).abs() < 1e-9);
+        assert!(!serde_json::to_string(&c).unwrap().contains("trim"));
     }
 }

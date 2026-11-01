@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::prefs::PreferencePage;
 use crate::settings::SettingsStore;
+use crate::widgets::toolbar::Toolbar;
 
 /// Everything an exercise UI may use while drawing.
 pub struct ExerciseCtx<'a> {
@@ -43,6 +44,14 @@ pub trait ExerciseType: PresetSchema {
         false
     }
 
+    /// Fills the Exercise Control Toolbar, shown above the (scrolling) exercise area.
+    /// It should at least hold the start / stop button ([`Toolbar::transport`]).
+    fn toolbar(&mut self, tb: &mut Toolbar, ctx: &mut ExerciseCtx);
+
+    /// Messages shown just below the toolbar (errors, warnings); none by default.
+    fn notices(&mut self, _ui: &mut egui::Ui, _ctx: &mut ExerciseCtx) {}
+
+    /// The exercise area (scrolls).
     fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx);
 
     /// Extra preference pages contributed by this exercise type.

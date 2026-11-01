@@ -5,8 +5,8 @@ use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::SessionConfig;
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::results::results;
-use bg_ui::widgets::session_panel::session_panel;
-use bg_ui::widgets::transport_button;
+use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
+use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::{ExerciseCtx, ExerciseType, egui, icons, theme};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -89,27 +89,32 @@ impl ExerciseType for BasicTiming {
         lock(&self.shared).running
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx) {
+    fn toolbar(&mut self, tb: &mut Toolbar, ctx: &mut ExerciseCtx) {
         let running = ctx.engine.session_running() && self.is_running();
-        let space = ui.input(|i| i.key_pressed(egui::Key::Space)) && !ui.ctx().egui_wants_keyboard_input();
-
-        ui.horizontal(|ui| {
-            if transport_button(ui, running) || space {
-                if running {
-                    ctx.engine.stop_session();
-                } else if ctx.engine.clock().is_running() {
-                    let logic = TimingSession::new(self.data.session.clone(), ctx.scoring.clone(), self.shared.clone());
-                    ctx.engine.start_session(Box::new(logic));
-                    self.has_results = true;
-                }
+        if tb.transport(running) {
+            if running {
+                ctx.engine.stop_session();
+            } else if ctx.engine.clock().is_running() {
+                let logic = TimingSession::new(self.data.session.clone(), ctx.scoring.clone(), self.shared.clone());
+                ctx.engine.start_session(Box::new(logic));
+                self.has_results = true;
             }
-            ui.add_space(8.0);
-            status_line(ui, &self.shared, ctx, running);
-        });
+        }
+        // Live status in the space between START and the settings.
+        tb.gap_with(Gap::Large, |ui| status_line(ui, &self.shared, ctx, running));
+        if tb.group(!running, |tb| session_toolbar(tb, &mut self.data.session)) {
+            self.has_results = false;
+        }
+    }
+
+    fn notices(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx) {
         if !ctx.engine.clock().is_running() {
             ui.label(egui::RichText::new(format!("{} No audio output — check Preferences › Audio", icons::WARNING)).color(theme::amber()));
         }
-        ui.add_space(6.0);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx) {
+        let running = ctx.engine.session_running() && self.is_running();
 
         // Beat grid: the live / last session, or a preview of the configured groove.
         let steps = self.data.session.groove.steps_per_beat;
@@ -161,7 +166,7 @@ fn status_line(ui: &mut egui::Ui, shared: &SharedTiming, ctx: &ExerciseCtx, runn
                 ui.label(mono("READY".into(), theme::dim()));
             }
         }
-    } else {
-        ui.label(egui::RichText::new("Space: start / stop").small().color(theme::dim()));
+    } else if ctx.engine.clock().is_running() {
+        ui.label(mono("READY".into(), theme::dim()));
     }
 }

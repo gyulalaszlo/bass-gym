@@ -11,21 +11,14 @@ pub fn groove_editor(ui: &mut egui::Ui, groove: &mut Groove, sig: TimeSignature)
     ui.horizontal_wrapped(|ui| {
         theme::caption(ui, "Grid");
         let mut spb = groove.steps_per_beat;
-        egui::ComboBox::from_id_salt("groove_spb")
-            .selected_text(spb_label(spb))
-            .width(90.0)
-            .show_ui(ui, |ui| {
-                for v in [1, 2, 3, 4, 6, 8] {
-                    ui.selectable_value(&mut spb, v, spb_label(v));
-                }
-            });
+        crate::widgets::controls::dropdown_value(ui, "groove_spb", &mut spb, [1, 2, 3, 4, 6, 8], |v| spb_label(*v).to_string());
         if spb != groove.steps_per_beat {
             groove.set_steps_per_beat(spb);
             changed = true;
         }
         theme::caption(ui, "Bars");
         let mut bars = groove.bars;
-        if ui.add(egui::DragValue::new(&mut bars).range(1..=8)).changed() {
+        if ui.add(crate::widgets::controls::number_field(&mut bars).range(1..=8)).changed() {
             groove.bars = bars;
             let total = groove.total_steps(sig);
             groove.notes.retain(|n| n.step < total);

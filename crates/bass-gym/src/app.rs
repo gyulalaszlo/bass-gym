@@ -8,6 +8,7 @@ use bg_audio::{AnalysisConfig, AudioConfig, AudioEngine, SoundConfig};
 use bg_core::ScoringThresholds;
 use bg_core::preset::PresetStore;
 use bg_ui::theme::ThemePrefs;
+use bg_ui::widgets::toolbar::show_toolbar;
 use bg_ui::widgets::tuner::{TunerPrefs, tuner};
 use bg_ui::{ExerciseCtx, PreferencePage, PrefsCtx, SettingsStore, egui, icons, theme};
 use egui::RichText;
@@ -15,8 +16,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::menu::{AppMenu, MenuAction};
 use crate::pages;
 use crate::presets::{ExerciseSlot, PresetBar};
+
+const PREFS_VIEWPORT: &str = "preferences";
 
 /// Session state restored on the next launch (kept as JSON next to the settings).
 #[derive(Default, Serialize, Deserialize)]
@@ -25,6 +29,14 @@ struct AppState {
     selected: Option<String>,
     presets: HashMap<String, Uuid>,
     working: HashMap<String, Value>,
+    /// Preferences window position and size (logical points).
+    prefs_window: Option<WindowGeometry>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+struct WindowGeometry {
+    pos: [f32; 2],
+    size: [f32; 2],
 }
 
 pub struct BassGymApp {
@@ -36,6 +48,8 @@ pub struct BassGymApp {
     selected: usize,
     preset_bar: PresetBar,
     prefs_open: bool,
+    prefs_window: Option<WindowGeometry>,
+    menu: Option<AppMenu>,
     pages: Vec<Box<dyn PreferencePage>>,
     page: usize,
     scoring: ScoringThresholds,
@@ -88,6 +102,8 @@ impl BassGymApp {
             selected,
             preset_bar: PresetBar::default(),
             prefs_open: false,
+            prefs_window: state.prefs_window,
+            menu: AppMenu::install(),
             pages,
             page: 0,
             scoring: ScoringThresholds::default(),
@@ -100,6 +116,10 @@ impl BassGymApp {
         if let Some(page) = std::env::var("BASS_GYM_PREFS").ok().and_then(|id| app.pages.iter().position(|p| p.id() == id)) {
             app.prefs_open = true;
             app.page = page;
+            if app.screenshot.is_some() {
+                // Screenshots only capture the main window: draw the preferences inside it.
+                cc.egui_ctx.set_embed_viewports(true);
+            }
         }
         app.refresh_settings();
         app
@@ -126,6 +146,7 @@ impl BassGymApp {
             selected: self.slots.get(self.selected).map(|s| s.et.id().to_owned()),
             presets: self.slots.iter().filter_map(|s| s.current.map(|c| (s.et.id().to_owned(), c))).collect(),
             working: self.slots.iter().map(|s| (s.et.id().to_owned(), s.et.save_preset())).collect(),
+            prefs_window: self.prefs_window,
         };
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -158,8 +179,13 @@ impl BassGymApp {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.add_space(10.0);
-            if ui.add(egui::Button::new(format!("{}  PREFERENCES", icons::GEAR)).min_size(egui::vec2(ui.available_width(), 32.0))).clicked() {
-                self.prefs_open = true;
+            let shortcut = if cfg!(target_os = "macos") { "⌘," } else { "Ctrl+," };
+            if ui
+                .add(egui::Button::new(format!("{}  PREFERENCES", icons::GEAR)).min_size(egui::vec2(ui.available_width(), 32.0)))
+                .on_hover_text(format!("Open the preferences ({shortcut})"))
+                .clicked()
+            {
+                self.open_preferences(ui.ctx());
             }
             ui.add_space(4.0);
             let st = self.engine.status().clone();
@@ -185,16 +211,31 @@ impl BassGymApp {
         });
     }
 
+    /// Opens the preferences window, or brings it to the front.
+    fn open_preferences(&mut self, ctx: &egui::Context) {
+        if self.prefs_open {
+            ctx.send_viewport_cmd_to(egui::ViewportId::from_hash_of(PREFS_VIEWPORT), egui::ViewportCommand::Focus);
+        }
+        self.prefs_open = true;
+        ctx.request_repaint();
+    }
+
+    /// The preferences, in their own window.
     fn preferences(&mut self, ctx: &egui::Context) {
-        let mut open = self.prefs_open;
-        egui::Window::new(RichText::new(format!("{}  Preferences", icons::GEAR)))
-            .open(&mut open)
-            .default_size([860.0, 620.0])
-            .min_size([560.0, 320.0])
-            .resizable(true)
-            .vscroll(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
+        let mut builder = egui::ViewportBuilder::default().with_title("Preferences").with_min_inner_size([560.0, 320.0]);
+        builder = match self.prefs_window {
+            Some(g) => builder.with_position(g.pos).with_inner_size(g.size),
+            None => builder.with_inner_size([860.0, 620.0]),
+        };
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(PREFS_VIEWPORT), builder, |ui, _class| {
+            let ctx = ui.ctx().clone();
+            if ctx.input(|i| i.viewport().close_requested()) {
+                self.prefs_open = false;
+            }
+            if let Some((outer, inner)) = ctx.input(|i| i.viewport().outer_rect.zip(i.viewport().inner_rect)) {
+                self.prefs_window = Some(WindowGeometry { pos: outer.min.into(), size: inner.size().into() });
+            }
+            egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::same(14))).show(ui, |ui| {
                 let avail = ui.available_size();
                 ui.horizontal_top(|ui| {
                     // Page list.
@@ -218,7 +259,7 @@ impl BassGymApp {
                     });
                 });
             });
-        self.prefs_open = open;
+        });
     }
 }
 
@@ -238,7 +279,7 @@ impl BassGymApp {
                 Ok(()) => log::info!("screenshot saved to {}", path.display()),
                 Err(e) => log::warn!("couldn't save the screenshot: {e}"),
             }
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
         }
     }
 }
@@ -259,15 +300,27 @@ impl eframe::App for BassGymApp {
             ui.add_space(8.0);
             if let Some(slot) = self.slots.get_mut(self.selected) {
                 self.preset_bar.ui(ui, slot, &self.store);
-                ui.add_space(4.0);
+                ui.add_space(2.0);
+                let mut ectx = ExerciseCtx { engine: &mut self.engine, settings: &mut self.settings, scoring: &self.scoring };
+                // The Exercise Control Toolbar stays put; only the exercise area scrolls.
+                show_toolbar(ui, |tb| slot.et.toolbar(tb, &mut ectx));
+                slot.et.notices(ui, &mut ectx);
                 ui.separator();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    let mut ectx = ExerciseCtx { engine: &mut self.engine, settings: &mut self.settings, scoring: &self.scoring };
                     slot.et.ui(ui, &mut ectx);
                 });
             }
         });
 
+        // Preferences: app menu (macOS), Cmd/Ctrl + comma, or the sidebar button.
+        let menu_action = self.menu.as_ref().and_then(AppMenu::poll);
+        let shortcut = ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma)));
+        if menu_action == Some(MenuAction::Preferences) || shortcut {
+            self.open_preferences(&ctx);
+        }
+        if menu_action == Some(MenuAction::Quit) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         if self.prefs_open {
             self.preferences(&ctx);
         }
@@ -282,6 +335,11 @@ impl eframe::App for BassGymApp {
         }
         self.refresh_settings();
         self.take_screenshot(&ctx);
+    }
+
+    /// Only the window geometry is persisted by eframe; egui's own memory isn't.
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

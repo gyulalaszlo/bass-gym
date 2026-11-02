@@ -1,6 +1,7 @@
 //! Preset selection / creation for the active exercise type.
 
 use bg_core::preset::{PresetEnvelope, PresetStore, StoredPreset, migrate};
+use bg_ui::widgets::button::{button, selectable};
 use bg_ui::widgets::controls::dropdown_sized;
 use bg_ui::{ExerciseType, egui, icons, theme};
 use chrono::Utc;
@@ -142,19 +143,19 @@ impl PresetBar {
                 let buttons_w: f32 = ui.data(|d| d.get_temp(buttons_id)).unwrap_or(560.0);
                 let width = (ui.available_width() - buttons_w - ui.spacing().item_spacing.x).max(140.0);
                 dropdown_sized(ui, "preset_select", text, width, |ui| {
-                    if ui.selectable_label(slot.current.is_none(), "Default").clicked() {
+                    if ui.add(selectable(slot.current.is_none(), "Default")).clicked() {
                         pick = Some(None);
                     }
                     for p in &slot.presets {
                         let selected = slot.current == Some(p.envelope.id);
                         match &p.incompatible {
                             None => {
-                                if ui.selectable_label(selected, &p.envelope.name).clicked() {
+                                if ui.add(selectable(selected, &p.envelope.name)).clicked() {
                                     pick = Some(Some(p.envelope.id));
                                 }
                             }
                             Some(why) => {
-                                ui.add_enabled(false, egui::Button::selectable(false, format!("{} {}", icons::WARNING, p.envelope.name))).on_disabled_hover_text(why);
+                                ui.add_enabled(false, selectable(false, format!("{} {}", icons::WARNING, p.envelope.name))).on_disabled_hover_text(why);
                             }
                         }
                     }
@@ -168,28 +169,29 @@ impl PresetBar {
 
                 let buttons = ui.horizontal(|ui| {
                 let can_save = dirty && slot.current.is_some();
-                if ui.add_enabled(can_save, egui::Button::new(format!("{} Save", icons::FLOPPY_DISK))).on_hover_text("Overwrite the selected preset").clicked() {
+                if ui.add_enabled(can_save, button(format!("{} Save", icons::FLOPPY_DISK))).on_hover_text("Overwrite the selected preset").clicked() {
                     result = Some(slot.save(store));
                 }
-                if ui.button(format!("{} New", icons::PLUS)).on_hover_text("Save the current settings as a new preset").clicked() {
+                if ui.add(button(format!("{} New", icons::PLUS))).on_hover_text("Save the current settings as a new preset").clicked() {
                     self.dialog = Some(Dialog::New(String::new()));
                 }
-                if ui.add_enabled(dirty, egui::Button::new(format!("{} Revert", icons::ARROW_COUNTER_CLOCKWISE))).on_hover_text("Discard unsaved changes").clicked() {
+                if ui.add_enabled(dirty, button(format!("{} Revert", icons::ARROW_COUNTER_CLOCKWISE))).on_hover_text("Discard unsaved changes").clicked() {
                     match slot.current {
                         Some(id) => result = Some(slot.load(id)),
                         None => slot.load_default(),
                     }
                 }
-                if ui.button(format!("{} Defaults", icons::ARROW_U_UP_LEFT)).on_hover_text("Reset the settings to the factory defaults (keeps the preset selected)").clicked() {
+                if ui.add(button(format!("{} Defaults", icons::ARROW_U_UP_LEFT))).on_hover_text("Reset the settings to the factory defaults (keeps the preset selected)").clicked() {
                     let data = slot.et.default_preset();
                     result = Some(slot.et.load_preset(data).map_err(|e| format!("{e:#}")));
                 }
                 ui.add_enabled_ui(slot.current.is_some(), |ui| {
-                    ui.menu_button(icons::DOTS_THREE, |ui| {
-                        if ui.button(format!("{} Rename…", icons::PENCIL_SIMPLE)).clicked() {
+                    let more = ui.add(button(icons::DOTS_THREE)).on_hover_text("More preset actions");
+                    egui::Popup::menu(&more).show(|ui| {
+                        if ui.add(button(format!("{} Rename…", icons::PENCIL_SIMPLE)).min_size([ui.available_width(), 0.0])).clicked() {
                             self.dialog = Some(Dialog::Rename(slot.current_name()));
                         }
-                        if ui.button(RichText::new(format!("{} Delete…", icons::TRASH)).color(theme::red())).clicked() {
+                        if ui.add(button(format!("{} Delete…", icons::TRASH)).color(theme::red()).min_size([ui.available_width(), 0.0])).clicked() {
                             self.dialog = Some(Dialog::Delete);
                         }
                     });
@@ -219,12 +221,12 @@ impl PresetBar {
                         let valid = !name.trim().is_empty();
                         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.horizontal(|ui| {
-                            if ui.add_enabled(valid, egui::Button::new("Save")).clicked() || (enter && valid) {
+                            if ui.add_enabled(valid, button("Save")).clicked() || (enter && valid) {
                                 let name = name.trim().to_owned();
                                 result = Some(if is_new { slot.save_as(store, &name) } else { slot.rename(store, &name) });
                                 close = true;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.add(button("Cancel")).clicked() {
                                 close = true;
                             }
                         });
@@ -233,11 +235,11 @@ impl PresetBar {
                         ui.heading("Delete preset");
                         ui.label(format!("Delete “{}”? This can't be undone.", slot.current_name()));
                         ui.horizontal(|ui| {
-                            if ui.button(RichText::new("Delete").color(theme::red())).clicked() {
+                            if ui.add(button("Delete").color(theme::red())).clicked() {
                                 result = Some(slot.delete(store));
                                 close = true;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.add(button("Cancel")).clicked() {
                                 close = true;
                             }
                         });

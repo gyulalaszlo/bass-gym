@@ -10,6 +10,7 @@ use std::cell::Cell;
 use bg_core::TimeSignature;
 use egui::{Align, Layout, Pos2, Rect, RichText, Shape, Ui, vec2};
 
+use crate::widgets::button::{button, selectable};
 use crate::widgets::controls::{self, number_field};
 use crate::{icons, theme};
 
@@ -149,7 +150,7 @@ impl Toolbar<'_> {
         let space = ui.input(|i| i.key_pressed(egui::Key::Space)) && !ui.ctx().egui_wants_keyboard_input();
         let (text, color) = if running { (format!("{}  STOP", icons::STOP), theme::amber()) } else { (format!("{}  START", icons::PLAY), theme::green()) };
         let clicked = ui
-            .add_sized([118.0, BUTTON_HEIGHT], egui::Button::new(RichText::new(text).strong().size(16.0).color(color)).stroke(egui::Stroke::new(1.5, color)))
+            .add(button(text).color(color).strong().font(egui::FontId::proportional(16.0)).min_size([118.0, BUTTON_HEIGHT]))
             .on_hover_text("Space: start / stop")
             .clicked();
         clicked || space
@@ -158,7 +159,7 @@ impl Toolbar<'_> {
     /// The boxed tap-tempo button. Sets `bpm` once tapped at least 3 times.
     pub fn tap(&mut self, bpm: &mut f32) -> bool {
         let ui = &mut *self.ui;
-        let r = ui.add_sized([88.0, BUTTON_HEIGHT], egui::Button::new(RichText::new(format!("{} TAP", icons::HAND_TAP)).color(theme::cyan()))).on_hover_text("Tap at least 3 times in tempo");
+        let r = ui.add(button(format!("{} TAP", icons::HAND_TAP)).min_size([88.0, BUTTON_HEIGHT])).on_hover_text("Tap at least 3 times in tempo");
         if r.clicked()
             && let Some(t) = tap_tempo(ui)
         {
@@ -192,7 +193,7 @@ impl Toolbar<'_> {
         let text = RichText::new(format!("{}/{}", sig.num, sig.den)).font(theme::mono(20.0));
         controls::dropdown(self.ui, "toolbar_time_sig", text, |ui| {
             for (n, d) in [(2, 4), (3, 4), (4, 4), (5, 4), (6, 8), (7, 8), (9, 8), (12, 8)] {
-                if ui.selectable_label(sig.num == n && sig.den == d, format!("{n}/{d}")).clicked() {
+                if ui.add(selectable(sig.num == n && sig.den == d, format!("{n}/{d}"))).clicked() {
                     *sig = TimeSignature { num: n, den: d };
                 }
             }

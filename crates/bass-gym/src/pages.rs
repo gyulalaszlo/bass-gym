@@ -6,6 +6,7 @@ use bg_audio::{AnalysisConfig, AudioConfig, CALIBRATION_CLICKS, Calibration, Cal
 use bg_core::ScoringThresholds;
 use bg_sound::SoundRole;
 use bg_ui::theme::{PRESETS, Palette, Rgb, ThemePrefs};
+use bg_ui::widgets::button::{button, selectable, selectable_value};
 use bg_ui::widgets::controls::{checkbox, dropdown, number_field, slider_field};
 use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{PreferencePage, PrefsCtx, egui, icons, theme};
@@ -75,9 +76,9 @@ impl PreferencePage for AudioPage {
                     .unwrap_or(ctx.engine.status().input_channels.max(1));
                 let text = cfg.input_channel.map_or("Mix all".to_owned(), |c| format!("Channel {}", c + 1));
                 dropdown(ui, "in_ch", text, |ui| {
-                    ui.selectable_value(&mut cfg.input_channel, None, "Mix all");
+                    selectable_value(ui, &mut cfg.input_channel, None, "Mix all");
                     for c in 0..channels {
-                        ui.selectable_value(&mut cfg.input_channel, Some(c), format!("Channel {}", c + 1));
+                        selectable_value(ui, &mut cfg.input_channel, Some(c), format!("Channel {}", c + 1));
                     }
                 });
                 ui.end_row();
@@ -89,9 +90,9 @@ impl PreferencePage for AudioPage {
                 ui.label("Sample rate");
                 let text = cfg.sample_rate.map_or("Device default".to_owned(), |r| format!("{r} Hz"));
                 dropdown(ui, "rate", text, |ui| {
-                    ui.selectable_value(&mut cfg.sample_rate, None, "Device default");
+                    selectable_value(ui, &mut cfg.sample_rate, None, "Device default");
                     for r in [44_100, 48_000, 88_200, 96_000] {
-                        ui.selectable_value(&mut cfg.sample_rate, Some(r), format!("{r} Hz"));
+                        selectable_value(ui, &mut cfg.sample_rate, Some(r), format!("{r} Hz"));
                     }
                 });
                 ui.end_row();
@@ -99,18 +100,18 @@ impl PreferencePage for AudioPage {
                 ui.label("Buffer size");
                 let text = cfg.buffer_frames.map_or("Device default".to_owned(), |f| format!("{f} frames"));
                 dropdown(ui, "buf", text, |ui| {
-                    ui.selectable_value(&mut cfg.buffer_frames, None, "Device default");
+                    selectable_value(ui, &mut cfg.buffer_frames, None, "Device default");
                     for f in [64, 128, 256, 512, 1024] {
-                        ui.selectable_value(&mut cfg.buffer_frames, Some(f), format!("{f} frames"));
+                        selectable_value(ui, &mut cfg.buffer_frames, Some(f), format!("{f} frames"));
                     }
                 });
                 ui.end_row();
             });
             ui.horizontal(|ui| {
-                if ui.button(format!("{} Rescan devices", icons::ARROWS_CLOCKWISE)).clicked() {
+                if ui.add(button(format!("{} Rescan devices", icons::ARROWS_CLOCKWISE))).clicked() {
                     self.devices = None;
                 }
-                if ui.button(format!("{} Reopen audio", icons::PLUGS)).clicked() {
+                if ui.add(button(format!("{} Reopen audio", icons::PLUGS))).clicked() {
                     ctx.engine.rebuild();
                 }
             });
@@ -160,7 +161,7 @@ impl PreferencePage for AudioPage {
         if let Some(dir) = crate::soundfonts::user_dir() {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(format!("More instruments: put SoundFont (.sf2) files in {} and restart.", dir.display())).small().color(theme::dim()));
-                if ui.small_button(format!("{} Open folder", icons::FOLDER_OPEN)).clicked() {
+                if ui.add(button(format!("{} Open folder", icons::FOLDER_OPEN)).small()).clicked() {
                     let _ = std::fs::create_dir_all(&dir);
                     open_folder(&dir);
                 }
@@ -180,9 +181,9 @@ fn device_combo(ui: &mut egui::Ui, id: &str, value: &mut Option<String>, list: &
         Some(v) => list.iter().find(|d| &d.id == v).map_or_else(|| "(unavailable device)".to_owned(), |d| d.name.clone()),
     };
     dropdown(ui, id, text, |ui| {
-        ui.selectable_value(value, None, "System default");
+        selectable_value(ui, value, None, "System default");
         for d in list {
-            ui.selectable_value(value, Some(d.id.clone()), format!("{}  ({} ch, {} Hz)", d.name, d.channels, d.default_rate));
+            selectable_value(ui, value, Some(d.id.clone()), format!("{}  ({} ch, {} Hz)", d.name, d.channels, d.default_rate));
         }
     });
 }
@@ -226,7 +227,7 @@ fn sound_combo(ui: &mut egui::Ui, id: &str, value: &mut String, role: SoundRole)
     let text = bg_sound::source(value).map_or(value.clone(), |s| s.name().to_owned());
     dropdown(ui, id, text, |ui| {
         for s in bg_sound::sources_for(role) {
-            ui.selectable_value(value, s.id().to_owned(), s.name());
+            selectable_value(ui, value, s.id().to_owned(), s.name());
         }
     });
 }
@@ -279,13 +280,13 @@ impl PreferencePage for LatencyPage {
                 if cal.running {
                     let text = format!("{} / {} clicks · {} notes heard", cal.clicks_done, CALIBRATION_CLICKS, cal.offsets_ms.len());
                     ui.add(egui::ProgressBar::new(cal.clicks_done as f32 / CALIBRATION_CLICKS as f32).desired_width(240.0).text(text));
-                    if ui.button("Cancel").clicked() {
+                    if ui.add(button("Cancel")).clicked() {
                         ctx.engine.stop_session();
                         reset_calibration(&self.calibration);
                     }
                     ui.ctx().request_repaint();
                 } else if ui
-                    .add_enabled(!ctx.engine.session_running(), egui::Button::new(format!("{} Measure", icons::GAUGE)))
+                    .add_enabled(!ctx.engine.session_running(), button(format!("{} Measure", icons::GAUGE)))
                     .on_hover_text("Plays 4 lead-in clicks, then 16 clicks to measure against")
                     .clicked()
                 {
@@ -302,12 +303,12 @@ impl PreferencePage for LatencyPage {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(format!("Measured {r:+.1} ms")).font(theme::mono(16.0)).color(theme::green()));
                             ui.label(RichText::new(format!("(±{spread:.1} ms, {} of {CALIBRATION_CLICKS} clicks)", cal.offsets_ms.len())).color(theme::dim()));
-                            if ui.button(format!("{} Apply", icons::CHECK)).clicked() {
+                            if ui.add(button(format!("{} Apply", icons::CHECK))).clicked() {
                                 cfg.latency_ms = (r * 10.0).round() / 10.0;
                                 self.applied_at = Some(now);
                                 reset_calibration(&self.calibration);
                             }
-                            if ui.button("Discard").clicked() {
+                            if ui.add(button("Discard")).clicked() {
                                 reset_calibration(&self.calibration);
                             }
                         });
@@ -320,7 +321,7 @@ impl PreferencePage for LatencyPage {
                                 cal.offsets_ms.len()
                             );
                             ui.label(RichText::new(text).color(theme::amber()));
-                            if ui.small_button(icons::X).on_hover_text("Dismiss").clicked() {
+                            if ui.add(button(icons::X).small()).on_hover_text("Dismiss").clicked() {
                                 reset_calibration(&self.calibration);
                             }
                         });
@@ -492,7 +493,7 @@ pub struct DisplayPage;
 
 type ColorField = fn(&mut Palette) -> &mut Rgb;
 
-const COLOR_FIELDS: [(&str, ColorField); 12] = [
+const COLOR_FIELDS: [(&str, ColorField); 13] = [
     ("Background", |p| &mut p.bg),
     ("Panels", |p| &mut p.panel),
     ("Raised areas", |p| &mut p.raised),
@@ -505,6 +506,7 @@ const COLOR_FIELDS: [(&str, ColorField); 12] = [
     ("Warning", |p| &mut p.red),
     ("Selectable / units", |p| &mut p.cyan),
     ("Targets", |p| &mut p.magenta),
+    ("Button base", |p| &mut p.button_base),
 ];
 
 impl PreferencePage for DisplayPage {
@@ -526,14 +528,14 @@ impl PreferencePage for DisplayPage {
                 ui.label("UI zoom");
                 ui.horizontal(|ui| {
                     let pct = (t.zoom * 100.0).round() as i32;
-                    if ui.add_enabled(pct > 50, egui::Button::new(icons::MINUS)).on_hover_text("−5%").clicked() {
+                    if ui.add_enabled(pct > 50, button(icons::MINUS)).on_hover_text("−5%").clicked() {
                         t.zoom = ((pct - 5).max(50)) as f32 / 100.0;
                     }
                     ui.label(RichText::new(format!("{pct:>3}%")).font(theme::mono(16.0)).color(theme::green()));
-                    if ui.add_enabled(pct < 250, egui::Button::new(icons::PLUS)).on_hover_text("+5%").clicked() {
+                    if ui.add_enabled(pct < 250, button(icons::PLUS)).on_hover_text("+5%").clicked() {
                         t.zoom = ((pct + 5).min(250)) as f32 / 100.0;
                     }
-                    if ui.add_enabled(pct != 100, egui::Button::new("100%")).clicked() {
+                    if ui.add_enabled(pct != 100, button("100%")).clicked() {
                         t.zoom = 1.0;
                     }
                 });
@@ -544,14 +546,14 @@ impl PreferencePage for DisplayPage {
                 ui.label("Text size");
                 ui.horizontal(|ui| {
                     let pct = (t.text_scale * 100.0).round() as i32;
-                    if ui.add_enabled(pct > 70, egui::Button::new(icons::MINUS)).on_hover_text("−5%").clicked() {
+                    if ui.add_enabled(pct > 70, button(icons::MINUS)).on_hover_text("−5%").clicked() {
                         t.text_scale = ((pct - 5).max(70)) as f32 / 100.0;
                     }
                     ui.label(RichText::new(format!("{pct:>3}%")).font(theme::mono(16.0)).color(theme::green()));
-                    if ui.add_enabled(pct < 160, egui::Button::new(icons::PLUS)).on_hover_text("+5%").clicked() {
+                    if ui.add_enabled(pct < 160, button(icons::PLUS)).on_hover_text("+5%").clicked() {
                         t.text_scale = ((pct + 5).min(160)) as f32 / 100.0;
                     }
-                    if ui.add_enabled(pct != 100, egui::Button::new("100%")).clicked() {
+                    if ui.add_enabled(pct != 100, button("100%")).clicked() {
                         t.text_scale = 1.0;
                     }
                 });
@@ -565,14 +567,40 @@ impl PreferencePage for DisplayPage {
             });
         });
         ui.add_space(6.0);
+        theme::section(ui, "Buttons", |ui| {
+            egui::Grid::new("display_buttons").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+                ui.label("Rounding");
+                ui.add(slider_field(&mut t.button_rounding, 0.0..=16.0).step_by(1.0).suffix("px"));
+                ui.end_row();
+                ui.label("Base strength");
+                let mut pct = (t.button_tint * 100.0).round();
+                if ui.add(slider_field(&mut pct, 0.0..=100.0).step_by(1.0).suffix("%")).changed() {
+                    t.button_tint = pct / 100.0;
+                }
+                ui.end_row();
+                ui.label("");
+                ui.label(RichText::new("How much of each button's colour mixes into the \"Button base\" colour for its resting fill").small().color(theme::dim()));
+                ui.end_row();
+                ui.label("Preview");
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(button(format!("{} Button", icons::CURSOR_CLICK)));
+                    ui.add(button(format!("{} Start", icons::PLAY)).color(theme::green()));
+                    ui.add(button(format!("{} Stop", icons::STOP)).color(theme::amber()));
+                    ui.add(button(format!("{} Delete", icons::TRASH)).color(theme::red()));
+                    ui.add_enabled(false, button("Disabled"));
+                });
+                ui.end_row();
+            });
+        });
+        ui.add_space(6.0);
         theme::section(ui, "Theme", |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (id, name, _) in PRESETS {
-                    if ui.selectable_label(t.preset == id, name).clicked() {
+                    if ui.add(selectable(t.preset == id, name)).clicked() {
                         t.preset = id.to_owned();
                     }
                 }
-                ui.selectable_value(&mut t.preset, "custom".to_owned(), "Custom");
+                selectable_value(ui, &mut t.preset, "custom".to_owned(), "Custom");
             });
             ui.add_space(4.0);
             let mut palette = t.palette();
@@ -584,7 +612,7 @@ impl PreferencePage for DisplayPage {
                     egui::widgets::color_picker::color_edit_button_srgba(ui, &mut c, egui::widgets::color_picker::Alpha::Opaque);
                     *rgb = Rgb([c.r(), c.g(), c.b()]);
                     ui.label(*label);
-                    if i % 2 == 1 {
+                    if i % 2 == 1 || i + 1 == COLOR_FIELDS.len() {
                         ui.end_row();
                     }
                 }

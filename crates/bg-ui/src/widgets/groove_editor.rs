@@ -24,7 +24,7 @@ pub fn groove_editor(ui: &mut egui::Ui, groove: &mut Groove, sig: TimeSignature)
             groove.notes.retain(|n| n.step < total);
             changed = true;
         }
-        if ui.button(format!("{} Clear", crate::icons::ERASER)).clicked() {
+        if ui.add(crate::widgets::button(format!("{} Clear", crate::icons::ERASER))).clicked() {
             groove.notes.clear();
             changed = true;
         }

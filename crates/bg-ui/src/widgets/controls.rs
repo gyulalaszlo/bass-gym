@@ -4,6 +4,7 @@
 use egui::emath::Numeric;
 use egui::{Align, FontId, Id, Key, Modifiers, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Widget, WidgetText, vec2};
 
+use crate::widgets::button::selectable;
 use crate::{icons, theme};
 
 /// The underline under an editable value: dotted at rest, solid while hovered or edited.
@@ -345,7 +346,7 @@ pub fn dropdown_value<T: PartialEq + Clone>(
     let mut picked = None;
     let (mut resp, _) = dropdown(ui, id_salt, label(value), |ui| {
         for o in options {
-            if ui.selectable_label(*value == o, label(&o)).clicked() {
+            if ui.add(selectable(*value == o, label(&o))).clicked() {
                 picked = Some(o);
             }
         }

@@ -54,6 +54,9 @@ pub struct Palette {
     pub red: Rgb,
     pub cyan: Rgb,
     pub magenta: Rgb,
+    /// Base of the button fill: blended with each button's colour (see
+    /// [`ThemePrefs::button_tint`]) for the dim resting fill.
+    pub button_base: Rgb,
 }
 
 impl Default for Palette {
@@ -75,6 +78,7 @@ pub const ECAM: Palette = Palette {
     red: Rgb::hex(0xff3434),
     cyan: Rgb::hex(0x16e0ff),
     magenta: Rgb::hex(0xff45ee),
+    button_base: Rgb::hex(0x000000),
 };
 
 pub const ECAM_NIGHT: Palette = Palette {
@@ -90,6 +94,7 @@ pub const ECAM_NIGHT: Palette = Palette {
     red: Rgb::hex(0xc22828),
     cyan: Rgb::hex(0x10a5bd),
     magenta: Rgb::hex(0xbd33b0),
+    button_base: Rgb::hex(0x000000),
 };
 
 pub const HIGH_CONTRAST: Palette = Palette {
@@ -105,6 +110,7 @@ pub const HIGH_CONTRAST: Palette = Palette {
     red: Rgb::hex(0xff2020),
     cyan: Rgb::hex(0x00ffff),
     magenta: Rgb::hex(0xff00ff),
+    button_base: Rgb::hex(0x000000),
 };
 
 pub const SLATE: Palette = Palette {
@@ -120,6 +126,7 @@ pub const SLATE: Palette = Palette {
     red: Rgb::hex(0xff453a),
     cyan: Rgb::hex(0x2bd4f5),
     magenta: Rgb::hex(0xf05ce0),
+    button_base: Rgb::hex(0x0a0d11),
 };
 
 pub const DAY: Palette = Palette {
@@ -135,6 +142,7 @@ pub const DAY: Palette = Palette {
     red: Rgb::hex(0xc62828),
     cyan: Rgb::hex(0x006e9a),
     magenta: Rgb::hex(0xa3168f),
+    button_base: Rgb::hex(0xf4f4f0),
 };
 
 /// Built-in themes: (id, name, palette).
@@ -158,11 +166,24 @@ pub struct ThemePrefs {
     pub text_scale: f32,
     /// Use the monospaced font for all text (ECAM style).
     pub mono_ui: bool,
+    /// Corner radius of buttons, in points.
+    pub button_rounding: f32,
+    /// How much of a button's colour goes into its resting fill (0 = just
+    /// `button_base`, 1 = the full button colour).
+    pub button_tint: f32,
 }
 
 impl Default for ThemePrefs {
     fn default() -> Self {
-        Self { preset: "ecam".into(), custom: ECAM, zoom: 1.0, text_scale: 1.0, mono_ui: true }
+        Self {
+            preset: "ecam".into(),
+            custom: ECAM,
+            zoom: 1.0,
+            text_scale: 1.0,
+            mono_ui: true,
+            button_rounding: 4.0,
+            button_tint: 0.15,
+        }
     }
 }
 
@@ -170,12 +191,17 @@ impl ThemePrefs {
     pub const ID: &'static str = "display";
 
     pub fn palette(&self) -> Palette {
-        PRESETS.iter().find(|p| p.0 == self.preset).map_or(self.custom, |p| p.2)
+        PRESETS
+            .iter()
+            .find(|p| p.0 == self.preset)
+            .map_or(self.custom, |p| p.2)
     }
 }
 
 static PALETTE: RwLock<Palette> = RwLock::new(ECAM);
 static TEXT_SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0f32
+static BUTTON_ROUNDING: AtomicU32 = AtomicU32::new(0x4080_0000); // 4.0f32
+static BUTTON_TINT: AtomicU32 = AtomicU32::new(0x3e19_999a); // 0.15f32
 
 pub fn palette() -> Palette {
     *PALETTE.read().unwrap_or_else(|e| e.into_inner())
@@ -227,6 +253,23 @@ pub fn magenta() -> Color32 {
     palette().magenta.color()
 }
 
+/// Corner radius of buttons.
+pub fn button_rounding() -> f32 {
+    f32::from_bits(BUTTON_ROUNDING.load(Ordering::Relaxed))
+}
+
+/// The dim resting fill of a button drawn in `color` (also its text colour on hover).
+pub fn button_fill(color: Color32) -> Color32 {
+    let t = f32::from_bits(BUTTON_TINT.load(Ordering::Relaxed));
+    let base = palette().button_base.0;
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    Color32::from_rgb(
+        mix(base[0], color.r()),
+        mix(base[1], color.g()),
+        mix(base[2], color.b()),
+    )
+}
+
 pub fn grade_color(g: Grade) -> Color32 {
     match g {
         Grade::Good => green(),
@@ -253,12 +296,24 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
     *PALETTE.write().unwrap_or_else(|e| e.into_inner()) = p;
     let scale = prefs.text_scale.clamp(0.6, 2.0);
     TEXT_SCALE.store(scale.to_bits(), Ordering::Relaxed);
+    BUTTON_ROUNDING.store(
+        prefs.button_rounding.clamp(0.0, 16.0).to_bits(),
+        Ordering::Relaxed,
+    );
+    BUTTON_TINT.store(
+        prefs.button_tint.clamp(0.0, 1.0).to_bits(),
+        Ordering::Relaxed,
+    );
 
     let mut fonts = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     if prefs.mono_ui {
         // Monospace first for all text; the proportional fonts stay as fallbacks (icons).
-        let mono_fonts = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+        let mono_fonts = fonts
+            .families
+            .get(&FontFamily::Monospace)
+            .cloned()
+            .unwrap_or_default();
         if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
             for (i, f) in mono_fonts.into_iter().enumerate() {
                 prop.retain(|x| *x != f);
@@ -273,17 +328,32 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
     ctx.global_style_mut(|style| {
         // With `mono_ui` the proportional family resolves to the monospace font first.
         let body = FontFamily::Proportional;
-        style.text_styles.insert(TextStyle::Body, FontId::new(16.0 * scale, body.clone()));
-        style.text_styles.insert(TextStyle::Button, FontId::new(16.0 * scale, body.clone()));
-        style.text_styles.insert(TextStyle::Heading, FontId::new(21.0 * scale, body.clone()));
-        style.text_styles.insert(TextStyle::Monospace, FontId::new(16.0 * scale, FontFamily::Monospace));
-        style.text_styles.insert(TextStyle::Small, FontId::new(13.0 * scale, body));
+        style
+            .text_styles
+            .insert(TextStyle::Body, FontId::new(16.0 * scale, body.clone()));
+        style
+            .text_styles
+            .insert(TextStyle::Button, FontId::new(16.0 * scale, body.clone()));
+        style
+            .text_styles
+            .insert(TextStyle::Heading, FontId::new(21.0 * scale, body.clone()));
+        style.text_styles.insert(
+            TextStyle::Monospace,
+            FontId::new(16.0 * scale, FontFamily::Monospace),
+        );
+        style
+            .text_styles
+            .insert(TextStyle::Small, FontId::new(13.0 * scale, body));
         style.spacing.item_spacing = egui::vec2(10.0, 7.0);
         style.spacing.button_padding = egui::vec2(10.0, 5.0);
         style.spacing.interact_size.y = 28.0 * scale.max(1.0);
 
         let v = &mut style.visuals;
-        *v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+        *v = if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
         v.panel_fill = c(p.panel);
         v.window_fill = c(p.panel);
         v.extreme_bg_color = c(p.bg);
@@ -302,7 +372,13 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
         v.text_cursor.stroke = Stroke::new(2.0, c(p.cyan));
 
         let w = &mut v.widgets;
-        for wv in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+        for wv in [
+            &mut w.noninteractive,
+            &mut w.inactive,
+            &mut w.hovered,
+            &mut w.active,
+            &mut w.open,
+        ] {
             wv.corner_radius = CornerRadius::ZERO;
             wv.expansion = 0.0;
         }
@@ -311,29 +387,36 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
         w.noninteractive.weak_bg_fill = c(p.panel);
         w.noninteractive.bg_stroke = Stroke::new(1.0, c(p.grid));
         w.noninteractive.fg_stroke = Stroke::new(1.0, c(p.text));
+        // Stroke widths are 0 at rest and a whole 1.0 otherwise: egui sizes a button as
+        // `round(padding - stroke) + stroke`, and selectables drop their frame at rest, so
+        // any other widths make buttons change size (and the layout wiggle) on hover.
         // Controls: outlined boxes with cyan content, like ECAM selectable fields.
         w.inactive.bg_fill = c(p.raised);
         w.inactive.weak_bg_fill = c(p.bg);
-        w.inactive.bg_stroke = Stroke::new(1.0, c(p.line).gamma_multiply(0.6));
+        w.inactive.bg_stroke = Stroke::new(0.0, c(p.line).gamma_multiply(0.6));
         w.inactive.fg_stroke = Stroke::new(1.5, c(p.cyan));
         w.hovered.bg_fill = c(p.raised);
         w.hovered.weak_bg_fill = c(p.raised);
-        w.hovered.bg_stroke = Stroke::new(1.5, c(p.cyan));
+        w.hovered.bg_stroke = Stroke::new(1.0, c(p.cyan));
         w.hovered.fg_stroke = Stroke::new(1.5, c(p.cyan));
         w.active.bg_fill = c(p.cyan).gamma_multiply(0.25);
         w.active.weak_bg_fill = c(p.cyan).gamma_multiply(0.25);
-        w.active.bg_stroke = Stroke::new(1.5, c(p.cyan));
+        w.active.bg_stroke = Stroke::new(1.0, c(p.cyan));
         w.active.fg_stroke = Stroke::new(2.0, c(p.text));
         w.open.bg_fill = c(p.raised);
         w.open.weak_bg_fill = c(p.raised);
-        w.open.bg_stroke = Stroke::new(1.5, c(p.cyan));
+        w.open.bg_stroke = Stroke::new(1.0, c(p.cyan));
         w.open.fg_stroke = Stroke::new(1.5, c(p.cyan));
     });
 }
 
 /// A label caption, ECAM-style (upper case).
 pub fn caption(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text.to_uppercase()).small().color(dim()));
+    ui.label(
+        egui::RichText::new(text.to_uppercase())
+            .small()
+            .color(dim()),
+    );
 }
 
 /// A boxed section with an underlined title, like the ECAM page titles. Fills the
@@ -352,9 +435,15 @@ pub fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui
 
 /// Lays out `count` items in as many equal-width columns as fit (each at least
 /// `min_width` wide), row by row; on a narrow display they stack vertically.
-pub fn responsive_columns(ui: &mut egui::Ui, min_width: f32, count: usize, mut item: impl FnMut(&mut egui::Ui, usize)) {
+pub fn responsive_columns(
+    ui: &mut egui::Ui,
+    min_width: f32,
+    count: usize,
+    mut item: impl FnMut(&mut egui::Ui, usize),
+) {
     let spacing = ui.spacing().item_spacing.x;
-    let cols = (((ui.available_width() + spacing) / (min_width + spacing)).floor() as usize).clamp(1, count.max(1));
+    let cols = (((ui.available_width() + spacing) / (min_width + spacing)).floor() as usize)
+        .clamp(1, count.max(1));
     for row in (0..count).step_by(cols) {
         ui.columns(cols, |columns| {
             for (c, col) in columns.iter_mut().enumerate() {
@@ -369,6 +458,10 @@ pub fn responsive_columns(ui: &mut egui::Ui, min_width: f32, count: usize, mut i
 /// An underlined, upper-case title.
 pub fn title_label(ui: &mut egui::Ui, title: &str) {
     let r = ui.label(egui::RichText::new(title.to_uppercase()).color(text()));
-    ui.painter().hline(r.rect.x_range(), r.rect.bottom() + 1.0, Stroke::new(1.5, text()));
+    ui.painter().hline(
+        r.rect.x_range(),
+        r.rect.bottom() + 1.0,
+        Stroke::new(1.5, text()),
+    );
     ui.add_space(2.0);
 }

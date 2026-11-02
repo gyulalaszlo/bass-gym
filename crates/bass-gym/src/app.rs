@@ -8,6 +8,7 @@ use bg_audio::{AnalysisConfig, AudioConfig, AudioEngine, SoundConfig};
 use bg_core::ScoringThresholds;
 use bg_core::preset::PresetStore;
 use bg_ui::theme::ThemePrefs;
+use bg_ui::widgets::button::{button, selectable};
 use bg_ui::widgets::toolbar::show_toolbar;
 use bg_ui::widgets::tuner::{TunerPrefs, tuner};
 use bg_ui::{ExerciseCtx, PreferencePage, PrefsCtx, SettingsStore, egui, icons, theme};
@@ -169,9 +170,8 @@ impl BassGymApp {
         let running = self.slots.iter().any(|s| s.et.is_running());
         for (i, slot) in self.slots.iter().enumerate() {
             let selected = i == self.selected;
-            let color = if selected { theme::text() } else { theme::cyan() };
-            let text = RichText::new(format!("{}  {}", slot.et.icon(), slot.et.name().to_uppercase())).color(color);
-            let resp = ui.add_enabled(!running || selected, egui::Button::selectable(selected, text).min_size(egui::vec2(ui.available_width(), 34.0)));
+            let text = format!("{}  {}", slot.et.icon(), slot.et.name().to_uppercase());
+            let resp = ui.add_enabled(!running || selected, selectable(selected, text).min_size(egui::vec2(ui.available_width(), 34.0)));
             if resp.on_hover_text(slot.et.description()).clicked() {
                 self.selected = i;
             }
@@ -181,7 +181,7 @@ impl BassGymApp {
             ui.add_space(10.0);
             let shortcut = if cfg!(target_os = "macos") { "⌘," } else { "Ctrl+," };
             if ui
-                .add(egui::Button::new(format!("{}  PREFERENCES", icons::GEAR)).min_size(egui::vec2(ui.available_width(), 32.0)))
+                .add(button(format!("{}  PREFERENCES", icons::GEAR)).min_size(egui::vec2(ui.available_width(), 32.0)))
                 .on_hover_text(format!("Open the preferences ({shortcut})"))
                 .clicked()
             {
@@ -204,8 +204,10 @@ impl BassGymApp {
                 ui.add(egui::Slider::new(&mut sounds.monitor_gain, 0.0..=2.0).show_value(false)).on_hover_text("Monitor volume");
             });
             let on = sounds.monitor;
-            let label = RichText::new(format!("{}  MONITOR {}", icons::EAR, if on { "ON" } else { "OFF" })).color(if on { theme::green() } else { theme::cyan() });
-            ui.toggle_value(&mut sounds.monitor, label).on_hover_text("Mix the bass input into the output");
+            let label = format!("{}  MONITOR {}", icons::EAR, if on { "ON" } else { "OFF" });
+            if ui.add(selectable(on, label).color(if on { theme::green() } else { theme::cyan() })).on_hover_text("Mix the bass input into the output").clicked() {
+                sounds.monitor = !on;
+            }
             self.settings.set(pages::SOUNDS, &sounds);
             self.engine.set_sounds(sounds);
         });
@@ -241,8 +243,8 @@ impl BassGymApp {
                     // Page list.
                     ui.allocate_ui_with_layout(egui::vec2(190.0, avail.y), egui::Layout::top_down(egui::Align::Min), |ui| {
                         for (i, p) in self.pages.iter().enumerate() {
-                            let text = RichText::new(format!("{}  {}", p.icon(), p.title())).color(if i == self.page { theme::text() } else { theme::cyan() });
-                            if ui.add(egui::Button::selectable(i == self.page, text).min_size(egui::vec2(186.0, 30.0))).clicked() {
+                            let text = format!("{}  {}", p.icon(), p.title());
+                            if ui.add(selectable(i == self.page, text).min_size(egui::vec2(186.0, 30.0))).clicked() {
                                 self.page = i;
                             }
                         }

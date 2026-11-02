@@ -6,6 +6,7 @@ use bg_core::groove::builtin_grooves;
 use bg_core::session::{ClickDensity, Span, StopCondition, Trigger};
 use egui::{RichText, Slider, Ui};
 
+use crate::widgets::button::selectable;
 use crate::icons;
 use crate::theme::{self, mono, section};
 use crate::widgets::controls::{checkbox, dropdown, dropdown_value, form_row, number_field};
@@ -197,7 +198,7 @@ fn groove(ui: &mut Ui, cfg: &mut SessionConfig) {
         dropdown(ui, "groove_pick", RichText::new(&cfg.groove.name), |ui| {
             for g in builtin_grooves(cfg.time_sig) {
                 let selected = g.name == cfg.groove.name;
-                if ui.selectable_label(selected, &g.name).clicked() {
+                if ui.add(selectable(selected, &g.name)).clicked() {
                     cfg.groove = g;
                 }
             }

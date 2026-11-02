@@ -12,6 +12,7 @@ use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
 use bg_ui::widgets::beatgrid::Beatgrid;
+use bg_ui::widgets::button::{button, selectable_value};
 use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
 use bg_ui::widgets::results::results;
 use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
@@ -545,7 +546,7 @@ impl BasicChords {
                     let current = harmony::checker(&d.checker);
                     dropdown(ui, "bc_checker", current.name(), |ui| {
                         for c in harmony::checkers() {
-                            ui.selectable_value(&mut d.checker, c.id().to_owned(), c.name()).on_hover_text(c.description());
+                            selectable_value(ui, &mut d.checker, c.id().to_owned(), c.name()).on_hover_text(c.description());
                         }
                     });
                     ui.add(egui::Label::new(RichText::new(current.description()).small().color(theme::dim())).wrap());
@@ -562,12 +563,12 @@ fn scale_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
     ui.horizontal_wrapped(|ui| {
         dropdown(ui, "bc_root", note_name(d.scale.root as i32), |ui| {
             for pc in 0..12u8 {
-                ui.selectable_value(&mut d.scale.root, pc, note_name(pc as i32));
+                selectable_value(ui, &mut d.scale.root, pc, note_name(pc as i32));
             }
         });
         dropdown(ui, "bc_mode", d.scale.mode.label(), |ui| {
             for m in Mode::ALL {
-                ui.selectable_value(&mut d.scale.mode, m, m.label());
+                selectable_value(ui, &mut d.scale.mode, m, m.label());
             }
         });
     });
@@ -592,7 +593,7 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
                     let name = harmony::library(&p.library).map_or("?", |e| e.1);
                     dropdown(ui, "bc_library", name, |ui| {
                         for (id, name, text) in harmony::LIBRARY {
-                            ui.selectable_value(&mut p.library, id.to_owned(), name).on_hover_text(text);
+                            selectable_value(ui, &mut p.library, id.to_owned(), name).on_hover_text(text);
                         }
                     });
                 }
@@ -641,20 +642,20 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
         ui.label("Each chord");
         dropdown(ui, "bc_len", d.chord_length.label(), |ui| {
             for l in ChordLength::ALL {
-                ui.selectable_value(&mut d.chord_length, l, l.label());
+                selectable_value(ui, &mut d.chord_length, l, l.label());
             }
         });
     });
     ui.horizontal_wrapped(|ui| {
         ui.label("Seed");
         ui.add(number_field(&mut d.seed));
-        if ui.button(format!("{} New", icons::SHUFFLE)).clicked() {
+        if ui.add(button(format!("{} New", icons::SHUFFLE))).clicked() {
             d.seed = d.seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) >> 16;
         }
         checkbox(ui, &mut d.new_seed_each_start, "New each start");
     });
     if let Some(s) = run_seed.filter(|&s| s != d.seed)
-        && ui.button(format!("{} Keep the last session's chords", icons::PUSH_PIN)).on_hover_text("Use its seed").clicked()
+        && ui.add(button(format!("{} Keep the last session's chords", icons::PUSH_PIN))).on_hover_text("Use its seed").clicked()
     {
         d.seed = s;
         d.new_seed_each_start = false;
@@ -667,7 +668,7 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
         let name = comp::PATTERNS.iter().find(|p| p.0 == d.comp).map_or("?", |p| p.1);
         dropdown(ui, "bc_comp", name, |ui| {
             for (id, name) in comp::PATTERNS {
-                ui.selectable_value(&mut d.comp, id.to_owned(), name);
+                selectable_value(ui, &mut d.comp, id.to_owned(), name);
             }
         });
         ui.end_row();
@@ -687,14 +688,14 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
         ui.label("Keyboard");
         dropdown(ui, "bc_keys", format!("{} keys", k.keys), |ui| {
             for (n, _, _) in keyboard::SIZES {
-                ui.selectable_value(&mut k.keys, n, format!("{n} keys"));
+                selectable_value(ui, &mut k.keys, n, format!("{n} keys"));
             }
         });
         ui.end_row();
         ui.label("Key labels");
         dropdown(ui, "bc_labels", k.labels.label(), |ui| {
             for l in KeyLabels::ALL {
-                ui.selectable_value(&mut k.labels, l, l.label());
+                selectable_value(ui, &mut k.labels, l, l.label());
             }
         });
         ui.end_row();

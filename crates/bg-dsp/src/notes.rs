@@ -35,15 +35,27 @@ pub struct NoteDetectorConfig {
 
 impl Default for NoteDetectorConfig {
     fn default() -> Self {
-        Self { gate_db: -45.0, onset_rise_db: 5.0, min_gap_ms: 45.0, release_db: 24.0, end_offset_ms: 0.0 }
+        Self {
+            gate_db: -45.0,
+            onset_rise_db: 5.0,
+            min_gap_ms: 45.0,
+            release_db: 24.0,
+            end_offset_ms: 0.0,
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteEvent {
     /// `sample` counts from the first sample ever passed to the detector.
-    On { sample: u64, level_db: f32 },
-    Off { sample: u64, peak_db: f32 },
+    On {
+        sample: u64,
+        level_db: f32,
+    },
+    Off {
+        sample: u64,
+        peak_db: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -93,7 +105,10 @@ impl NoteDetector {
         Self {
             cfg,
             hpf: Biquad::highpass(sr, 20.0, 0.707),
-            hf: [Biquad::highpass(sr, 500.0, 0.54), Biquad::highpass(sr, 500.0, 1.31)],
+            hf: [
+                Biquad::highpass(sr, 500.0, 0.54),
+                Biquad::highpass(sr, 500.0, 1.31),
+            ],
             hop,
             hop_buf: Vec::with_capacity(hop),
             hf_buf: Vec::with_capacity(hop),
@@ -145,10 +160,19 @@ impl NoteDetector {
 
     fn emit_onset(&mut self, sample: u64, level: f32, out: &mut Vec<NoteEvent>) {
         if let Some(a) = self.active.take() {
-            out.push(NoteEvent::Off { sample, peak_db: db(a.peak) });
+            out.push(NoteEvent::Off {
+                sample,
+                peak_db: db(a.peak),
+            });
         }
-        out.push(NoteEvent::On { sample, level_db: db(level) });
-        self.active = Some(Active { peak: level, peak_rms: 0.0 });
+        out.push(NoteEvent::On {
+            sample,
+            level_db: db(level),
+        });
+        self.active = Some(Active {
+            peak: level,
+            peak_rms: 0.0,
+        });
         self.last_onset = Some(sample);
     }
 
@@ -161,15 +185,25 @@ impl NoteDetector {
         // Peaks of the recent past (long enough to span a full period of the lowest note)
         // vs. the peak of the last couple of hops.
         let n = self.peak_hist.len();
-        let reference = self.peak_hist.iter().take(n.saturating_sub(self.hist_skip)).fold(0.0f32, |m, &v| m.max(v));
+        let reference = self
+            .peak_hist
+            .iter()
+            .take(n.saturating_sub(self.hist_skip))
+            .fold(0.0f32, |m, &v| m.max(v));
         let current = self.peak_hist.back().copied().unwrap_or(0.0).max(hop_peak);
         let gate = from_db(self.cfg.gate_db);
         let min_gap = (self.cfg.min_gap_ms / 1000.0 * self.sr) as u64;
 
         let hf_peak = self.hf_buf.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         let n = self.hf_hist.len();
-        let hf_ref = self.hf_hist.iter().take(n.saturating_sub(self.hf_skip)).fold(0.0f32, |m, &v| m.max(v));
-        let hf_onset = hf_peak > gate * 0.25 && hf_peak > hf_ref * from_db(self.cfg.onset_rise_db + 6.0) && n >= self.hf_hist_len;
+        let hf_ref = self
+            .hf_hist
+            .iter()
+            .take(n.saturating_sub(self.hf_skip))
+            .fold(0.0f32, |m, &v| m.max(v));
+        let hf_onset = hf_peak > gate * 0.25
+            && hf_peak > hf_ref * from_db(self.cfg.onset_rise_db + 6.0)
+            && n >= self.hf_hist_len;
         let lf_onset = current > reference * from_db(self.cfg.onset_rise_db);
         self.hf_hist.push_back(hf_peak);
         if self.hf_hist.len() > self.hf_hist_len {
@@ -177,7 +211,12 @@ impl NoteDetector {
         }
 
         let rise = from_db(self.cfg.onset_rise_db);
-        let floor = self.peak_hist.iter().rev().take(self.floor_hops).fold(0.0f32, |m, &v| m.max(v));
+        let floor = self
+            .peak_hist
+            .iter()
+            .rev()
+            .take(self.floor_hops)
+            .fold(0.0f32, |m, &v| m.max(v));
         if let Some(c) = &mut self.candidate {
             if hop_peak > gate && hop_peak > c.floor * rise {
                 let (sample, level) = (c.sample, hop_peak);
@@ -193,12 +232,24 @@ impl NoteDetector {
         let gap_ok = self.last_onset.is_none_or(|t| hop_start >= t + min_gap);
         if current > gate && lf_onset && gap_ok {
             let threshold = (hop_peak * 0.3).max(gate * 0.5);
-            let idx = self.hop_buf.iter().position(|v| v.abs() >= threshold).unwrap_or(0);
+            let idx = self
+                .hop_buf
+                .iter()
+                .position(|v| v.abs() >= threshold)
+                .unwrap_or(0);
             self.candidate = None;
             self.emit_onset(hop_start + idx as u64, hop_peak, out);
         } else if hf_onset && gap_ok && self.candidate.is_none() {
-            let idx = self.hf_buf.iter().position(|v| v.abs() >= hf_peak * 0.3).unwrap_or(0);
-            self.candidate = Some(Candidate { sample: hop_start + idx as u64, floor, hops_left: self.confirm_hops });
+            let idx = self
+                .hf_buf
+                .iter()
+                .position(|v| v.abs() >= hf_peak * 0.3)
+                .unwrap_or(0);
+            self.candidate = Some(Candidate {
+                sample: hop_start + idx as u64,
+                floor,
+                hops_left: self.confirm_hops,
+            });
         }
 
         self.peak_hist.push_back(hop_peak);
@@ -209,19 +260,29 @@ impl NoteDetector {
         if self.energy_hist.len() > self.rms_hops {
             self.energy_hist.pop_front();
         }
-        let rms = (self.energy_hist.iter().sum::<f32>() / (self.energy_hist.len() * self.hop) as f32).sqrt();
+        let rms = (self.energy_hist.iter().sum::<f32>()
+            / (self.energy_hist.len() * self.hop) as f32)
+            .sqrt();
 
         if let Some(a) = &mut self.active {
             a.peak = a.peak.max(hop_peak);
             a.peak_rms = a.peak_rms.max(rms);
-            let settled = self.last_onset.is_some_and(|t| hop_start > t + (self.rms_hops * self.hop) as u64);
-            if settled && (rms < a.peak_rms * from_db(-self.cfg.release_db) || self.env < gate * 0.5) {
+            let settled = self
+                .last_onset
+                .is_some_and(|t| hop_start > t + (self.rms_hops * self.hop) as u64);
+            if settled
+                && (rms < a.peak_rms * from_db(-self.cfg.release_db) || self.env < gate * 0.5)
+            {
                 // With a release threshold this far down, the RMS window is almost entirely
                 // past the end of the note when it triggers; place the end at its start.
-                let end = (hop_start + self.hop as u64) as i64 - (self.rms_hops * self.hop) as i64 + (self.cfg.end_offset_ms / 1000.0 * self.sr) as i64;
+                let end = (hop_start + self.hop as u64) as i64 - (self.rms_hops * self.hop) as i64
+                    + (self.cfg.end_offset_ms / 1000.0 * self.sr) as i64;
                 let onset = self.last_onset.unwrap_or(0) as i64 + 1;
                 let sample = end.max(onset) as u64;
-                out.push(NoteEvent::Off { sample, peak_db: db(a.peak) });
+                out.push(NoteEvent::Off {
+                    sample,
+                    peak_db: db(a.peak),
+                });
                 self.active = None;
             }
         }
@@ -244,11 +305,18 @@ mod tests {
                 let t = i as f32 / sr;
                 let attack = (t / 0.002).min(1.0);
                 let decay = (-t / 1.2).exp();
-                let damp = if t > dur { (-(t - dur) / 0.006).exp() } else { 1.0 };
-                let tone: f32 = (1..6).map(|h| (TAU * freq * h as f32 * t).sin() / h as f32).sum();
+                let damp = if t > dur {
+                    (-(t - dur) / 0.006).exp()
+                } else {
+                    1.0
+                };
+                let tone: f32 = (1..6)
+                    .map(|h| (TAU * freq * h as f32 * t).sin() / h as f32)
+                    .sum();
                 // Finger / pick transient: a short broadband click.
                 seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let click = ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * (-t / 0.0015).exp() * 0.3;
+                let click =
+                    ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * (-t / 0.0015).exp() * 0.3;
                 out[s0 + i] += amp * (attack * decay * damp * tone * 0.5 + click);
             }
         }
@@ -267,10 +335,33 @@ mod tests {
     #[test]
     fn onsets_are_precise() {
         let sr = 48_000.0;
-        let notes = [(0.25, 0.4, 41.2, 0.5), (0.75, 0.2, 55.0, 0.3), (1.0, 0.45, 61.7, 0.6), (1.5, 0.3, 30.87, 0.4)];
+        let notes = [
+            (0.25, 0.4, 41.2, 0.5),
+            (0.75, 0.2, 55.0, 0.3),
+            (1.0, 0.45, 61.7, 0.6),
+            (1.5, 0.3, 30.87, 0.4),
+        ];
         let ev = detect(sr, &render(sr, 2.5, &notes));
-        let ons: Vec<f32> = ev.iter().filter_map(|e| if let NoteEvent::On { sample, .. } = e { Some(*sample as f32 / sr) } else { None }).collect();
-        let offs: Vec<f32> = ev.iter().filter_map(|e| if let NoteEvent::Off { sample, .. } = e { Some(*sample as f32 / sr) } else { None }).collect();
+        let ons: Vec<f32> = ev
+            .iter()
+            .filter_map(|e| {
+                if let NoteEvent::On { sample, .. } = e {
+                    Some(*sample as f32 / sr)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let offs: Vec<f32> = ev
+            .iter()
+            .filter_map(|e| {
+                if let NoteEvent::Off { sample, .. } = e {
+                    Some(*sample as f32 / sr)
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(ons.len(), notes.len(), "{ev:?}");
         assert_eq!(offs.len(), notes.len(), "{ev:?}");
         for ((on, off), n) in ons.iter().zip(&offs).zip(&notes) {
@@ -284,13 +375,22 @@ mod tests {
     fn ringing_note_triggers_once_and_legato_splits() {
         let sr = 44_100.0;
         let ev = detect(sr, &render(sr, 3.0, &[(0.1, 2.5, 30.87, 0.8)]));
-        assert_eq!(ev.iter().filter(|e| matches!(e, NoteEvent::On { .. })).count(), 1, "{ev:?}");
+        assert_eq!(
+            ev.iter()
+                .filter(|e| matches!(e, NoteEvent::On { .. }))
+                .count(),
+            1,
+            "{ev:?}"
+        );
         // Legato: second note starts while the first still rings.
         let mut sig = render(sr, 1.5, &[(0.1, 1.2, 41.2, 0.3)]);
         let second = render(sr, 1.5, &[(0.6, 0.6, 55.0, 0.6)]);
         sig.iter_mut().zip(&second).for_each(|(a, b)| *a += b);
         let ev = detect(sr, &sig);
-        let ons: Vec<_> = ev.iter().filter(|e| matches!(e, NoteEvent::On { .. })).collect();
+        let ons: Vec<_> = ev
+            .iter()
+            .filter(|e| matches!(e, NoteEvent::On { .. }))
+            .collect();
         assert_eq!(ons.len(), 2, "{ev:?}");
     }
 
@@ -298,9 +398,22 @@ mod tests {
     fn repeated_note_after_short_mute() {
         // Same pitch and level, the previous note muted only ~20 ms before the next one.
         let sr = 48_000.0;
-        let notes = [(0.25, 0.23, 41.2, 0.5), (0.5, 0.23, 41.2, 0.5), (0.75, 0.23, 41.2, 0.5)];
+        let notes = [
+            (0.25, 0.23, 41.2, 0.5),
+            (0.5, 0.23, 41.2, 0.5),
+            (0.75, 0.23, 41.2, 0.5),
+        ];
         let ev = detect(sr, &render(sr, 1.5, &notes));
-        let ons: Vec<f32> = ev.iter().filter_map(|e| if let NoteEvent::On { sample, .. } = e { Some(*sample as f32 / sr) } else { None }).collect();
+        let ons: Vec<f32> = ev
+            .iter()
+            .filter_map(|e| {
+                if let NoteEvent::On { sample, .. } = e {
+                    Some(*sample as f32 / sr)
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(ons.len(), 3, "{ev:?}");
         for (on, n) in ons.iter().zip(&notes) {
             assert!((on - n.0).abs() < 0.003, "onset {on} vs {}", n.0);
@@ -312,10 +425,24 @@ mod tests {
         let sr = 48_000.0;
         let sig = render(sr, 1.0, &[(0.2, 0.3, 55.0, 0.5)]);
         let end = |offset_ms: f32| {
-            let mut d = NoteDetector::new(sr, NoteDetectorConfig { end_offset_ms: offset_ms, ..Default::default() });
+            let mut d = NoteDetector::new(
+                sr,
+                NoteDetectorConfig {
+                    end_offset_ms: offset_ms,
+                    ..Default::default()
+                },
+            );
             let mut ev = Vec::new();
             d.process(&sig, &mut ev);
-            ev.iter().find_map(|e| if let NoteEvent::Off { sample, .. } = e { Some(*sample as f32 / sr) } else { None }).unwrap()
+            ev.iter()
+                .find_map(|e| {
+                    if let NoteEvent::Off { sample, .. } = e {
+                        Some(*sample as f32 / sr)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
         };
         assert!((end(-20.0) - (end(0.0) - 0.020)).abs() < 0.001);
         assert!((end(15.0) - (end(0.0) + 0.015)).abs() < 0.001);

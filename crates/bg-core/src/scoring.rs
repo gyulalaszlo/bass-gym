@@ -55,7 +55,14 @@ pub struct ScoringThresholds {
 
 impl Default for ScoringThresholds {
     fn default() -> Self {
-        Self { good_ms: 12.0, ok_ms: 30.0, window_ms: 150.0, score_length: true, length_good: 0.3, length_ok: 0.6 }
+        Self {
+            good_ms: 12.0,
+            ok_ms: 30.0,
+            window_ms: 150.0,
+            score_length: true,
+            length_good: 0.3,
+            length_ok: 0.6,
+        }
     }
 }
 
@@ -133,12 +140,20 @@ pub struct Matcher {
 
 impl Matcher {
     pub fn new(thresholds: ScoringThresholds) -> Self {
-        Self { thresholds, ..Default::default() }
+        Self {
+            thresholds,
+            ..Default::default()
+        }
     }
 
     /// A matcher that also grades harmony (see [`Matcher::on_pitch`]).
     pub fn with_harmony(thresholds: ScoringThresholds, grade_mode: GradeMode) -> Self {
-        Self { thresholds, harmony_enabled: true, grade_mode, ..Default::default() }
+        Self {
+            thresholds,
+            harmony_enabled: true,
+            grade_mode,
+            ..Default::default()
+        }
     }
 
     fn regrade(&mut self, i: usize) {
@@ -160,7 +175,9 @@ impl Matcher {
     /// Records the chord-compatibility score of a played note (may be called again with
     /// a better estimate).
     pub fn on_pitch(&mut self, played: usize, harmony: Option<f32>) {
-        let Some(p) = self.played.get_mut(played) else { return };
+        let Some(p) = self.played.get_mut(played) else {
+            return;
+        };
         p.harmony = harmony;
         if let Some(i) = p.matched {
             self.outcomes[i].harmony = harmony;
@@ -172,7 +189,14 @@ impl Matcher {
     pub fn add_bar(&mut self, bar: &BarPlan) {
         let max_window = self.thresholds.window_ms as f64 / 1000.0;
         for n in &bar.notes {
-            self.expected.push(Expected { bar: bar.index, bpm: bar.bpm, time: n.time, len: n.len, accent: n.accent, window: max_window });
+            self.expected.push(Expected {
+                bar: bar.index,
+                bpm: bar.bpm,
+                time: n.time,
+                len: n.len,
+                accent: n.accent,
+                window: max_window,
+            });
             self.outcomes.push(Outcome::default());
         }
         // Each note's window extends at most half-way to its neighbours.
@@ -198,15 +222,29 @@ impl Matcher {
                 break;
             }
             let d = (onset - e.time).abs();
-            if self.outcomes[i].played.is_none() && d <= e.window && best.is_none_or(|(_, bd)| d < bd) {
+            if self.outcomes[i].played.is_none()
+                && d <= e.window
+                && best.is_none_or(|(_, bd)| d < bd)
+            {
                 best = Some((i, d));
             }
         }
         let idx = self.played.len();
-        self.played.push(Played { onset, offset: None, peak_db, freq: None, harmony: None, matched: best.map(|b| b.0) });
+        self.played.push(Played {
+            onset,
+            offset: None,
+            peak_db,
+            freq: None,
+            harmony: None,
+            matched: best.map(|b| b.0),
+        });
         if let Some((i, _)) = best {
             let ms = ((onset - self.expected[i].time) * 1000.0) as f32;
-            self.outcomes[i] = Outcome { played: Some(idx), timing_ms: Some(ms), ..Default::default() };
+            self.outcomes[i] = Outcome {
+                played: Some(idx),
+                timing_ms: Some(ms),
+                ..Default::default()
+            };
             self.regrade(i);
         }
         idx
@@ -214,14 +252,17 @@ impl Matcher {
 
     /// Completes a played note with its end time, final peak level and (optional) pitch.
     pub fn on_offset(&mut self, played: usize, offset: f64, peak_db: f32, freq: Option<f32>) {
-        let Some(p) = self.played.get_mut(played) else { return };
+        let Some(p) = self.played.get_mut(played) else {
+            return;
+        };
         p.offset = Some(offset);
         p.peak_db = peak_db;
         if freq.is_some() {
             p.freq = freq;
         }
         if let Some(i) = p.matched {
-            self.outcomes[i].length_ratio = Some(((offset - p.onset) / self.expected[i].len) as f32);
+            self.outcomes[i].length_ratio =
+                Some(((offset - p.onset) / self.expected[i].len) as f32);
             self.regrade(i);
         }
     }
@@ -245,7 +286,9 @@ impl Matcher {
     /// Time of the latest input activity (end of the last note, or infinity while a
     /// note is still sounding); `None` before anything was played.
     pub fn last_activity(&self) -> Option<f64> {
-        self.played.last().map(|p| p.offset.unwrap_or(f64::INFINITY))
+        self.played
+            .last()
+            .map(|p| p.offset.unwrap_or(f64::INFINITY))
     }
 
     pub fn stats(&self) -> SessionStats {
@@ -256,7 +299,10 @@ impl Matcher {
             let tempo = match s.per_tempo.iter_mut().find(|t| t.bpm == e.bpm) {
                 Some(t) => t,
                 None => {
-                    s.per_tempo.push(TempoStats { bpm: e.bpm, ..Default::default() });
+                    s.per_tempo.push(TempoStats {
+                        bpm: e.bpm,
+                        ..Default::default()
+                    });
                     s.per_tempo.last_mut().unwrap()
                 }
             };
@@ -273,7 +319,11 @@ impl Matcher {
             }
             if let Some(p) = o.played {
                 let db = self.played[p].peak_db;
-                if e.accent { s.accent_levels_db.push(db) } else { s.levels_db.push(db) }
+                if e.accent {
+                    s.accent_levels_db.push(db)
+                } else {
+                    s.levels_db.push(db)
+                }
                 if self.harmony_enabled {
                     let k = match o.harmony {
                         Some(h) if h >= 0.999 => 0,
@@ -294,7 +344,12 @@ impl Progress for Matcher {
     fn bar_rate(&self, bar: i64) -> Option<f32> {
         let mut n = 0;
         let mut hits = 0;
-        for (e, o) in self.expected.iter().zip(&self.outcomes).filter(|(e, _)| e.bar == bar) {
+        for (e, o) in self
+            .expected
+            .iter()
+            .zip(&self.outcomes)
+            .filter(|(e, _)| e.bar == bar)
+        {
             if e.time + e.window >= self.now {
                 return None;
             }
@@ -356,7 +411,8 @@ pub fn mean(v: &[f32]) -> Option<f32> {
 
 pub fn std_dev(v: &[f32]) -> Option<f32> {
     let m = mean(v)?;
-    (v.len() > 1).then(|| (v.iter().map(|x| (x - m).powi(2)).sum::<f32>() / (v.len() - 1) as f32).sqrt())
+    (v.len() > 1)
+        .then(|| (v.iter().map(|x| (x - m).powi(2)).sum::<f32>() / (v.len() - 1) as f32).sqrt())
 }
 
 #[cfg(test)]
@@ -366,7 +422,11 @@ mod tests {
     use crate::session::SessionConfig;
 
     fn setup() -> (Matcher, Vec<BarPlan>) {
-        let cfg = SessionConfig { tempo: 120.0, count_in_bars: 0, ..Default::default() };
+        let cfg = SessionConfig {
+            tempo: 120.0,
+            count_in_bars: 0,
+            ..Default::default()
+        };
         let mut p = Planner::new(cfg, 0.0);
         let mut m = Matcher::new(ScoringThresholds::default());
         let bars: Vec<BarPlan> = (0..2).map(|_| p.next_bar(&()).unwrap()).collect();
@@ -405,7 +465,11 @@ mod tests {
     fn harmony_grading_modes() {
         for mode in [GradeMode::Combined, GradeMode::Separate] {
             let (m, _) = setup();
-            let mut m = Matcher { harmony_enabled: true, grade_mode: mode, ..m };
+            let mut m = Matcher {
+                harmony_enabled: true,
+                grade_mode: mode,
+                ..m
+            };
             let a = m.on_onset(0.002, -10.0); // on time
             m.on_pitch(a, Some(0.5)); // passing tone
             let b = m.on_onset(0.501, -10.0);

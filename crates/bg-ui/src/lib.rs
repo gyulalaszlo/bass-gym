@@ -10,5 +10,5 @@ pub mod widgets;
 pub use egui;
 pub use egui_phosphor::regular as icons;
 pub use exercise::{ExerciseCtx, ExerciseType};
-pub use prefs::{PrefsCtx, PreferencePage};
+pub use prefs::{PreferencePage, PrefsCtx};
 pub use settings::SettingsStore;

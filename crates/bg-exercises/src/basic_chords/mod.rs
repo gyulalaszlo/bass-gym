@@ -13,9 +13,9 @@ use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::button::{button, selectable_value};
+use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
 use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
 use bg_ui::widgets::results::results;
-use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::widgets::tuner::TunerPrefs;
@@ -120,7 +120,13 @@ pub struct KeyboardOptions {
 
 impl Default for KeyboardOptions {
     fn default() -> Self {
-        Self { keys: 49, labels: KeyLabels::Octaves, ghost_next: true, hide_chord_names: false, show_bass: true }
+        Self {
+            keys: 49,
+            labels: KeyLabels::Octaves,
+            ghost_next: true,
+            hide_chord_names: false,
+            show_bass: true,
+        }
     }
 }
 
@@ -166,15 +172,30 @@ pub fn resolve_progression(d: &BasicChordsData, seed: u64) -> Result<Vec<Chord>,
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let p = &d.progression;
     let text = match p.kind {
-        ProgressionKind::Random => return Ok(harmony::random_progression(&d.scale, p.random_len.max(1) as usize, d.jazziness, &mut rng)),
+        ProgressionKind::Random => {
+            return Ok(harmony::random_progression(
+                &d.scale,
+                p.random_len.max(1) as usize,
+                d.jazziness,
+                &mut rng,
+            ));
+        }
         ProgressionKind::Fixed => match p.source {
             FixedSource::Library => harmony::library(&p.library).map_or("I", |e| e.2).to_owned(),
             FixedSource::Custom => p.custom.clone(),
         },
         ProgressionKind::SemiRandom => {
             use rand::Rng;
-            let pool: Vec<&str> = harmony::LIBRARY.iter().filter(|e| p.pool.is_empty() || p.pool.iter().any(|id| id == e.0)).map(|e| e.2).collect();
-            let pool = if pool.is_empty() { vec![harmony::LIBRARY[0].2] } else { pool };
+            let pool: Vec<&str> = harmony::LIBRARY
+                .iter()
+                .filter(|e| p.pool.is_empty() || p.pool.iter().any(|id| id == e.0))
+                .map(|e| e.2)
+                .collect();
+            let pool = if pool.is_empty() {
+                vec![harmony::LIBRARY[0].2]
+            } else {
+                pool
+            };
             pool[rng.random_range(0..pool.len())].to_owned()
         }
     };
@@ -205,12 +226,26 @@ impl PresetSchema for BasicChords {
             // v1 ("Chord interaction" preview): sevenths flag, random progression length
             // and whole bars per chord.
             1 => {
-                let o = data.as_object_mut().ok_or_else(|| PresetError::Invalid("expected an object".into()))?;
-                let sevenths = o.remove("sevenths").and_then(|v| v.as_bool()).unwrap_or(false);
-                let len = o.remove("progression_len").and_then(|v| v.as_u64()).unwrap_or(4);
-                let bars = o.remove("bars_per_chord").and_then(|v| v.as_u64()).unwrap_or(1);
+                let o = data
+                    .as_object_mut()
+                    .ok_or_else(|| PresetError::Invalid("expected an object".into()))?;
+                let sevenths = o
+                    .remove("sevenths")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let len = o
+                    .remove("progression_len")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(4);
+                let bars = o
+                    .remove("bars_per_chord")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1);
                 o.insert("jazziness".into(), json!(if sevenths { 0.35 } else { 0.1 }));
-                o.insert("progression".into(), json!({ "kind": "Random", "random_len": len }));
+                o.insert(
+                    "progression".into(),
+                    json!({ "kind": "Random", "random_len": len }),
+                );
                 o.insert(
                     "chord_length".into(),
                     json!(match bars {
@@ -289,7 +324,11 @@ impl ExerciseType for BasicChords {
             }
         }
         // Current / next chord in the space between START and the settings.
-        let now = if running { ctx.engine.clock().now() } else { last_time(&self.timing) };
+        let now = if running {
+            ctx.engine.clock().now()
+        } else {
+            last_time(&self.timing)
+        };
         tb.gap_with(Gap::Large, |ui| self.status(ui, now, running));
         if tb.group(!running, |tb| session_toolbar(tb, &mut self.data.session)) {
             self.has_results = false;
@@ -302,14 +341,24 @@ impl ExerciseType for BasicChords {
             ui.label(RichText::new(format!("{} {e}", icons::WARNING)).color(theme::red()));
         }
         if !ctx.engine.clock().is_running() {
-            ui.label(RichText::new(format!("{} No audio output — check Preferences › Audio", icons::WARNING)).color(theme::amber()));
+            ui.label(
+                RichText::new(format!(
+                    "{} No audio output — check Preferences › Audio",
+                    icons::WARNING
+                ))
+                .color(theme::amber()),
+            );
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx) {
         let running = ctx.engine.session_running() && self.is_running();
         self.a4 = ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4;
-        let now = if running { ctx.engine.clock().now() } else { last_time(&self.timing) };
+        let now = if running {
+            ctx.engine.clock().now()
+        } else {
+            last_time(&self.timing)
+        };
 
         ui.add_space(6.0);
         self.keyboard(ui, now);
@@ -339,7 +388,9 @@ impl ExerciseType for BasicChords {
 impl BasicChords {
     fn start(&mut self, ctx: &mut ExerciseCtx) {
         let seed = if self.data.new_seed_each_start {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64)
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(1, |d| d.as_nanos() as u64)
         } else {
             self.data.seed
         };
@@ -353,7 +404,10 @@ impl BasicChords {
         self.error = None;
         let d = &self.data;
         let a4 = self.a4;
-        let mode = ctx.settings.get::<BasicChordsPrefs>(BasicChordsPrefs::ID).grade_mode;
+        let mode = ctx
+            .settings
+            .get::<BasicChordsPrefs>(BasicChordsPrefs::ID)
+            .grade_mode;
         let acc = ChordAccompaniment::new(
             progression,
             d.scale,
@@ -366,7 +420,13 @@ impl BasicChords {
             seed,
             self.chords.clone(),
         );
-        let logic = TimingSession::with_accompaniment(d.session.clone(), ctx.scoring.clone(), self.timing.clone(), Box::new(acc), mode);
+        let logic = TimingSession::with_accompaniment(
+            d.session.clone(),
+            ctx.scoring.clone(),
+            self.timing.clone(),
+            Box::new(acc),
+            mode,
+        );
         ctx.engine.start_session(Box::new(logic));
         self.has_results = true;
         self.run_seed = Some(seed);
@@ -384,7 +444,11 @@ impl BasicChords {
     }
 
     fn chord_label(&self, c: &Chord) -> String {
-        if self.data.keyboard.hide_chord_names { "?".into() } else { c.name() }
+        if self.data.keyboard.hide_chord_names {
+            "?".into()
+        } else {
+            c.name()
+        }
     }
 
     fn status(&self, ui: &mut egui::Ui, now: f64, running: bool) {
@@ -396,18 +460,38 @@ impl BasicChords {
         let next = shared.spans.iter().find(|s| s.start > now);
         match current {
             Some(c) => {
-                ui.label(RichText::new(self.chord_label(&c.chord)).font(theme::mono(26.0)).color(theme::cyan()));
+                ui.label(
+                    RichText::new(self.chord_label(&c.chord))
+                        .font(theme::mono(26.0))
+                        .color(theme::cyan()),
+                );
                 if !self.data.keyboard.hide_chord_names {
-                    ui.label(RichText::new(c.chord.roman()).font(theme::mono(16.0)).color(theme::dim()));
+                    ui.label(
+                        RichText::new(c.chord.roman())
+                            .font(theme::mono(16.0))
+                            .color(theme::dim()),
+                    );
                 }
             }
             None => {
-                ui.label(RichText::new("COUNT-IN").font(theme::mono(18.0)).color(theme::amber()));
+                ui.label(
+                    RichText::new("COUNT-IN")
+                        .font(theme::mono(18.0))
+                        .color(theme::amber()),
+                );
             }
         }
         if let Some(n) = next {
-            ui.label(RichText::new("NEXT").font(theme::mono(13.0)).color(theme::text()));
-            ui.label(RichText::new(self.chord_label(&n.chord)).font(theme::mono(16.0)).color(theme::magenta()));
+            ui.label(
+                RichText::new("NEXT")
+                    .font(theme::mono(13.0))
+                    .color(theme::text()),
+            );
+            ui.label(
+                RichText::new(self.chord_label(&n.chord))
+                    .font(theme::mono(16.0))
+                    .color(theme::magenta()),
+            );
         }
     }
 
@@ -415,10 +499,25 @@ impl BasicChords {
         let opts = &self.data.keyboard;
         let (active, ghost) = if self.has_results {
             let shared = lock_chords(&self.chords);
-            let active: Vec<u8> = shared.piano.iter().filter(|n| n.time <= now && now < n.time + n.len).map(|n| n.midi).collect();
+            let active: Vec<u8> = shared
+                .piano
+                .iter()
+                .filter(|n| n.time <= now && now < n.time + n.len)
+                .map(|n| n.midi)
+                .collect();
             let ghost = if opts.ghost_next {
-                let beat = lock(&self.timing).bars.iter().rev().find(|b| b.start <= now).map_or(0.5, |b| b.duration / b.beats.max(1) as f64);
-                shared.spans.iter().find(|s| s.start > now && s.start - now <= beat).map(|s| s.voicing.clone()).unwrap_or_default()
+                let beat = lock(&self.timing)
+                    .bars
+                    .iter()
+                    .rev()
+                    .find(|b| b.start <= now)
+                    .map_or(0.5, |b| b.duration / b.beats.max(1) as f64);
+                shared
+                    .spans
+                    .iter()
+                    .find(|s| s.start > now && s.start - now <= beat)
+                    .map(|s| s.voicing.clone())
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };
@@ -433,62 +532,142 @@ impl BasicChords {
                 let recent = p.offset.is_none_or(|o| now - o < 1.5);
                 recent.then(|| {
                     let midi = bg_core::music::freq_to_midi(freq, self.a4).0;
-                    let color = p.harmony.map_or(theme::dim(), |h| theme::grade_color(harmony_grade(h)));
+                    let color = p
+                        .harmony
+                        .map_or(theme::dim(), |h| theme::grade_color(harmony_grade(h)));
                     (midi, color)
                 })
             })
         } else {
             None
         };
-        Keyboard { keys: opts.keys, active: &active, ghost: &ghost, bass, labels: opts.labels }.show(ui);
+        Keyboard {
+            keys: opts.keys,
+            active: &active,
+            ghost: &ghost,
+            bass,
+            labels: opts.labels,
+        }
+        .show(ui);
     }
 
     fn progression_strip(&self, ui: &mut egui::Ui, now: f64) {
         let progression = self.shown_progression();
-        let current = if self.has_results { lock_chords(&self.chords).spans.iter().find(|s| s.start <= now && now < s.end).map(|s| s.step) } else { None };
+        let current = if self.has_results {
+            lock_chords(&self.chords)
+                .spans
+                .iter()
+                .find(|s| s.start <= now && now < s.end)
+                .map(|s| s.step)
+        } else {
+            None
+        };
         // One row of compact cells (fixed height, scrolls sideways if it doesn't fit).
         let hide = self.data.keyboard.hide_chord_names;
-        egui::ScrollArea::horizontal().id_salt("bc_strip").auto_shrink([false, true]).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for (i, c) in progression.iter().enumerate() {
-                    let active = current == Some(i);
-                    let name_color = if active { theme::text() } else { theme::cyan() };
-                    let name = ui.painter().layout_no_wrap(self.chord_label(c), theme::mono(18.0), name_color);
-                    let roman = ui.painter().layout_no_wrap(if hide { String::new() } else { c.roman() }, theme::mono(12.0), theme::dim());
-                    let size = egui::vec2(name.size().x.max(roman.size().x) + 20.0, 48.0);
-                    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                    let p = ui.painter();
-                    if active {
-                        p.rect_filled(rect, 2.0, theme::cyan().gamma_multiply(0.18));
-                        p.rect_stroke(rect, 2.0, egui::Stroke::new(1.5, theme::cyan()), egui::StrokeKind::Inside);
-                    } else {
-                        p.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, theme::grid()), egui::StrokeKind::Inside);
+        egui::ScrollArea::horizontal()
+            .id_salt("bc_strip")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (i, c) in progression.iter().enumerate() {
+                        let active = current == Some(i);
+                        let name_color = if active { theme::text() } else { theme::cyan() };
+                        let name = ui.painter().layout_no_wrap(
+                            self.chord_label(c),
+                            theme::mono(18.0),
+                            name_color,
+                        );
+                        let roman = ui.painter().layout_no_wrap(
+                            if hide { String::new() } else { c.roman() },
+                            theme::mono(12.0),
+                            theme::dim(),
+                        );
+                        let size = egui::vec2(name.size().x.max(roman.size().x) + 20.0, 48.0);
+                        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                        let p = ui.painter();
+                        if active {
+                            p.rect_filled(rect, 2.0, theme::cyan().gamma_multiply(0.18));
+                            p.rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.5, theme::cyan()),
+                                egui::StrokeKind::Inside,
+                            );
+                        } else {
+                            p.rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.0, theme::grid()),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        p.galley(
+                            egui::pos2(rect.center().x - name.size().x / 2.0, rect.top() + 5.0),
+                            name,
+                            name_color,
+                        );
+                        p.galley(
+                            egui::pos2(
+                                rect.center().x - roman.size().x / 2.0,
+                                rect.bottom() - 5.0 - roman.size().y,
+                            ),
+                            roman,
+                            theme::dim(),
+                        );
                     }
-                    p.galley(egui::pos2(rect.center().x - name.size().x / 2.0, rect.top() + 5.0), name, name_color);
-                    p.galley(egui::pos2(rect.center().x - roman.size().x / 2.0, rect.bottom() - 5.0 - roman.size().y), roman, theme::dim());
-                }
+                });
             });
-        });
     }
 
     fn grid(&self, ui: &mut egui::Ui, now: f64) {
         let steps = self.data.session.groove.steps_per_beat;
         if self.has_results {
-            let labels: Vec<(f64, f64, String)> = lock_chords(&self.chords).spans.iter().map(|s| (s.start, s.end, self.chord_label(&s.chord))).collect();
+            let labels: Vec<(f64, f64, String)> = lock_chords(&self.chords)
+                .spans
+                .iter()
+                .map(|s| (s.start, s.end, self.chord_label(&s.chord)))
+                .collect();
             let t = lock(&self.timing);
-            Beatgrid { now, bars: &t.bars, matcher: &t.matcher, steps_per_beat: steps, bars_behind: 1.0, bars_ahead: 2.0, chords: &labels }.show(ui, 180.0);
+            Beatgrid {
+                now,
+                bars: &t.bars,
+                matcher: &t.matcher,
+                steps_per_beat: steps,
+                bars_behind: 1.0,
+                bars_ahead: 2.0,
+                chords: &labels,
+            }
+            .show(ui, 180.0);
         } else {
             let (bars, matcher) = preview(&self.data.session);
             let progression = self.shown_progression();
             let labels: Vec<(f64, f64, String)> = if progression.is_empty() {
                 Vec::new()
             } else {
-                let len = bars.first().map_or(2.0, |b| b.duration) * self.data.chord_length.bars() as f64;
-                (0..8).map(|i| (i as f64 * len, (i + 1) as f64 * len, self.chord_label(&progression[i % progression.len()]))).collect()
+                let len =
+                    bars.first().map_or(2.0, |b| b.duration) * self.data.chord_length.bars() as f64;
+                (0..8)
+                    .map(|i| {
+                        (
+                            i as f64 * len,
+                            (i + 1) as f64 * len,
+                            self.chord_label(&progression[i % progression.len()]),
+                        )
+                    })
+                    .collect()
             };
             let now = bars.first().map_or(0.0, |b| b.start);
-            Beatgrid { now, bars: &bars, matcher: &matcher, steps_per_beat: steps, bars_behind: 1.0, bars_ahead: 2.0, chords: &labels }.show(ui, 180.0);
+            Beatgrid {
+                now,
+                bars: &bars,
+                matcher: &matcher,
+                steps_per_beat: steps,
+                bars_behind: 1.0,
+                bars_ahead: 2.0,
+                chords: &labels,
+            }
+            .show(ui, 180.0);
         }
     }
 
@@ -501,7 +680,15 @@ impl BasicChords {
         // Per progression step: notes, timing hits, chord tones, known pitches.
         let mut rows = vec![(0usize, 0usize, 0usize, 0usize); chords.progression.len()];
         for (e, o) in t.matcher.expected.iter().zip(&t.matcher.outcomes) {
-            let (Some(g), Some(span)) = (o.grade, chords.spans.iter().find(|s| s.start <= e.time && e.time < s.end)) else { continue };
+            let (Some(g), Some(span)) = (
+                o.grade,
+                chords
+                    .spans
+                    .iter()
+                    .find(|s| s.start <= e.time && e.time < s.end),
+            ) else {
+                continue;
+            };
             let r = &mut rows[span.step];
             r.0 += 1;
             if g.is_hit() {
@@ -516,20 +703,32 @@ impl BasicChords {
         }
         ui.add_space(6.0);
         theme::caption(ui, "Per chord");
-        let pct = |a: usize, b: usize| if b == 0 { "--".to_owned() } else { format!("{:.0}%", a as f32 * 100.0 / b as f32) };
-        egui::Grid::new("per_chord").spacing(egui::vec2(18.0, 2.0)).show(ui, |ui| {
-            for h in ["CHORD", "NOTES", "HIT", "IN CHORD"] {
-                ui.label(RichText::new(h).small().color(theme::dim()));
+        let pct = |a: usize, b: usize| {
+            if b == 0 {
+                "--".to_owned()
+            } else {
+                format!("{:.0}%", a as f32 * 100.0 / b as f32)
             }
-            ui.end_row();
-            for (c, r) in chords.progression.iter().zip(&rows) {
-                ui.label(RichText::new(self.chord_label(c)).font(theme::mono(14.0)).color(theme::cyan()));
-                ui.label(RichText::new(r.0.to_string()).font(theme::mono(14.0)));
-                ui.label(RichText::new(pct(r.1, r.0)).font(theme::mono(14.0)));
-                ui.label(RichText::new(pct(r.2, r.3)).font(theme::mono(14.0)));
+        };
+        egui::Grid::new("per_chord")
+            .spacing(egui::vec2(18.0, 2.0))
+            .show(ui, |ui| {
+                for h in ["CHORD", "NOTES", "HIT", "IN CHORD"] {
+                    ui.label(RichText::new(h).small().color(theme::dim()));
+                }
                 ui.end_row();
-            }
-        });
+                for (c, r) in chords.progression.iter().zip(&rows) {
+                    ui.label(
+                        RichText::new(self.chord_label(c))
+                            .font(theme::mono(14.0))
+                            .color(theme::cyan()),
+                    );
+                    ui.label(RichText::new(r.0.to_string()).font(theme::mono(14.0)));
+                    ui.label(RichText::new(pct(r.1, r.0)).font(theme::mono(14.0)));
+                    ui.label(RichText::new(pct(r.2, r.3)).font(theme::mono(14.0)));
+                    ui.end_row();
+                }
+            });
     }
 
     /// The configuration panels. Returns true when anything changed.
@@ -546,10 +745,18 @@ impl BasicChords {
                     let current = harmony::checker(&d.checker);
                     dropdown(ui, "bc_checker", current.name(), |ui| {
                         for c in harmony::checkers() {
-                            selectable_value(ui, &mut d.checker, c.id().to_owned(), c.name()).on_hover_text(c.description());
+                            selectable_value(ui, &mut d.checker, c.id().to_owned(), c.name())
+                                .on_hover_text(c.description());
                         }
                     });
-                    ui.add(egui::Label::new(RichText::new(current.description()).small().color(theme::dim())).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(current.description())
+                                .small()
+                                .color(theme::dim()),
+                        )
+                        .wrap(),
+                    );
                 }),
             });
         });
@@ -593,25 +800,50 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
                     let name = harmony::library(&p.library).map_or("?", |e| e.1);
                     dropdown(ui, "bc_library", name, |ui| {
                         for (id, name, text) in harmony::LIBRARY {
-                            selectable_value(ui, &mut p.library, id.to_owned(), name).on_hover_text(text);
+                            selectable_value(ui, &mut p.library, id.to_owned(), name)
+                                .on_hover_text(text);
                         }
                     });
                 }
                 FixedSource::Custom => {
-                    ui.add(text_field(&mut p.custom).hint("e.g. ii7 V7 I7 vi7").width(ui.available_width().min(280.0)).font(theme::mono(15.0)));
+                    ui.add(
+                        text_field(&mut p.custom)
+                            .hint("e.g. ii7 V7 I7 vi7")
+                            .width(ui.available_width().min(280.0))
+                            .font(theme::mono(15.0)),
+                    );
                     match harmony::parse_progression(&p.custom, &d.scale) {
                         Ok(specs) => {
-                            ui.add(egui::Label::new(RichText::new(format!("{} chords · repeat a numeral to hold it longer", specs.len())).small().color(theme::dim())).wrap());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!(
+                                        "{} chords · repeat a numeral to hold it longer",
+                                        specs.len()
+                                    ))
+                                    .small()
+                                    .color(theme::dim()),
+                                )
+                                .wrap(),
+                            );
                         }
                         Err(e) => {
-                            ui.add(egui::Label::new(RichText::new(e.message).small().color(theme::red())).wrap());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(e.message).small().color(theme::red()),
+                                )
+                                .wrap(),
+                            );
                         }
                     }
                 }
             }
         }
         ProgressionKind::SemiRandom => {
-            ui.label(RichText::new("A new pick on every start, from:").small().color(theme::dim()));
+            ui.label(
+                RichText::new("A new pick on every start, from:")
+                    .small()
+                    .color(theme::dim()),
+            );
             for (id, name, _) in harmony::LIBRARY {
                 let mut on = p.pool.is_empty() || p.pool.iter().any(|x| x == id);
                 if checkbox(ui, &mut on, name).changed() {
@@ -632,9 +864,17 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
         ProgressionKind::Random => {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Length");
-                ui.add(number_field(&mut p.random_len).range(2..=16).suffix("chords"));
+                ui.add(
+                    number_field(&mut p.random_len)
+                        .range(2..=16)
+                        .suffix("chords"),
+                );
             });
-            ui.label(RichText::new("In key; neighbouring chords share notes.").small().color(theme::dim()));
+            ui.label(
+                RichText::new("In key; neighbouring chords share notes.")
+                    .small()
+                    .color(theme::dim()),
+            );
         }
     }
     ui.add_space(4.0);
@@ -650,12 +890,22 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
         ui.label("Seed");
         ui.add(number_field(&mut d.seed));
         if ui.add(button(format!("{} New", icons::SHUFFLE))).clicked() {
-            d.seed = d.seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) >> 16;
+            d.seed = d
+                .seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407)
+                >> 16;
         }
         checkbox(ui, &mut d.new_seed_each_start, "New each start");
     });
     if let Some(s) = run_seed.filter(|&s| s != d.seed)
-        && ui.add(button(format!("{} Keep the last session's chords", icons::PUSH_PIN))).on_hover_text("Use its seed").clicked()
+        && ui
+            .add(button(format!(
+                "{} Keep the last session's chords",
+                icons::PUSH_PIN
+            )))
+            .on_hover_text("Use its seed")
+            .clicked()
     {
         d.seed = s;
         d.new_seed_each_start = false;
@@ -663,45 +913,69 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
 }
 
 fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
-    egui::Grid::new("bc_piano").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-        ui.label("Comping");
-        let name = comp::PATTERNS.iter().find(|p| p.0 == d.comp).map_or("?", |p| p.1);
-        dropdown(ui, "bc_comp", name, |ui| {
-            for (id, name) in comp::PATTERNS {
-                selectable_value(ui, &mut d.comp, id.to_owned(), name);
-            }
+    egui::Grid::new("bc_piano")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Comping");
+            let name = comp::PATTERNS
+                .iter()
+                .find(|p| p.0 == d.comp)
+                .map_or("?", |p| p.1);
+            dropdown(ui, "bc_comp", name, |ui| {
+                for (id, name) in comp::PATTERNS {
+                    selectable_value(ui, &mut d.comp, id.to_owned(), name);
+                }
+            });
+            ui.end_row();
+            ui.label("Jazziness");
+            let mut pct = d.jazziness * 100.0;
+            ui.add(
+                bg_ui::widgets::controls::slider_field(&mut pct, 0.0..=100.0)
+                    .step_by(5.0)
+                    .suffix("%"),
+            );
+            d.jazziness = pct / 100.0;
+            ui.end_row();
+            ui.label("Volume");
+            ui.add(egui::Slider::new(&mut d.piano_volume, 0.0..=1.0).show_value(false));
+            ui.end_row();
         });
-        ui.end_row();
-        ui.label("Jazziness");
-        let mut pct = d.jazziness * 100.0;
-        ui.add(bg_ui::widgets::controls::slider_field(&mut pct, 0.0..=100.0).step_by(5.0).suffix("%"));
-        d.jazziness = pct / 100.0;
-        ui.end_row();
-        ui.label("Volume");
-        ui.add(egui::Slider::new(&mut d.piano_volume, 0.0..=1.0).show_value(false));
-        ui.end_row();
-    });
-    ui.add(egui::Label::new(RichText::new(jazz_description(d.jazziness)).small().color(theme::dim())).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(jazz_description(d.jazziness))
+                .small()
+                .color(theme::dim()),
+        )
+        .wrap(),
+    );
     ui.add_space(6.0);
-    egui::Grid::new("bc_keyboard").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-        let k = &mut d.keyboard;
-        ui.label("Keyboard");
-        dropdown(ui, "bc_keys", format!("{} keys", k.keys), |ui| {
-            for (n, _, _) in keyboard::SIZES {
-                selectable_value(ui, &mut k.keys, n, format!("{n} keys"));
-            }
+    egui::Grid::new("bc_keyboard")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            let k = &mut d.keyboard;
+            ui.label("Keyboard");
+            dropdown(ui, "bc_keys", format!("{} keys", k.keys), |ui| {
+                for (n, _, _) in keyboard::SIZES {
+                    selectable_value(ui, &mut k.keys, n, format!("{n} keys"));
+                }
+            });
+            ui.end_row();
+            ui.label("Key labels");
+            dropdown(ui, "bc_labels", k.labels.label(), |ui| {
+                for l in KeyLabels::ALL {
+                    selectable_value(ui, &mut k.labels, l, l.label());
+                }
+            });
+            ui.end_row();
         });
-        ui.end_row();
-        ui.label("Key labels");
-        dropdown(ui, "bc_labels", k.labels.label(), |ui| {
-            for l in KeyLabels::ALL {
-                selectable_value(ui, &mut k.labels, l, l.label());
-            }
-        });
-        ui.end_row();
-    });
     let k = &mut d.keyboard;
     checkbox(ui, &mut k.ghost_next, "Outline the next chord");
     checkbox(ui, &mut k.show_bass, "Show my bass note");
-    checkbox(ui, &mut k.hide_chord_names, "Hide chord names (read the keyboard)");
+    checkbox(
+        ui,
+        &mut k.hide_chord_names,
+        "Hide chord names (read the keyboard)",
+    );
 }

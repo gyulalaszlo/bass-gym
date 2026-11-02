@@ -78,7 +78,12 @@ pub struct ClickConfig {
 
 impl Default for ClickConfig {
     fn default() -> Self {
-        Self { enabled: true, density: ClickDensity::Beat, accent_downbeat: true, volume: 0.8 }
+        Self {
+            enabled: true,
+            density: ClickDensity::Beat,
+            accent_downbeat: true,
+            volume: 0.8,
+        }
     }
 }
 
@@ -93,7 +98,11 @@ pub struct GrooveClickConfig {
 
 impl Default for GrooveClickConfig {
     fn default() -> Self {
-        Self { enabled: false, volume: 0.6, pitch: 40 }
+        Self {
+            enabled: false,
+            volume: 0.6,
+            pitch: 40,
+        }
     }
 }
 
@@ -115,7 +124,10 @@ impl Default for Span {
 pub enum Trigger {
     After(Span),
     /// The average hit rate ("good" or "ok" grades) of the last `bars` bars reaches `min_rate`.
-    Success { bars: u32, min_rate: f32 },
+    Success {
+        bars: u32,
+        min_rate: f32,
+    },
 }
 
 impl Default for Trigger {
@@ -135,7 +147,12 @@ pub struct TempoRamp {
 
 impl Default for TempoRamp {
     fn default() -> Self {
-        Self { enabled: false, target: 200.0, step: 5.0, every: Trigger::After(Span::Bars(32)) }
+        Self {
+            enabled: false,
+            target: 200.0,
+            step: 5.0,
+            every: Trigger::After(Span::Bars(32)),
+        }
     }
 }
 
@@ -150,7 +167,11 @@ pub struct ClickGap {
 
 impl Default for ClickGap {
     fn default() -> Self {
-        Self { enabled: false, play: Span::Bars(4), mute: Span::Bars(4) }
+        Self {
+            enabled: false,
+            play: Span::Bars(4),
+            mute: Span::Bars(4),
+        }
     }
 }
 
@@ -158,7 +179,9 @@ impl Default for ClickGap {
 pub enum StopCondition {
     Trigger(Trigger),
     /// Stop once the tempo ramp reached its target and `bars` more bars were played.
-    RampDone { bars: u32 },
+    RampDone {
+        bars: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -174,6 +197,11 @@ pub struct AutoStop {
 
 impl Default for AutoStop {
     fn default() -> Self {
-        Self { enabled: false, when: StopCondition::Trigger(Trigger::After(Span::Bars(64))), on_silence: false, silence_bars: 2 }
+        Self {
+            enabled: false,
+            when: StopCondition::Trigger(Trigger::After(Span::Bars(64))),
+            on_silence: false,
+            silence_bars: 2,
+        }
     }
 }

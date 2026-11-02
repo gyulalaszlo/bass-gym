@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Formats staged Rust files with rustfmt (settings in rustfmt.toml).
+#
+# - A file staged as a whole is formatted in place and re-staged.
+# - A file that also has unstaged changes is only checked: if its staged version isn't
+#   formatted the commit stops, so unstaged edits never slip into the commit.
+#
+# Install once per clone:  ln -sf ../../.githooks/pre-commit .git/hooks/pre-commit
+# Skip for one commit:     git commit --no-verify
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+command -v rustfmt >/dev/null 2>&1 || {
+    echo "pre-commit: rustfmt not found (rustup component add rustfmt)" >&2
+    exit 1
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+needs_format=()
+errors=0
+
+while IFS= read -r -d '' f; do
+    git show ":$f" >"$tmp/in"
+    # Formatting from stdin leaves `mod` children alone (they're checked on their own).
+    if ! rustfmt <"$tmp/in" >"$tmp/out" 2>"$tmp/err"; then
+        echo "pre-commit: rustfmt failed on $f:" >&2
+        cat "$tmp/err" >&2
+        errors=1
+        continue
+    fi
+    cmp -s "$tmp/in" "$tmp/out" && continue
+    if git diff --quiet -- "$f"; then
+        cp "$tmp/out" "$f"
+        git add -- "$f"
+        echo "pre-commit: formatted $f"
+    else
+        needs_format+=("$f")
+    fi
+done < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.rs')
+
+if ((${#needs_format[@]})); then
+    echo "pre-commit: these files have unstaged changes and their staged version isn't formatted:" >&2
+    printf '  %s\n' "${needs_format[@]}" >&2
+    echo "Run 'cargo fmt' (or format them in your editor), stage them, and commit again." >&2
+    errors=1
+fi
+exit $errors

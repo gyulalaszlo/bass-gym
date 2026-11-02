@@ -87,7 +87,15 @@ impl PitchTracker {
     fn analyze(&mut self) -> Option<PitchReading> {
         self.low.copy_latest(&mut self.scratch);
         self.full.copy_latest(&mut self.full_scratch);
-        estimate(&self.scratch, &self.full_scratch, self.sr, self.decim, self.gate_db, self.min_clarity, &mut self.nsdf)
+        estimate(
+            &self.scratch,
+            &self.full_scratch,
+            self.sr,
+            self.decim,
+            self.gate_db,
+            self.min_clarity,
+            &mut self.nsdf,
+        )
     }
 }
 
@@ -97,7 +105,10 @@ fn decimation(sr: f32) -> usize {
 
 fn lowpass(sr: f32, decim: usize) -> [Biquad; 2] {
     let cutoff = (sr / decim as f32 * 0.4).min(MAX_FREQ * 4.0);
-    [Biquad::lowpass(sr, cutoff, 0.54), Biquad::lowpass(sr, cutoff, 1.31)]
+    [
+        Biquad::lowpass(sr, cutoff, 0.54),
+        Biquad::lowpass(sr, cutoff, 1.31),
+    ]
 }
 
 /// One-shot pitch detection of a whole buffer, e.g. the samples of a single played
@@ -117,11 +128,27 @@ pub fn detect(samples: &[f32], sr: f32) -> Option<PitchReading> {
     // Skip the filter's settling time.
     let skip = (low.len() / 16).min(64);
     let mut buf = Vec::new();
-    estimate(&low[skip..], &samples[skip * decim..], sr, decim, -70.0, 0.75, &mut buf)
+    estimate(
+        &low[skip..],
+        &samples[skip * decim..],
+        sr,
+        decim,
+        -70.0,
+        0.75,
+        &mut buf,
+    )
 }
 
 /// MPM on a decimated window, refined on the matching full-rate samples.
-fn estimate(low: &[f32], full: &[f32], sr: f32, decim: usize, gate_db: f32, min_clarity: f32, nsdf_buf: &mut Vec<f32>) -> Option<PitchReading> {
+fn estimate(
+    low: &[f32],
+    full: &[f32],
+    sr: f32,
+    decim: usize,
+    gate_db: f32,
+    min_clarity: f32,
+    nsdf_buf: &mut Vec<f32>,
+) -> Option<PitchReading> {
     if low.len() < 64 {
         return None;
     }
@@ -156,11 +183,19 @@ fn estimate(low: &[f32], full: &[f32], sr: f32, decim: usize, gate_db: f32, min_
                 best = i;
             }
         }
-        if best + 1 < vals.len() { (lo - 1 + best) as f32 + parabolic(vals[best - 1], vals[best], vals[best + 1]).0 } else { est }
+        if best + 1 < vals.len() {
+            (lo - 1 + best) as f32 + parabolic(vals[best - 1], vals[best], vals[best + 1]).0
+        } else {
+            est
+        }
     } else {
         est
     };
-    Some(PitchReading { freq: sr / refined, clarity, rms_db })
+    Some(PitchReading {
+        freq: sr / refined,
+        clarity,
+        rms_db,
+    })
 }
 
 /// Normalized square difference function for lags `0..max_lag`.
@@ -182,7 +217,9 @@ fn nsdf_at(x: &[f32], tau: usize) -> f32 {
     let (r, m) = x[..n - tau]
         .iter()
         .zip(&x[tau..])
-        .fold((0.0f64, 0.0f64), |(r, m), (&a, &b)| (r + (a * b) as f64, m + (a * a + b * b) as f64));
+        .fold((0.0f64, 0.0f64), |(r, m), (&a, &b)| {
+            (r + (a * b) as f64, m + (a * a + b * b) as f64)
+        });
     if m > 1e-12 { (2.0 * r / m) as f32 } else { 0.0 }
 }
 
@@ -208,7 +245,11 @@ fn pick_peak(n: &[f32], min_tau: usize, max_tau: usize) -> Option<(f32, f32)> {
     let mut cur: Option<(usize, f32)> = None;
     while tau < n.len() - 1 && tau <= max_tau {
         if n[tau] > 0.0 {
-            if n[tau] >= n[tau - 1] && n[tau] >= n[tau + 1] && cur.is_none_or(|c| n[tau] > c.1) && tau >= min_tau {
+            if n[tau] >= n[tau - 1]
+                && n[tau] >= n[tau + 1]
+                && cur.is_none_or(|c| n[tau] > c.1)
+                && tau >= min_tau
+            {
                 cur = Some((tau, n[tau]));
             }
         } else if let Some(c) = cur.take() {
@@ -234,7 +275,11 @@ mod tests {
         (0..(sr * secs) as usize)
             .map(|i| {
                 let t = i as f32 / sr;
-                amps.iter().enumerate().map(|(h, a)| a * (TAU * freq * (h + 1) as f32 * t + h as f32).sin()).sum::<f32>() * 0.2
+                amps.iter()
+                    .enumerate()
+                    .map(|(h, a)| a * (TAU * freq * (h + 1) as f32 * t + h as f32).sin())
+                    .sum::<f32>()
+                    * 0.2
             })
             .collect()
     }
@@ -255,9 +300,14 @@ mod tests {
         for sr in [44_100.0, 48_000.0, 96_000.0] {
             for midi in [23, 28, 33, 38, 43, 52, 60, 67] {
                 let freq = 440.0 * 2f32.powf((midi as f32 - 69.0) / 12.0);
-                let r = measure(sr, &bass_tone(sr, freq, 0.6)).unwrap_or_else(|| panic!("no reading for {midi} @ {sr}"));
+                let r = measure(sr, &bass_tone(sr, freq, 0.6))
+                    .unwrap_or_else(|| panic!("no reading for {midi} @ {sr}"));
                 let cents = 1200.0 * (r.freq / freq).log2();
-                assert!(cents.abs() < 1.0, "midi {midi} @ {sr}: {} Hz vs {freq} ({cents:.2} cents)", r.freq);
+                assert!(
+                    cents.abs() < 1.0,
+                    "midi {midi} @ {sr}: {} Hz vs {freq} ({cents:.2} cents)",
+                    r.freq
+                );
             }
         }
     }
@@ -277,8 +327,11 @@ mod tests {
             .map(|i| {
                 let t = i as f32 / sr;
                 seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let click = ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * (-t / 0.0015).exp() * 0.3;
-                let tone: f32 = (1..6).map(|h| (TAU * freq * h as f32 * t).sin() / h as f32).sum();
+                let click =
+                    ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * (-t / 0.0015).exp() * 0.3;
+                let tone: f32 = (1..6)
+                    .map(|h| (TAU * freq * h as f32 * t).sin() / h as f32)
+                    .sum();
                 0.4 * ((t / 0.002).min(1.0) * (-t / 1.0).exp() * tone + click)
             })
             .collect()
@@ -290,7 +343,8 @@ mod tests {
         for midi in [23, 28, 33, 40, 45, 52, 60] {
             let freq = 440.0 * 2f32.powf((midi as f32 - 69.0) / 12.0);
             for secs in [0.1, 0.4] {
-                let r = detect(&pluck(sr, freq, secs), sr).unwrap_or_else(|| panic!("midi {midi}, {secs}s"));
+                let r = detect(&pluck(sr, freq, secs), sr)
+                    .unwrap_or_else(|| panic!("midi {midi}, {secs}s"));
                 let cents = 1200.0 * (r.freq / freq).log2();
                 assert!(cents.abs() < 5.0, "midi {midi} {secs}s: {cents} cents");
             }

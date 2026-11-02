@@ -26,16 +26,27 @@ impl SoundFontSource {
     pub fn new(path: &Path) -> Option<Self> {
         let stem = path.file_stem()?.to_str()?;
         let name = info_name(path).unwrap_or_else(|| stem.to_owned());
-        Some(Self { id: format!("sf2:{stem}"), name, path: path.to_owned(), font: OnceLock::new() })
+        Some(Self {
+            id: format!("sf2:{stem}"),
+            name,
+            path: path.to_owned(),
+            font: OnceLock::new(),
+        })
     }
 
     fn font(&self) -> Result<Arc<SoundFont>, String> {
         self.font
             .get_or_init(|| {
                 let started = std::time::Instant::now();
-                let mut file = std::io::BufReader::new(std::fs::File::open(&self.path).map_err(|e| e.to_string())?);
+                let mut file = std::io::BufReader::new(
+                    std::fs::File::open(&self.path).map_err(|e| e.to_string())?,
+                );
                 let font = SoundFont::new(&mut file).map_err(|e| format!("{e:?}"))?;
-                log::info!("loaded {} in {:.0} ms", self.path.display(), started.elapsed().as_secs_f64() * 1000.0);
+                log::info!(
+                    "loaded {} in {:.0} ms",
+                    self.path.display(),
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
                 Ok(Arc::new(font))
             })
             .clone()
@@ -53,10 +64,16 @@ impl SoundSource for SoundFontSource {
         &[SoundRole::Pitched]
     }
     fn create(&self, sample_rate: f32) -> Box<dyn Voice> {
-        match self.font().and_then(|f| SoundFontVoice::new(&f, sample_rate)) {
+        match self
+            .font()
+            .and_then(|f| SoundFontVoice::new(&f, sample_rate))
+        {
             Ok(v) => Box::new(v),
             Err(e) => {
-                log::warn!("can't play {}: {e}; using the FM e-piano", self.path.display());
+                log::warn!(
+                    "can't play {}: {e}; using the FM e-piano",
+                    self.path.display()
+                );
                 Box::new(crate::FmPiano::new(sample_rate))
             }
         }
@@ -68,17 +85,24 @@ fn info_name(path: &Path) -> Option<String> {
     let mut head = vec![0u8; 4096];
     let n = std::fs::File::open(path).ok()?.read(&mut head).ok()?;
     let head = &head[..n];
-    if head.get(0..4)? != b"RIFF" || head.get(8..12)? != b"sfbk" || head.get(12..16)? != b"LIST" || head.get(20..24)? != b"INFO" {
+    if head.get(0..4)? != b"RIFF"
+        || head.get(8..12)? != b"sfbk"
+        || head.get(12..16)? != b"LIST"
+        || head.get(20..24)? != b"INFO"
+    {
         return None;
     }
-    let info_end = (24 + u32::from_le_bytes(head.get(16..20)?.try_into().ok()?) as usize - 4).min(head.len());
+    let info_end =
+        (24 + u32::from_le_bytes(head.get(16..20)?.try_into().ok()?) as usize - 4).min(head.len());
     let mut pos = 24;
     while pos + 8 <= info_end {
         let id = &head[pos..pos + 4];
         let len = u32::from_le_bytes(head[pos + 4..pos + 8].try_into().ok()?) as usize;
         let body = head.get(pos + 8..(pos + 8 + len).min(head.len()))?;
         if id == b"INAM" {
-            let s = String::from_utf8_lossy(body.split(|&b| b == 0).next()?).trim().to_owned();
+            let s = String::from_utf8_lossy(body.split(|&b| b == 0).next()?)
+                .trim()
+                .to_owned();
             return (!s.is_empty()).then_some(s);
         }
         pos += 8 + len + len % 2;
@@ -120,14 +144,24 @@ impl SoundFontVoice {
             synth.process_midi_message(0, 0xB0, 0x00, p.get_bank_number());
             synth.process_midi_message(0, 0xC0, p.get_patch_number(), 0);
         }
-        Ok(Self { synth, left: [0.0; BLOCK], right: [0.0; BLOCK], held: [0; 128], gain: 1.0 })
+        Ok(Self {
+            synth,
+            left: [0.0; BLOCK],
+            right: [0.0; BLOCK],
+            held: [0; 128],
+            gain: 1.0,
+        })
     }
 }
 
 impl Voice for SoundFontVoice {
     fn trigger(&mut self, ev: &SoundEvent) {
         let (midi, velocity, duration) = match ev.kind {
-            SoundKind::Note { midi, velocity, duration } => (midi, velocity, duration),
+            SoundKind::Note {
+                midi,
+                velocity,
+                duration,
+            } => (midi, velocity, duration),
             SoundKind::Click(_) => (72.0, 0.6, 0.1),
         };
         let key = midi.round().clamp(0.0, 127.0) as usize;
@@ -152,7 +186,10 @@ impl Voice for SoundFontVoice {
                     }
                 }
             }
-            let (l, r) = (&mut self.left[..chunk.len()], &mut self.right[..chunk.len()]);
+            let (l, r) = (
+                &mut self.left[..chunk.len()],
+                &mut self.right[..chunk.len()],
+            );
             self.synth.render(l, r);
             for ((o, a), b) in chunk.iter_mut().zip(l.iter()).zip(r.iter()) {
                 *o += (a + b) * 0.5 * LEVEL * self.gain;

@@ -66,7 +66,12 @@ fn close_voicing(order: &[u8], bottom: u8) -> Vec<u8> {
 
 /// Sum over notes of the distance to the nearest note of the other chord, both ways.
 fn movement(a: &[u8], b: &[u8]) -> f32 {
-    let near = |n: u8, set: &[u8]| set.iter().map(|&m| (n as i32 - m as i32).unsigned_abs()).min().unwrap_or(0) as f32;
+    let near = |n: u8, set: &[u8]| {
+        set.iter()
+            .map(|&m| (n as i32 - m as i32).unsigned_abs())
+            .min()
+            .unwrap_or(0) as f32
+    };
     a.iter().map(|&n| near(n, b)).sum::<f32>() + b.iter().map(|&n| near(n, a)).sum::<f32>()
 }
 
@@ -79,7 +84,9 @@ fn mean(v: &[u8]) -> f32 {
 pub fn voice(chord: &Chord, prev: Option<&[u8]>, jazziness: f32, rng: &mut impl Rng) -> Vec<u8> {
     let j = jazziness.clamp(0.0, 1.0);
     let pcs = rh_pitch_classes(chord, j);
-    let prev_rh: Vec<u8> = prev.map(|p| p.iter().copied().filter(|&n| n >= RH_LOW).collect()).unwrap_or_default();
+    let prev_rh: Vec<u8> = prev
+        .map(|p| p.iter().copied().filter(|&n| n >= RH_LOW).collect())
+        .unwrap_or_default();
 
     let mut best: Option<(f32, Vec<u8>)> = None;
     for r in 0..pcs.len() {
@@ -115,7 +122,9 @@ pub fn voice(chord: &Chord, prev: Option<&[u8]>, jazziness: f32, rng: &mut impl 
             }
         }
     }
-    let mut notes = best.map(|b| b.1).unwrap_or_else(|| close_voicing(&pcs, RH_LOW + pcs[0] % 12));
+    let mut notes = best
+        .map(|b| b.1)
+        .unwrap_or_else(|| close_voicing(&pcs, RH_LOW + pcs[0] % 12));
 
     // Left hand.
     let rh_low = notes[0];
@@ -141,7 +150,10 @@ mod tests {
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
 
-    const C: Scale = Scale { root: 0, mode: Mode::Ionian };
+    const C: Scale = Scale {
+        root: 0,
+        mode: Mode::Ionian,
+    };
 
     fn chain(chords: &[Chord], j: f32) -> Vec<Vec<u8>> {
         let mut rng = ChaCha8Rng::seed_from_u64(1);
@@ -159,9 +171,15 @@ mod tests {
             let scale = Scale { root: 5, mode };
             for size in 3..=7 {
                 for j in [0.0, 0.3, 0.6, 0.9] {
-                    let chords: Vec<Chord> = (0..7).map(|d| scale.realize(ChordSpec { degree: d, size })).collect();
+                    let chords: Vec<Chord> = (0..7)
+                        .map(|d| scale.realize(ChordSpec { degree: d, size }))
+                        .collect();
                     for (c, v) in chords.iter().zip(chain(&chords, j)) {
-                        assert!(v.iter().all(|&n| (LH_LOW..=RH_HIGH).contains(&n)), "{} {v:?}", c.name());
+                        assert!(
+                            v.iter().all(|&n| (LH_LOW..=RH_HIGH).contains(&n)),
+                            "{} {v:?}",
+                            c.name()
+                        );
                         assert!(v.windows(2).all(|w| w[0] < w[1]), "{v:?}");
                         let pcs: Vec<u8> = v.iter().map(|n| n % 12).collect();
                         assert!(pcs.contains(&c.third()), "{} {v:?}", c.name());
@@ -179,13 +197,30 @@ mod tests {
 
     #[test]
     fn voice_leading_moves_less_than_root_position() {
-        let chords: Vec<Chord> = [1, 4, 0, 0].iter().map(|&d| C.realize(ChordSpec { degree: d, size: 4 })).collect();
+        let chords: Vec<Chord> = [1, 4, 0, 0]
+            .iter()
+            .map(|&d| C.realize(ChordSpec { degree: d, size: 4 }))
+            .collect();
         let led = chain(&chords, 0.3);
-        let rh = |v: &Vec<u8>| v.iter().copied().filter(|&n| n >= RH_LOW).collect::<Vec<u8>>();
-        let led_moves: f32 = led.windows(2).map(|w| movement(&rh(&w[0]), &rh(&w[1]))).sum();
-        let root_pos: Vec<Vec<u8>> = chords.iter().map(|c| close_voicing(&c.tones(), 48 + c.root())).collect();
+        let rh = |v: &Vec<u8>| {
+            v.iter()
+                .copied()
+                .filter(|&n| n >= RH_LOW)
+                .collect::<Vec<u8>>()
+        };
+        let led_moves: f32 = led
+            .windows(2)
+            .map(|w| movement(&rh(&w[0]), &rh(&w[1])))
+            .sum();
+        let root_pos: Vec<Vec<u8>> = chords
+            .iter()
+            .map(|c| close_voicing(&c.tones(), 48 + c.root()))
+            .collect();
         let root_moves: f32 = root_pos.windows(2).map(|w| movement(&w[0], &w[1])).sum();
-        assert!(led_moves < root_moves, "led {led_moves} vs root position {root_moves}: {led:?}");
+        assert!(
+            led_moves < root_moves,
+            "led {led_moves} vs root position {root_moves}: {led:?}"
+        );
         // ii7 -> V7 with good voice leading moves only a couple of semitones in total per voice.
         assert!(movement(&rh(&led[0]), &rh(&led[1])) <= 8.0, "{led:?}");
     }

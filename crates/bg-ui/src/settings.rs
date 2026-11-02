@@ -27,7 +27,12 @@ impl SettingsStore {
                 }
             })
             .unwrap_or_default();
-        Self { path, table, revision: 0, dirty: false }
+        Self {
+            path,
+            table,
+            revision: 0,
+            dirty: false,
+        }
     }
 
     pub fn in_memory() -> Self {
@@ -108,7 +113,8 @@ mod tests {
         s.set("a", &A { x: 2.5, name: None });
         assert_eq!(s.revision(), 1);
         assert_eq!(s.get::<A>("a").x, 2.5);
-        s.table.insert("b".into(), toml::Value::String("garbage".into()));
+        s.table
+            .insert("b".into(), toml::Value::String("garbage".into()));
         assert_eq!(s.get::<A>("b"), A::default());
     }
 }

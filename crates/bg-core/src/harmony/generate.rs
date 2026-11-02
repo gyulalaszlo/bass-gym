@@ -26,12 +26,23 @@ fn jazz_size(jazziness: f32, rng: &mut impl Rng) -> u8 {
 
 /// Adds colour to a written chord: it never gets smaller than written.
 pub fn colourize(spec: ChordSpec, jazziness: f32, rng: &mut impl Rng) -> ChordSpec {
-    ChordSpec { degree: spec.degree, size: spec.size.max(jazz_size(jazziness, rng)) }
+    ChordSpec {
+        degree: spec.degree,
+        size: spec.size.max(jazz_size(jazziness, rng)),
+    }
 }
 
 /// Realizes a written progression with colour.
-pub fn resolve(specs: &[ChordSpec], scale: &Scale, jazziness: f32, rng: &mut impl Rng) -> Vec<Chord> {
-    specs.iter().map(|&s| scale.realize(colourize(s, jazziness, rng))).collect()
+pub fn resolve(
+    specs: &[ChordSpec],
+    scale: &Scale,
+    jazziness: f32,
+    rng: &mut impl Rng,
+) -> Vec<Chord> {
+    specs
+        .iter()
+        .map(|&s| scale.realize(colourize(s, jazziness, rng)))
+        .collect()
 }
 
 fn shares_tone(a: &Chord, b: &Chord) -> bool {
@@ -44,7 +55,12 @@ fn shares_tone(a: &Chord, b: &Chord) -> bool {
 /// home, and makes each chord share at least one note with the previous one: when a
 /// move would share none, the new chord is first extended (a seventh or ninth usually
 /// creates the common tone), and only then re-picked.
-pub fn random_progression(scale: &Scale, len: usize, jazziness: f32, rng: &mut impl Rng) -> Vec<Chord> {
+pub fn random_progression(
+    scale: &Scale,
+    len: usize,
+    jazziness: f32,
+    rng: &mut impl Rng,
+) -> Vec<Chord> {
     // Weighted successors for each degree (0 = I .. 6 = VII).
     const NEXT: [&[(usize, u32)]; 7] = [
         &[(3, 3), (4, 3), (5, 3), (1, 2), (2, 1)],
@@ -70,7 +86,16 @@ pub fn random_progression(scale: &Scale, len: usize, jazziness: f32, rng: &mut i
                     .iter()
                     .filter(|o| !tried.contains(&o.0))
                     // Jazz: favour moves into ii and from ii into V.
-                    .map(|&(d, w)| (d, w + if d == 1 || (prev.degree == 1 && d == 4) { (j * 6.0) as u32 } else { 0 }))
+                    .map(|&(d, w)| {
+                        (
+                            d,
+                            w + if d == 1 || (prev.degree == 1 && d == 4) {
+                                (j * 6.0) as u32
+                            } else {
+                                0
+                            },
+                        )
+                    })
                     .collect();
                 if opts.is_empty() {
                     break scale.realize(colourize(ChordSpec { degree: 4, size: 4 }, j, rng));
@@ -123,7 +148,12 @@ mod tests {
                     assert_eq!(a.len(), 8);
                     assert_eq!(a[0].degree, 0);
                     for w in a.windows(2) {
-                        assert!(shares_tone(&w[0], &w[1]), "{} -> {} ({mode:?}, seed {seed}, j {j})", w[0].name(), w[1].name());
+                        assert!(
+                            shares_tone(&w[0], &w[1]),
+                            "{} -> {} ({mode:?}, seed {seed}, j {j})",
+                            w[0].name(),
+                            w[1].name()
+                        );
                     }
                 }
             }
@@ -135,7 +165,9 @@ mod tests {
         let scale = Scale::default();
         let avg_size = |j: f32| {
             let mut rng = ChaCha8Rng::seed_from_u64(3);
-            let chords: Vec<Chord> = (0..50).flat_map(|_| random_progression(&scale, 8, j, &mut rng)).collect();
+            let chords: Vec<Chord> = (0..50)
+                .flat_map(|_| random_progression(&scale, 8, j, &mut rng))
+                .collect();
             chords.iter().map(|c| c.tones().len()).sum::<usize>() as f32 / chords.len() as f32
         };
         let (plain, mid, jazz) = (avg_size(0.0), avg_size(0.5), avg_size(1.0));

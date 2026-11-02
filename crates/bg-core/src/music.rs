@@ -31,7 +31,9 @@ impl TimeSignature {
     }
 }
 
-const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const NOTE_NAMES: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
 
 /// Returns the nearest MIDI note and the deviation from it in cents.
 pub fn freq_to_midi(freq: f32, a4: f32) -> (i32, f32) {

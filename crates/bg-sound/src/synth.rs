@@ -27,7 +27,11 @@ pub struct SineClick {
 
 impl SineClick {
     pub fn new(sr: f32) -> Self {
-        Self { sr, pings: [Ping::default(); SLOTS], next: 0 }
+        Self {
+            sr,
+            pings: [Ping::default(); SLOTS],
+            next: 0,
+        }
     }
 }
 
@@ -39,7 +43,12 @@ impl Voice for SineClick {
             SoundKind::Click(ClickKind::Sub) => (1000.0, 0.4),
             SoundKind::Note { midi, velocity, .. } => (midi_to_freq(midi + 36.0, 440.0), velocity),
         };
-        self.pings[self.next] = Ping { phase: 0.0, inc: freq / self.sr, amp: level * ev.gain, decay: (-1.0 / (0.012 * self.sr)).exp() };
+        self.pings[self.next] = Ping {
+            phase: 0.0,
+            inc: freq / self.sr,
+            amp: level * ev.gain,
+            decay: (-1.0 / (0.012 * self.sr)).exp(),
+        };
         self.next = (self.next + 1) % SLOTS;
     }
 
@@ -67,7 +76,11 @@ pub struct Woodblock {
 
 impl Woodblock {
     pub fn new(sr: f32) -> Self {
-        Self { sr, pings: [[Ping::default(); 2]; SLOTS], next: 0 }
+        Self {
+            sr,
+            pings: [[Ping::default(); 2]; SLOTS],
+            next: 0,
+        }
     }
 }
 
@@ -81,8 +94,18 @@ impl Voice for Woodblock {
         };
         let amp = level * ev.gain;
         self.pings[self.next] = [
-            Ping { phase: 0.0, inc: base / self.sr, amp: amp * 0.65, decay: (-1.0 / (0.025 * self.sr)).exp() },
-            Ping { phase: 0.0, inc: base * 2.76 / self.sr, amp: amp * 0.3, decay: (-1.0 / (0.008 * self.sr)).exp() },
+            Ping {
+                phase: 0.0,
+                inc: base / self.sr,
+                amp: amp * 0.65,
+                decay: (-1.0 / (0.025 * self.sr)).exp(),
+            },
+            Ping {
+                phase: 0.0,
+                inc: base * 2.76 / self.sr,
+                amp: amp * 0.3,
+                decay: (-1.0 / (0.008 * self.sr)).exp(),
+            },
         ];
         self.next = (self.next + 1) % SLOTS;
     }
@@ -124,14 +147,22 @@ pub struct PluckBass {
 
 impl PluckBass {
     pub fn new(sr: f32) -> Self {
-        Self { sr, notes: [Pluck::default(); SLOTS], next: 0 }
+        Self {
+            sr,
+            notes: [Pluck::default(); SLOTS],
+            next: 0,
+        }
     }
 }
 
 impl Voice for PluckBass {
     fn trigger(&mut self, ev: &SoundEvent) {
         let (midi, vel, dur) = match ev.kind {
-            SoundKind::Note { midi, velocity, duration } => (midi, velocity, duration),
+            SoundKind::Note {
+                midi,
+                velocity,
+                duration,
+            } => (midi, velocity, duration),
             SoundKind::Click(ClickKind::Accent) => (45.0, 1.0, 0.12),
             SoundKind::Click(ClickKind::Beat) => (40.0, 0.8, 0.12),
             SoundKind::Click(ClickKind::Sub) => (40.0, 0.5, 0.08),
@@ -196,14 +227,22 @@ pub struct FmPiano {
 
 impl FmPiano {
     pub fn new(sr: f32) -> Self {
-        Self { sr, notes: [FmNote::default(); 16], next: 0 }
+        Self {
+            sr,
+            notes: [FmNote::default(); 16],
+            next: 0,
+        }
     }
 }
 
 impl Voice for FmPiano {
     fn trigger(&mut self, ev: &SoundEvent) {
         let (midi, vel, dur) = match ev.kind {
-            SoundKind::Note { midi, velocity, duration } => (midi, velocity, duration),
+            SoundKind::Note {
+                midi,
+                velocity,
+                duration,
+            } => (midi, velocity, duration),
             SoundKind::Click(_) => (72.0, 0.6, 0.1),
         };
         self.notes[self.next] = FmNote {

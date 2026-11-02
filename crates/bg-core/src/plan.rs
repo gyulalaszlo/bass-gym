@@ -139,7 +139,11 @@ impl Planner {
         let mut clicks = Vec::new();
         let click = &self.cfg.click;
         if index < 0 || (click.enabled && !muted) {
-            let per_beat = if index < 0 { 1 } else { click.density.per_beat() };
+            let per_beat = if index < 0 {
+                1
+            } else {
+                click.density.per_beat()
+            };
             let tpb = sig.ticks_per_beat();
             let (step, count) = match tpb.checked_div(per_beat) {
                 Some(step) => (step, sig.num * per_beat),
@@ -154,7 +158,10 @@ impl Planner {
                 } else {
                     ClickKind::Sub
                 };
-                clicks.push(PlannedClick { time: start + pos as f64 * spt, kind });
+                clicks.push(PlannedClick {
+                    time: start + pos as f64 * spt,
+                    kind,
+                });
             }
         }
 
@@ -165,19 +172,33 @@ impl Planner {
                 .groove
                 .bar_notes(sig, index as u32)
                 .into_iter()
-                .map(|n| PlannedNote { time: start + n.pos as f64 * spt, len: n.len as f64 * spt, accent: n.accent })
+                .map(|n| PlannedNote {
+                    time: start + n.pos as f64 * spt,
+                    len: n.len as f64 * spt,
+                    accent: n.accent,
+                })
                 .collect()
         };
 
         self.next_index += 1;
         self.next_time = start + duration;
-        Some(BarPlan { index, start, duration, bpm: self.bpm, beats: sig.num, muted, clicks, notes })
+        Some(BarPlan {
+            index,
+            start,
+            duration,
+            bpm: self.bpm,
+            beats: sig.num,
+            muted,
+            clicks,
+            notes,
+        })
     }
 
     fn start_of_bar0(&self) -> f64 {
         // Count-in bars are always at the initial tempo, so bar 0's start is known up front.
         let sig = self.cfg.time_sig;
-        let bar = sig.ticks_per_bar() as f64 * sig.seconds_per_tick(self.cfg.tempo.clamp(20.0, 400.0));
+        let bar =
+            sig.ticks_per_bar() as f64 * sig.seconds_per_tick(self.cfg.tempo.clamp(20.0, 400.0));
         self.start + self.cfg.count_in_bars as f64 * bar
     }
 
@@ -190,10 +211,20 @@ impl Planner {
             self.ramp_done_at = Some(index);
             return;
         }
-        let fire = trigger_fired(ramp.every, index, self.tempo_since_bar, elapsed - self.tempo_since_time, progress);
+        let fire = trigger_fired(
+            ramp.every,
+            index,
+            self.tempo_since_bar,
+            elapsed - self.tempo_since_time,
+            progress,
+        );
         if fire {
             let step = ramp.step.abs().max(0.1);
-            self.bpm = if ramp.target > self.bpm { (self.bpm + step).min(ramp.target) } else { (self.bpm - step).max(ramp.target) };
+            self.bpm = if ramp.target > self.bpm {
+                (self.bpm + step).min(ramp.target)
+            } else {
+                (self.bpm - step).max(ramp.target)
+            };
             self.tempo_since_bar = index;
             self.tempo_since_time = elapsed;
             if (self.bpm - ramp.target).abs() < 1e-3 {
@@ -219,13 +250,29 @@ impl Planner {
 
     /// Returns whether the clicks of this bar are muted.
     fn update_gap(&mut self, index: i64, elapsed: f64) -> bool {
-        let ClickGap { enabled, play, mute } = self.cfg.gap;
+        let ClickGap {
+            enabled,
+            play,
+            mute,
+        } = self.cfg.gap;
         if !enabled {
             return false;
         }
-        let span = if self.gap_phase == GapPhase::Play { play } else { mute };
-        if span_elapsed(span, index - self.gap_since_bar, elapsed - self.gap_since_time) {
-            self.gap_phase = if self.gap_phase == GapPhase::Play { GapPhase::Mute } else { GapPhase::Play };
+        let span = if self.gap_phase == GapPhase::Play {
+            play
+        } else {
+            mute
+        };
+        if span_elapsed(
+            span,
+            index - self.gap_since_bar,
+            elapsed - self.gap_since_time,
+        ) {
+            self.gap_phase = if self.gap_phase == GapPhase::Play {
+                GapPhase::Mute
+            } else {
+                GapPhase::Play
+            };
             self.gap_since_bar = index;
             self.gap_since_time = elapsed;
         }
@@ -241,7 +288,13 @@ fn span_elapsed(span: Span, bars: i64, seconds: f64) -> bool {
     }
 }
 
-fn trigger_fired(trigger: Trigger, index: i64, since_bar: i64, since_seconds: f64, progress: &dyn Progress) -> bool {
+fn trigger_fired(
+    trigger: Trigger,
+    index: i64,
+    since_bar: i64,
+    since_seconds: f64,
+    progress: &dyn Progress,
+) -> bool {
     match trigger {
         Trigger::After(span) => span_elapsed(span, index - since_bar, since_seconds),
         Trigger::Success { bars, min_rate } => {
@@ -276,7 +329,11 @@ mod tests {
 
     #[test]
     fn count_in_and_timing() {
-        let cfg = SessionConfig { tempo: 120.0, count_in_bars: 1, ..Default::default() };
+        let cfg = SessionConfig {
+            tempo: 120.0,
+            count_in_bars: 1,
+            ..Default::default()
+        };
         let bars = plan_all(cfg, 3);
         assert_eq!(bars[0].index, -1);
         assert!(bars[0].notes.is_empty());
@@ -294,8 +351,17 @@ mod tests {
         let cfg = SessionConfig {
             tempo: 100.0,
             count_in_bars: 0,
-            ramp: TempoRamp { enabled: true, target: 110.0, step: 5.0, every: Trigger::After(Span::Bars(2)) },
-            auto_stop: AutoStop { enabled: true, when: StopCondition::RampDone { bars: 2 }, ..Default::default() },
+            ramp: TempoRamp {
+                enabled: true,
+                target: 110.0,
+                step: 5.0,
+                every: Trigger::After(Span::Bars(2)),
+            },
+            auto_stop: AutoStop {
+                enabled: true,
+                when: StopCondition::RampDone { bars: 2 },
+                ..Default::default()
+            },
             ..Default::default()
         };
         let bpms: Vec<f32> = plan_all(cfg, 100).iter().map(|b| b.bpm).collect();
@@ -307,7 +373,12 @@ mod tests {
         let cfg = SessionConfig {
             tempo: 100.0,
             count_in_bars: 0,
-            ramp: TempoRamp { enabled: true, target: 92.0, step: 5.0, every: Trigger::After(Span::Bars(1)) },
+            ramp: TempoRamp {
+                enabled: true,
+                target: 92.0,
+                step: 5.0,
+                every: Trigger::After(Span::Bars(1)),
+            },
             ..Default::default()
         };
         let bpms: Vec<f32> = plan_all(cfg, 4).iter().map(|b| b.bpm).collect();
@@ -318,15 +389,26 @@ mod tests {
     fn click_gap_cycle() {
         let cfg = SessionConfig {
             count_in_bars: 1,
-            gap: ClickGap { enabled: true, play: Span::Bars(2), mute: Span::Bars(1) },
+            gap: ClickGap {
+                enabled: true,
+                play: Span::Bars(2),
+                mute: Span::Bars(1),
+            },
             ..Default::default()
         };
         let muted: Vec<bool> = plan_all(cfg, 8).iter().map(|b| b.muted).collect();
-        assert_eq!(muted, vec![false, false, false, true, false, false, true, false]);
+        assert_eq!(
+            muted,
+            vec![false, false, false, true, false, false, true, false]
+        );
         let cfg = SessionConfig {
             tempo: 120.0,
             count_in_bars: 0,
-            gap: ClickGap { enabled: true, play: Span::Seconds(4.0), mute: Span::Seconds(2.0) },
+            gap: ClickGap {
+                enabled: true,
+                play: Span::Seconds(4.0),
+                mute: Span::Seconds(2.0),
+            },
             ..Default::default()
         };
         let bars = plan_all(cfg, 6);
@@ -341,7 +423,11 @@ mod tests {
         let cfg = SessionConfig {
             tempo: 120.0,
             count_in_bars: 2,
-            auto_stop: AutoStop { enabled: true, when: StopCondition::Trigger(Trigger::After(Span::Seconds(8.0))), ..Default::default() },
+            auto_stop: AutoStop {
+                enabled: true,
+                when: StopCondition::Trigger(Trigger::After(Span::Seconds(8.0))),
+                ..Default::default()
+            },
             ..Default::default()
         };
         assert_eq!(plan_all(cfg, 100).len(), 2 + 4);
@@ -359,7 +445,15 @@ mod tests {
         let cfg = SessionConfig {
             tempo: 100.0,
             count_in_bars: 0,
-            ramp: TempoRamp { enabled: true, target: 200.0, step: 10.0, every: Trigger::Success { bars: 2, min_rate: 0.9 } },
+            ramp: TempoRamp {
+                enabled: true,
+                target: 200.0,
+                step: 10.0,
+                every: Trigger::Success {
+                    bars: 2,
+                    min_rate: 0.9,
+                },
+            },
             ..Default::default()
         };
         let rates = Rates(vec![0.5, 1.0, 0.9, 1.0, 1.0, 1.0, 1.0]);

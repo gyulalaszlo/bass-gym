@@ -15,7 +15,10 @@ pub(crate) enum OutMsg {
 pub(crate) enum ControlMsg {
     Voice(Slot, Box<dyn Voice>),
     Master(f32),
-    Monitor { enabled: bool, gain: f32 },
+    Monitor {
+        enabled: bool,
+        gain: f32,
+    },
     /// Low-pass cutoff (Hz) for the instrument slot; `None` = unfiltered.
     InstrumentLowpass(Option<f32>),
     /// Raw input samples and their sample rate, for monitoring.
@@ -46,7 +49,16 @@ struct Monitor {
 impl Monitor {
     fn new(src: Consumer<f32>, in_rate: u32, out_rate: u32) -> Self {
         let target = (in_rate as usize / 100).max(64);
-        Self { src, step: in_rate as f64 / out_rate.max(1) as f64, pos: 0.0, cur: 0.0, next: 0.0, target, max: target + in_rate as usize / 25, priming: true }
+        Self {
+            src,
+            step: in_rate as f64 / out_rate.max(1) as f64,
+            pos: 0.0,
+            cur: 0.0,
+            next: 0.0,
+            target,
+            max: target + in_rate as usize / 25,
+            priming: true,
+        }
     }
 
     fn skip(&mut self, n: usize) {
@@ -167,7 +179,11 @@ impl OutputState {
         self.monitor_gain = gain;
     }
 
-    pub fn process<T: cpal::SizedSample + cpal::FromSample<f32>>(&mut self, data: &mut [T], info: &cpal::OutputCallbackInfo) {
+    pub fn process<T: cpal::SizedSample + cpal::FromSample<f32>>(
+        &mut self,
+        data: &mut [T],
+        info: &cpal::OutputCallbackInfo,
+    ) {
         let ts = info.timestamp();
         self.clock.publish(ClockSnapshot {
             frames: self.frames,
@@ -188,7 +204,10 @@ impl OutputState {
                 ControlMsg::Monitor { enabled, gain } => self.set_monitor(enabled, gain),
                 ControlMsg::InstrumentLowpass(cutoff) => self.set_lowpass(cutoff),
                 ControlMsg::MonitorSource(src, rate) => {
-                    if let Some(old) = self.monitor.replace(Monitor::new(src, rate, self.sample_rate)) {
+                    if let Some(old) =
+                        self.monitor
+                            .replace(Monitor::new(src, rate, self.sample_rate))
+                    {
                         let _ = self.garbage.push(Garbage::Monitor(old.src));
                     }
                 }
@@ -237,7 +256,10 @@ impl OutputState {
                 v.render(buf);
                 if self.lowpass.is_some() {
                     for x in buf.iter_mut() {
-                        *x = self.lowpass_filters.iter_mut().fold(*x, |y, f| f.process(y));
+                        *x = self
+                            .lowpass_filters
+                            .iter_mut()
+                            .fold(*x, |y, f| f.process(y));
                     }
                 }
                 mix.iter_mut().zip(buf.iter()).for_each(|(m, x)| *m += x);
@@ -261,7 +283,11 @@ impl OutputState {
 }
 
 fn soft_clip(x: f32) -> f32 {
-    if x.abs() < 0.8 { x } else { x.signum() * (0.8 + 0.2 * ((x.abs() - 0.8) / 0.2).tanh()) }
+    if x.abs() < 0.8 {
+        x
+    } else {
+        x.signum() * (0.8 + 0.2 * ((x.abs() - 0.8) / 0.2).tanh())
+    }
 }
 
 #[cfg(test)]
@@ -280,7 +306,11 @@ mod tests {
         }
         let out: Vec<f32> = (0..1_000).map(|_| m.sample()).collect();
         let diffs: Vec<f32> = out.windows(2).skip(2).map(|w| w[1] - w[0]).collect();
-        assert!(diffs.iter().all(|d| (d - 44_100.0 / 48_000.0).abs() < 1e-3), "{:?}", &diffs[..8]);
+        assert!(
+            diffs.iter().all(|d| (d - 44_100.0 / 48_000.0).abs() < 1e-3),
+            "{:?}",
+            &diffs[..8]
+        );
         // A large backlog is trimmed back to the target instead of adding latency.
         for i in 0..20_000 {
             tx.push(i as f32).unwrap();

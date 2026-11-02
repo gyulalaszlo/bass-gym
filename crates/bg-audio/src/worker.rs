@@ -30,7 +30,10 @@ struct History {
 
 impl History {
     fn new(len: usize) -> Self {
-        Self { buf: vec![0.0; len.max(1)], total: 0 }
+        Self {
+            buf: vec![0.0; len.max(1)],
+            total: 0,
+        }
     }
 
     fn extend(&mut self, samples: &[f32]) {
@@ -90,7 +93,12 @@ pub struct InputMeter {
 
 impl Default for InputMeter {
     fn default() -> Self {
-        Self { peak_db: -120.0, rms_db: -120.0, note_active: false, last_note_ms: None }
+        Self {
+            peak_db: -120.0,
+            rms_db: -120.0,
+            note_active: false,
+            last_note_ms: None,
+        }
     }
 }
 
@@ -191,7 +199,10 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                 let n = chunk.frames as usize;
                 let sr = a.link.sample_rate as f64;
                 // Track the input→transport mapping; smooth out timestamp jitter, but follow jumps.
-                let est = chunk.time.or_else(|| clock.is_running().then(|| clock.now() - n as f64 / sr)).map(|t| t - a.consumed as f64 / sr);
+                let est = chunk
+                    .time
+                    .or_else(|| clock.is_running().then(|| clock.now() - n as f64 / sr))
+                    .map(|t| t - a.consumed as f64 / sr);
                 if let Some(est) = est {
                     a.offset = Some(match a.offset {
                         Some(o) if (est - o).abs() < 0.05 => o + 0.02 * (est - o),
@@ -241,11 +252,14 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                         NoteEvent::Off { sample, peak_db } => {
                             a.note_on = false;
                             if let Ok(mut m) = shared.meter.lock() {
-                                m.last_note_ms = Some(sample.saturating_sub(a.note_start) as f32 / sr as f32 * 1000.0);
+                                m.last_note_ms = Some(
+                                    sample.saturating_sub(a.note_start) as f32 / sr as f32 * 1000.0,
+                                );
                             }
                             // The note's own samples give the most reliable pitch; tuner
                             // readings may still contain the previous note.
-                            let end = sample.min(a.note_start + (PITCH_MAX_MS / 1000.0 * sr) as u64);
+                            let end =
+                                sample.min(a.note_start + (PITCH_MAX_MS / 1000.0 * sr) as u64);
                             let freq = a
                                 .history
                                 .slice(a.note_start + skip, end)
@@ -260,10 +274,14 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                 }
                 // Early pitch of the sounding note, as soon as enough of it was heard.
                 if a.note_on && !a.pitch_sent && a.pitch_attempt < PITCH_ATTEMPTS_MS.len() {
-                    let due = a.note_start + (PITCH_ATTEMPTS_MS[a.pitch_attempt] / 1000.0 * sr) as u64;
+                    let due =
+                        a.note_start + (PITCH_ATTEMPTS_MS[a.pitch_attempt] / 1000.0 * sr) as u64;
                     if a.consumed >= due {
                         a.pitch_attempt += 1;
-                        let found = a.history.slice(a.note_start + skip, a.consumed).and_then(|x| bg_dsp::detect(&x, sr as f32));
+                        let found = a
+                            .history
+                            .slice(a.note_start + skip, a.consumed)
+                            .and_then(|x| bg_dsp::detect(&x, sr as f32));
                         if let Some(r) = found {
                             a.pitch_sent = true;
                             if let Some(s) = session.as_mut() {
@@ -298,14 +316,29 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
     }
 }
 
-fn io<'a>(clock: &Clock, cfg: &AnalysisConfig, out: &'a mut Option<Producer<OutMsg>>) -> SessionIo<'a> {
-    SessionIo { now: clock.now(), latency: cfg.total_latency(), out: if clock.is_running() { out.as_mut() } else { None } }
+fn io<'a>(
+    clock: &Clock,
+    cfg: &AnalysisConfig,
+    out: &'a mut Option<Producer<OutMsg>>,
+) -> SessionIo<'a> {
+    SessionIo {
+        now: clock.now(),
+        latency: cfg.total_latency(),
+        out: if clock.is_running() {
+            out.as_mut()
+        } else {
+            None
+        },
+    }
 }
 
 fn publish_tuner(shared: &WorkerShared, recent: &mut Vec<f32>, r: Option<PitchReading>) {
     let reading = r.map(|mut r| {
         // Median of the last few readings, restarted when the note changes.
-        if recent.last().is_some_and(|&f| (1200.0 * (r.freq / f).log2()).abs() > 50.0) {
+        if recent
+            .last()
+            .is_some_and(|&f| (1200.0 * (r.freq / f).log2()).abs() > 50.0)
+        {
             recent.clear();
         }
         recent.push(r.freq);

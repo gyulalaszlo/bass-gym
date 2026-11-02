@@ -49,10 +49,24 @@ mod imp {
 
     fn build() -> muda::Result<Menu> {
         let sep = PredefinedMenuItem::separator;
-        let about = AboutMetadata { name: Some("bass-gym".into()), version: Some(env!("CARGO_PKG_VERSION").into()), ..Default::default() };
-        let prefs = MenuItem::with_id(PREFS, "Preferences…", true, Some(Accelerator::new(Some(Modifiers::SUPER), Code::Comma)));
+        let about = AboutMetadata {
+            name: Some("bass-gym".into()),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            ..Default::default()
+        };
+        let prefs = MenuItem::with_id(
+            PREFS,
+            "Preferences…",
+            true,
+            Some(Accelerator::new(Some(Modifiers::SUPER), Code::Comma)),
+        );
         // Quit through the app (not NSApp's terminate:) so settings and state are saved.
-        let quit = MenuItem::with_id(QUIT, "Quit bass-gym", true, Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyQ)));
+        let quit = MenuItem::with_id(
+            QUIT,
+            "Quit bass-gym",
+            true,
+            Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyQ)),
+        );
         let app = Submenu::with_items(
             "bass-gym",
             true,

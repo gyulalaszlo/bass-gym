@@ -72,14 +72,28 @@ impl BassGymApp {
             log::info!("settings and presets in {}", d.display());
         }
         let settings = SettingsStore::load(config_dir.as_ref().map(|d| d.join("settings.toml")));
-        let store = PresetStore::new(config_dir.as_ref().map_or_else(|| std::env::temp_dir().join("bass-gym-presets"), |d| d.join("presets")));
+        let store = PresetStore::new(config_dir.as_ref().map_or_else(
+            || std::env::temp_dir().join("bass-gym-presets"),
+            |d| d.join("presets"),
+        ));
         let state_path = config_dir.as_ref().map(|d| d.join("state.json"));
 
         crate::soundfonts::register();
-        let engine = AudioEngine::new(settings.get::<AudioConfig>(pages::AUDIO), settings.get::<SoundConfig>(pages::SOUNDS), settings.get::<AnalysisConfig>(pages::ANALYSIS));
+        let engine = AudioEngine::new(
+            settings.get::<AudioConfig>(pages::AUDIO),
+            settings.get::<SoundConfig>(pages::SOUNDS),
+            settings.get::<AnalysisConfig>(pages::ANALYSIS),
+        );
 
-        let state: AppState = state_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        let mut slots: Vec<ExerciseSlot> = bg_exercises::all().into_iter().map(|et| ExerciseSlot::new(et, &store)).collect();
+        let state: AppState = state_path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let mut slots: Vec<ExerciseSlot> = bg_exercises::all()
+            .into_iter()
+            .map(|et| ExerciseSlot::new(et, &store))
+            .collect();
         let mut pages = pages::builtin();
         for slot in &mut slots {
             let id = slot.et.id();
@@ -92,7 +106,11 @@ impl BassGymApp {
             }
             pages.extend(slot.et.preference_pages());
         }
-        let selected = std::env::var("BASS_GYM_EXERCISE").ok().or(state.selected).and_then(|s| slots.iter().position(|x| x.et.id() == s)).unwrap_or(0);
+        let selected = std::env::var("BASS_GYM_EXERCISE")
+            .ok()
+            .or(state.selected)
+            .and_then(|s| slots.iter().position(|x| x.et.id() == s))
+            .unwrap_or(0);
 
         let mut app = Self {
             engine,
@@ -112,9 +130,13 @@ impl BassGymApp {
             theme: None,
             ctx: cc.egui_ctx.clone(),
             settings_rev: u64::MAX,
-            screenshot: std::env::var_os("BASS_GYM_SCREENSHOT").map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
+            screenshot: std::env::var_os("BASS_GYM_SCREENSHOT")
+                .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
-        if let Some(page) = std::env::var("BASS_GYM_PREFS").ok().and_then(|id| app.pages.iter().position(|p| p.id() == id)) {
+        if let Some(page) = std::env::var("BASS_GYM_PREFS")
+            .ok()
+            .and_then(|id| app.pages.iter().position(|p| p.id() == id))
+        {
             app.prefs_open = true;
             app.page = page;
             if app.screenshot.is_some() {
@@ -145,24 +167,41 @@ impl BassGymApp {
         let Some(path) = &self.state_path else { return };
         let state = AppState {
             selected: self.slots.get(self.selected).map(|s| s.et.id().to_owned()),
-            presets: self.slots.iter().filter_map(|s| s.current.map(|c| (s.et.id().to_owned(), c))).collect(),
-            working: self.slots.iter().map(|s| (s.et.id().to_owned(), s.et.save_preset())).collect(),
+            presets: self
+                .slots
+                .iter()
+                .filter_map(|s| s.current.map(|c| (s.et.id().to_owned(), c)))
+                .collect(),
+            working: self
+                .slots
+                .iter()
+                .map(|s| (s.et.id().to_owned(), s.et.save_preset()))
+                .collect(),
             prefs_window: self.prefs_window,
         };
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(text) = serde_json::to_string_pretty(&state)
-            && let Err(e) = std::fs::write(path, text) {
-                log::warn!("couldn't save app state: {e}");
-            }
+            && let Err(e) = std::fs::write(path, text)
+        {
+            log::warn!("couldn't save app state: {e}");
+        }
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(icons::WAVE_SINE).size(22.0).color(theme::green()));
-            ui.label(RichText::new("BASS GYM").font(theme::mono(20.0)).color(theme::text()));
+            ui.label(
+                RichText::new(icons::WAVE_SINE)
+                    .size(22.0)
+                    .color(theme::green()),
+            );
+            ui.label(
+                RichText::new("BASS GYM")
+                    .font(theme::mono(20.0))
+                    .color(theme::text()),
+            );
         });
         ui.add_space(14.0);
         theme::title_label(ui, "Exercises");
@@ -171,7 +210,10 @@ impl BassGymApp {
         for (i, slot) in self.slots.iter().enumerate() {
             let selected = i == self.selected;
             let text = format!("{}  {}", slot.et.icon(), slot.et.name().to_uppercase());
-            let resp = ui.add_enabled(!running || selected, selectable(selected, text).min_size(egui::vec2(ui.available_width(), 34.0)));
+            let resp = ui.add_enabled(
+                !running || selected,
+                selectable(selected, text).min_size(egui::vec2(ui.available_width(), 34.0)),
+            );
             if resp.on_hover_text(slot.et.description()).clicked() {
                 self.selected = i;
             }
@@ -179,9 +221,16 @@ impl BassGymApp {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.add_space(10.0);
-            let shortcut = if cfg!(target_os = "macos") { "⌘," } else { "Ctrl+," };
+            let shortcut = if cfg!(target_os = "macos") {
+                "⌘,"
+            } else {
+                "Ctrl+,"
+            };
             if ui
-                .add(button(format!("{}  PREFERENCES", icons::GEAR)).min_size(egui::vec2(ui.available_width(), 32.0)))
+                .add(
+                    button(format!("{}  PREFERENCES", icons::GEAR))
+                        .min_size(egui::vec2(ui.available_width(), 32.0)),
+                )
                 .on_hover_text(format!("Open the preferences ({shortcut})"))
                 .clicked()
             {
@@ -190,22 +239,41 @@ impl BassGymApp {
             ui.add_space(4.0);
             let st = self.engine.status().clone();
             let dot = |ok: bool| if ok { theme::green() } else { theme::amber() };
-            ui.label(RichText::new(format!("OUT {}", st.output.as_deref().unwrap_or("—"))).small().color(dot(st.output.is_some())));
-            ui.label(RichText::new(format!("IN  {}", st.input.as_deref().unwrap_or("—"))).small().color(dot(st.input.is_some())));
+            ui.label(
+                RichText::new(format!("OUT {}", st.output.as_deref().unwrap_or("—")))
+                    .small()
+                    .color(dot(st.output.is_some())),
+            );
+            ui.label(
+                RichText::new(format!("IN  {}", st.input.as_deref().unwrap_or("—")))
+                    .small()
+                    .color(dot(st.input.is_some())),
+            );
             let xruns = self.engine.xruns();
             if xruns > 0 {
-                ui.label(RichText::new(format!("{} {xruns} XRUNS", icons::WARNING)).small().color(theme::amber()))
-                    .on_hover_text("Audio buffer under/overruns. Try a larger buffer size in Preferences › Audio.");
+                ui.label(
+                    RichText::new(format!("{} {xruns} XRUNS", icons::WARNING))
+                        .small()
+                        .color(theme::amber()),
+                )
+                .on_hover_text(
+                    "Audio buffer under/overruns. Try a larger buffer size in Preferences › Audio.",
+                );
             }
             ui.add_space(6.0);
             // Input monitoring: hear the bass through the output, with its round-trip delay.
             let mut sounds: SoundConfig = self.settings.get(pages::SOUNDS);
             ui.horizontal(|ui| {
-                ui.add(egui::Slider::new(&mut sounds.monitor_gain, 0.0..=2.0).show_value(false)).on_hover_text("Monitor volume");
+                ui.add(egui::Slider::new(&mut sounds.monitor_gain, 0.0..=2.0).show_value(false))
+                    .on_hover_text("Monitor volume");
             });
             let on = sounds.monitor;
             let label = format!("{}  MONITOR {}", icons::EAR, if on { "ON" } else { "OFF" });
-            if ui.add(selectable(on, label).color(if on { theme::green() } else { theme::cyan() })).on_hover_text("Mix the bass input into the output").clicked() {
+            if ui
+                .add(selectable(on, label).color(if on { theme::green() } else { theme::cyan() }))
+                .on_hover_text("Mix the bass input into the output")
+                .clicked()
+            {
                 sounds.monitor = !on;
             }
             self.settings.set(pages::SOUNDS, &sounds);
@@ -216,7 +284,10 @@ impl BassGymApp {
     /// Opens the preferences window, or brings it to the front.
     fn open_preferences(&mut self, ctx: &egui::Context) {
         if self.prefs_open {
-            ctx.send_viewport_cmd_to(egui::ViewportId::from_hash_of(PREFS_VIEWPORT), egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd_to(
+                egui::ViewportId::from_hash_of(PREFS_VIEWPORT),
+                egui::ViewportCommand::Focus,
+            );
         }
         self.prefs_open = true;
         ctx.request_repaint();
@@ -224,59 +295,110 @@ impl BassGymApp {
 
     /// The preferences, in their own window.
     fn preferences(&mut self, ctx: &egui::Context) {
-        let mut builder = egui::ViewportBuilder::default().with_title("Preferences").with_min_inner_size([560.0, 320.0]);
+        let mut builder = egui::ViewportBuilder::default()
+            .with_title("Preferences")
+            .with_min_inner_size([560.0, 320.0]);
         builder = match self.prefs_window {
             Some(g) => builder.with_position(g.pos).with_inner_size(g.size),
             None => builder.with_inner_size([860.0, 620.0]),
         };
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(PREFS_VIEWPORT), builder, |ui, _class| {
-            let ctx = ui.ctx().clone();
-            if ctx.input(|i| i.viewport().close_requested()) {
-                self.prefs_open = false;
-            }
-            if let Some((outer, inner)) = ctx.input(|i| i.viewport().outer_rect.zip(i.viewport().inner_rect)) {
-                self.prefs_window = Some(WindowGeometry { pos: outer.min.into(), size: inner.size().into() });
-            }
-            egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::same(14))).show(ui, |ui| {
-                let avail = ui.available_size();
-                ui.horizontal_top(|ui| {
-                    // Page list.
-                    ui.allocate_ui_with_layout(egui::vec2(190.0, avail.y), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        for (i, p) in self.pages.iter().enumerate() {
-                            let text = format!("{}  {}", p.icon(), p.title());
-                            if ui.add(selectable(i == self.page, text).min_size(egui::vec2(186.0, 30.0))).clicked() {
-                                self.page = i;
-                            }
-                        }
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of(PREFS_VIEWPORT),
+            builder,
+            |ui, _class| {
+                let ctx = ui.ctx().clone();
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    self.prefs_open = false;
+                }
+                if let Some((outer, inner)) =
+                    ctx.input(|i| i.viewport().outer_rect.zip(i.viewport().inner_rect))
+                {
+                    self.prefs_window = Some(WindowGeometry {
+                        pos: outer.min.into(),
+                        size: inner.size().into(),
                     });
-                    ui.separator();
-                    // The page: sections stacked vertically, scrolling when they overflow.
-                    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), avail.y), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        egui::ScrollArea::vertical().id_salt(("prefs_page", self.page)).auto_shrink([false, false]).max_height(avail.y).show(ui, |ui| {
-                            if let Some(page) = self.pages.get_mut(self.page) {
-                                let mut pctx = PrefsCtx { engine: &mut self.engine, settings: &mut self.settings };
-                                page.ui(ui, &mut pctx);
-                            }
+                }
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::new()
+                            .fill(theme::panel())
+                            .inner_margin(egui::Margin::same(14)),
+                    )
+                    .show(ui, |ui| {
+                        let avail = ui.available_size();
+                        ui.horizontal_top(|ui| {
+                            // Page list.
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(190.0, avail.y),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    for (i, p) in self.pages.iter().enumerate() {
+                                        let text = format!("{}  {}", p.icon(), p.title());
+                                        if ui
+                                            .add(
+                                                selectable(i == self.page, text)
+                                                    .min_size(egui::vec2(186.0, 30.0)),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.page = i;
+                                        }
+                                    }
+                                },
+                            );
+                            ui.separator();
+                            // The page: sections stacked vertically, scrolling when they overflow.
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(ui.available_width(), avail.y),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    egui::ScrollArea::vertical()
+                                        .id_salt(("prefs_page", self.page))
+                                        .auto_shrink([false, false])
+                                        .max_height(avail.y)
+                                        .show(ui, |ui| {
+                                            if let Some(page) = self.pages.get_mut(self.page) {
+                                                let mut pctx = PrefsCtx {
+                                                    engine: &mut self.engine,
+                                                    settings: &mut self.settings,
+                                                };
+                                                page.ui(ui, &mut pctx);
+                                            }
+                                        });
+                                },
+                            );
                         });
                     });
-                });
-            });
-        });
+            },
+        );
     }
 }
 
 impl BassGymApp {
     fn take_screenshot(&mut self, ctx: &egui::Context) {
-        let Some((path, started, requested)) = self.screenshot.as_mut() else { return };
+        let Some((path, started, requested)) = self.screenshot.as_mut() else {
+            return;
+        };
         ctx.request_repaint();
         if !*requested && started.elapsed().as_secs_f32() > 2.0 {
             *requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
-        let image = ctx.input(|i| i.events.iter().find_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }));
+        let image = ctx.input(|i| {
+            i.events.iter().find_map(|e| {
+                if let egui::Event::Screenshot { image, .. } = e {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
+        });
         if let Some(image) = image {
             let mut ppm = format!("P6 {} {} 255\n", image.size[0], image.size[1]).into_bytes();
-            image.pixels.iter().for_each(|p| ppm.extend_from_slice(&[p.r(), p.g(), p.b()]));
+            image
+                .pixels
+                .iter()
+                .for_each(|p| ppm.extend_from_slice(&[p.r(), p.g(), p.b()]));
             match std::fs::write(&*path, ppm) {
                 Ok(()) => log::info!("screenshot saved to {}", path.display()),
                 Err(e) => log::warn!("couldn't save the screenshot: {e}"),
@@ -294,29 +416,56 @@ impl eframe::App for BassGymApp {
         egui::Panel::left("sidebar")
             .resizable(false)
             .exact_size(240.0)
-            .frame(egui::Frame::new().fill(theme::bg()).inner_margin(egui::Margin::symmetric(12, 4)).stroke(egui::Stroke::new(1.0, theme::grid())))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::bg())
+                    .inner_margin(egui::Margin::symmetric(12, 4))
+                    .stroke(egui::Stroke::new(1.0, theme::grid())),
+            )
             .show(ui, |ui| self.sidebar(ui));
 
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::same(14))).show(ui, |ui| {
-            tuner(ui, &self.engine.tuner(), &self.engine.meter(), &self.tuner_prefs);
-            ui.add_space(8.0);
-            if let Some(slot) = self.slots.get_mut(self.selected) {
-                self.preset_bar.ui(ui, slot, &self.store);
-                ui.add_space(2.0);
-                let mut ectx = ExerciseCtx { engine: &mut self.engine, settings: &mut self.settings, scoring: &self.scoring };
-                // The Exercise Control Toolbar stays put; only the exercise area scrolls.
-                show_toolbar(ui, |tb| slot.et.toolbar(tb, &mut ectx));
-                slot.et.notices(ui, &mut ectx);
-                ui.separator();
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    slot.et.ui(ui, &mut ectx);
-                });
-            }
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::panel())
+                    .inner_margin(egui::Margin::same(14)),
+            )
+            .show(ui, |ui| {
+                tuner(
+                    ui,
+                    &self.engine.tuner(),
+                    &self.engine.meter(),
+                    &self.tuner_prefs,
+                );
+                ui.add_space(8.0);
+                if let Some(slot) = self.slots.get_mut(self.selected) {
+                    self.preset_bar.ui(ui, slot, &self.store);
+                    ui.add_space(2.0);
+                    let mut ectx = ExerciseCtx {
+                        engine: &mut self.engine,
+                        settings: &mut self.settings,
+                        scoring: &self.scoring,
+                    };
+                    // The Exercise Control Toolbar stays put; only the exercise area scrolls.
+                    show_toolbar(ui, |tb| slot.et.toolbar(tb, &mut ectx));
+                    slot.et.notices(ui, &mut ectx);
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            slot.et.ui(ui, &mut ectx);
+                        });
+                }
+            });
 
         // Preferences: app menu (macOS), Cmd/Ctrl + comma, or the sidebar button.
         let menu_action = self.menu.as_ref().and_then(AppMenu::poll);
-        let shortcut = ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma)));
+        let shortcut = ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::Comma,
+            ))
+        });
         if menu_action == Some(MenuAction::Preferences) || shortcut {
             self.open_preferences(&ctx);
         }
@@ -330,7 +479,10 @@ impl eframe::App for BassGymApp {
         if let Some(t) = &self.theme {
             let z = ctx.zoom_factor();
             if (z - t.zoom).abs() > 1e-3 {
-                let t = ThemePrefs { zoom: z, ..t.clone() };
+                let t = ThemePrefs {
+                    zoom: z,
+                    ..t.clone()
+                };
                 self.settings.set(ThemePrefs::ID, &t);
                 self.theme = Some(t);
             }

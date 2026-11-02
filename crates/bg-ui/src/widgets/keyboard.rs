@@ -8,10 +8,21 @@ use crate::theme::{self, mono};
 
 /// Common keyboard sizes: (keys, lowest MIDI note, highest MIDI note), matching real
 /// instruments (88 = A0–C8, 76 = E1–G7, 73 = E1–E7, 61 = C2–C7, ...).
-pub const SIZES: [(u32, u8, u8); 7] = [(25, 48, 72), (37, 48, 84), (49, 36, 84), (61, 36, 96), (73, 28, 100), (76, 28, 103), (88, 21, 108)];
+pub const SIZES: [(u32, u8, u8); 7] = [
+    (25, 48, 72),
+    (37, 48, 84),
+    (49, 36, 84),
+    (61, 36, 96),
+    (73, 28, 100),
+    (76, 28, 103),
+    (88, 21, 108),
+];
 
 pub fn range(keys: u32) -> (u8, u8) {
-    SIZES.iter().find(|s| s.0 == keys).map_or((36, 96), |s| (s.1, s.2))
+    SIZES
+        .iter()
+        .find(|s| s.0 == keys)
+        .map_or((36, 96), |s| (s.1, s.2))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +69,8 @@ impl Keyboard<'_> {
         let whites: Vec<u8> = (low..=high).filter(|&m| !is_black(m)).collect();
         let ww = ui.available_width() / whites.len() as f32;
         let height = (ww * 5.5).clamp(70.0, 190.0);
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height + 14.0), Sense::hover());
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), height + 14.0), Sense::hover());
         let p = ui.painter_at(rect);
         let keys_rect = Rect::from_min_size(rect.min, vec2(rect.width(), height));
 
@@ -70,9 +82,15 @@ impl Keyboard<'_> {
             if is_black(m) {
                 let left = white_index(m - 1).map_or(keys_rect.left(), x_of_white);
                 let bw = ww * 0.6;
-                Rect::from_min_size(Pos2::new(left + ww - bw / 2.0, keys_rect.top()), vec2(bw, height * 0.62))
+                Rect::from_min_size(
+                    Pos2::new(left + ww - bw / 2.0, keys_rect.top()),
+                    vec2(bw, height * 0.62),
+                )
             } else {
-                Rect::from_min_size(Pos2::new(x_of_white(white_index(m).unwrap_or(0)), keys_rect.top()), vec2(ww, height))
+                Rect::from_min_size(
+                    Pos2::new(x_of_white(white_index(m).unwrap_or(0)), keys_rect.top()),
+                    vec2(ww, height),
+                )
             }
         };
 
@@ -92,19 +110,38 @@ impl Keyboard<'_> {
             };
             if let Some(l) = label {
                 let color = if on { theme::bg() } else { theme::dim() };
-                p.text(Pos2::new(r.center().x, r.bottom() - 4.0), Align2::CENTER_BOTTOM, l, mono((ww * 0.45).clamp(8.0, 13.0)), color);
+                p.text(
+                    Pos2::new(r.center().x, r.bottom() - 4.0),
+                    Align2::CENTER_BOTTOM,
+                    l,
+                    mono((ww * 0.45).clamp(8.0, 13.0)),
+                    color,
+                );
             }
         }
         for m in (low..=high).filter(|&m| is_black(m)) {
             let r = key_rect(m);
             p.rect_filled(r.expand(1.0), 2.0, theme::bg());
-            p.rect_filled(r, 2.0, if self.active.contains(&m) { active } else { theme::bg() });
+            p.rect_filled(
+                r,
+                2.0,
+                if self.active.contains(&m) {
+                    active
+                } else {
+                    theme::bg()
+                },
+            );
             p.rect_stroke(r, 2.0, outline, StrokeKind::Inside);
         }
         // Upcoming chord.
         for &m in self.ghost.iter().filter(|&&m| (low..=high).contains(&m)) {
             let r = key_rect(m).shrink(if is_black(m) { 2.0 } else { 3.0 });
-            p.rect_stroke(r, 2.0, Stroke::new(2.5, theme::magenta()), StrokeKind::Inside);
+            p.rect_stroke(
+                r,
+                2.0,
+                Stroke::new(2.5, theme::magenta()),
+                StrokeKind::Inside,
+            );
         }
         // Bass note marker below the keys.
         if let Some((midi, color)) = self.bass {

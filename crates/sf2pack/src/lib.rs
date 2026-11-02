@@ -111,12 +111,32 @@ pub fn write(out: &mut impl Write, inst: &Instrument) -> io::Result<()> {
     let mut shdr = Bytes(Vec::new());
     for s in &inst.samples {
         let start = (smpl.len() / 2) as u32;
-        s.data.iter().for_each(|x| smpl.extend_from_slice(&x.to_le_bytes()));
+        s.data
+            .iter()
+            .for_each(|x| smpl.extend_from_slice(&x.to_le_bytes()));
         smpl.resize(smpl.len() + SAMPLE_PAD * 2, 0);
         let end = start + s.data.len() as u32;
-        shdr.name(&s.name).u32(start).u32(end).u32(start).u32(end).u32(s.rate).u8(s.root).u8(0).u16(0).u16(1);
+        shdr.name(&s.name)
+            .u32(start)
+            .u32(end)
+            .u32(start)
+            .u32(end)
+            .u32(s.rate)
+            .u8(s.root)
+            .u8(0)
+            .u16(0)
+            .u16(1);
     }
-    shdr.name("EOS").u32(0).u32(0).u32(0).u32(0).u32(0).u8(0).u8(0).u16(0).u16(0);
+    shdr.name("EOS")
+        .u32(0)
+        .u32(0)
+        .u32(0)
+        .u32(0)
+        .u32(0)
+        .u8(0)
+        .u8(0)
+        .u16(0)
+        .u16(0);
 
     // Instrument zones. Each zone switches off the default velocity → attenuation
     // modulator: the recorded layers already carry the dynamics.
@@ -124,11 +144,18 @@ pub fn write(out: &mut impl Write, inst: &Instrument) -> io::Result<()> {
     let (mut ngen, mut nmod) = (0u16, 0u16);
     for z in &inst.zones {
         ibag.u16(ngen).u16(nmod);
-        imod.u16(MOD_VELOCITY).u16(GEN_INITIAL_ATTENUATION).u16(0).u16(0).u16(0);
+        imod.u16(MOD_VELOCITY)
+            .u16(GEN_INITIAL_ATTENUATION)
+            .u16(0)
+            .u16(0)
+            .u16(0);
         nmod += 1;
-        igen.gen_range(GEN_KEY_RANGE, z.keys).gen_range(GEN_VEL_RANGE, z.vels);
-        igen.u16(GEN_ROOT_KEY).u16(inst.samples[z.sample].root as u16);
-        igen.u16(GEN_RELEASE_VOL_ENV).u16(timecents(inst.release) as u16);
+        igen.gen_range(GEN_KEY_RANGE, z.keys)
+            .gen_range(GEN_VEL_RANGE, z.vels);
+        igen.u16(GEN_ROOT_KEY)
+            .u16(inst.samples[z.sample].root as u16);
+        igen.u16(GEN_RELEASE_VOL_ENV)
+            .u16(timecents(inst.release) as u16);
         igen.u16(GEN_SAMPLE_MODES).u16(0);
         igen.u16(GEN_SAMPLE_ID).u16(z.sample as u16);
         ngen += 6;
@@ -137,11 +164,21 @@ pub fn write(out: &mut impl Write, inst: &Instrument) -> io::Result<()> {
     imod.u16(0).u16(0).u16(0).u16(0).u16(0);
     igen.u32(0);
     let mut instr = Bytes(Vec::new());
-    instr.name(&inst.name).u16(0).name("EOI").u16(inst.zones.len() as u16);
+    instr
+        .name(&inst.name)
+        .u16(0)
+        .name("EOI")
+        .u16(inst.zones.len() as u16);
 
     // One preset with one zone pointing at the instrument.
     let mut phdr = Bytes(Vec::new());
-    phdr.name(&inst.name).u16(0).u16(0).u16(0).u32(0).u32(0).u32(0);
+    phdr.name(&inst.name)
+        .u16(0)
+        .u16(0)
+        .u16(0)
+        .u32(0)
+        .u32(0)
+        .u32(0);
     phdr.name("EOP").u16(0).u16(0).u16(1).u32(0).u32(0).u32(0);
     let mut pbag = Bytes(Vec::new());
     pbag.u16(0).u16(0).u16(1).u16(0);
@@ -154,7 +191,12 @@ pub fn write(out: &mut impl Write, inst: &Instrument) -> io::Result<()> {
     ifil.u16(2).u16(1);
     let info = list(
         b"INFO",
-        &[chunk(b"ifil", &ifil.0), chunk(b"isng", &zstr("EMU8000")), chunk(b"INAM", &zstr(&inst.name)), chunk(b"ISFT", &zstr("bass-gym sf2pack"))],
+        &[
+            chunk(b"ifil", &ifil.0),
+            chunk(b"isng", &zstr("EMU8000")),
+            chunk(b"INAM", &zstr(&inst.name)),
+            chunk(b"ISFT", &zstr("bass-gym sf2pack")),
+        ],
     );
     let sdta = list(b"sdta", &[chunk(b"smpl", &smpl)]);
     let pdta = list(
@@ -187,8 +229,16 @@ pub fn key_ranges(roots: &[u8]) -> Vec<(u8, u8)> {
     let n = sorted.len();
     (0..n)
         .map(|i| {
-            let lo = if i == 0 { 0 } else { ((sorted[i - 1] as u16 + sorted[i] as u16) / 2) as u8 + 1 };
-            let hi = if i + 1 == n { 127 } else { ((sorted[i] as u16 + sorted[i + 1] as u16) / 2) as u8 };
+            let lo = if i == 0 {
+                0
+            } else {
+                ((sorted[i - 1] as u16 + sorted[i] as u16) / 2) as u8 + 1
+            };
+            let hi = if i + 1 == n {
+                127
+            } else {
+                ((sorted[i] as u16 + sorted[i + 1] as u16) / 2) as u8
+            };
             (lo, hi)
         })
         .collect()
@@ -200,7 +250,10 @@ mod tests {
 
     #[test]
     fn splits_keys_between_roots() {
-        assert_eq!(key_ranges(&[48, 41, 55]), vec![(0, 44), (45, 51), (52, 127)]);
+        assert_eq!(
+            key_ranges(&[48, 41, 55]),
+            vec![(0, 44), (45, 51), (52, 127)]
+        );
     }
 
     /// The written file loads in a SoundFont player and picks zones by key and velocity.
@@ -208,15 +261,41 @@ mod tests {
     fn written_soundfont_plays() {
         let sr = 48_000;
         let tone = |freq: f32, amp: f32| -> Vec<i16> {
-            (0..sr).map(|i| ((i as f32 / sr as f32 * freq * std::f32::consts::TAU).sin() * amp * 32_000.0) as i16).collect()
+            (0..sr)
+                .map(|i| {
+                    ((i as f32 / sr as f32 * freq * std::f32::consts::TAU).sin() * amp * 32_000.0)
+                        as i16
+                })
+                .collect()
         };
         let inst = Instrument {
             name: "Test piano".into(),
             samples: vec![
-                Sample { name: "C4 soft".into(), rate: sr, root: 60, data: tone(261.6, 0.1) },
-                Sample { name: "C4 loud".into(), rate: sr, root: 60, data: tone(261.6, 0.9) },
+                Sample {
+                    name: "C4 soft".into(),
+                    rate: sr,
+                    root: 60,
+                    data: tone(261.6, 0.1),
+                },
+                Sample {
+                    name: "C4 loud".into(),
+                    rate: sr,
+                    root: 60,
+                    data: tone(261.6, 0.9),
+                },
             ],
-            zones: vec![Zone { sample: 0, keys: (0, 127), vels: (0, 63) }, Zone { sample: 1, keys: (0, 127), vels: (64, 127) }],
+            zones: vec![
+                Zone {
+                    sample: 0,
+                    keys: (0, 127),
+                    vels: (0, 63),
+                },
+                Zone {
+                    sample: 1,
+                    keys: (0, 127),
+                    vels: (64, 127),
+                },
+            ],
             release: 0.2,
         };
         let mut bytes = Vec::new();

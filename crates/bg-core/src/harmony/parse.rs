@@ -13,8 +13,16 @@ pub const LIBRARY: [(&str, &str, &str); 12] = [
     ("iii_vi_ii_v", "iii–vi–ii–V–I", "iii7 vi7 ii7 V7 I7 I7"),
     ("classic", "Classic cadence (I–IV–V–I)", "I IV V I"),
     ("royal_road", "Royal road (IV–V–iii–vi)", "IV7 V7 iii7 vi7"),
-    ("pachelbel", "Pachelbel (I–V–vi–iii–IV–I–IV–V)", "I V vi iii IV I IV V"),
-    ("blues", "Diatonic blues (I–IV–I–V–IV–I)", "I I I I IV IV I I V IV I V"),
+    (
+        "pachelbel",
+        "Pachelbel (I–V–vi–iii–IV–I–IV–V)",
+        "I V vi iii IV I IV V",
+    ),
+    (
+        "blues",
+        "Diatonic blues (I–IV–I–V–IV–I)",
+        "I I I I IV IV I I V IV I V",
+    ),
     ("minor_plagal", "Minor (i–iv–v–i)", "i iv v i"),
     ("minor_epic", "Minor epic (i–VI–III–VII)", "i VI III VII"),
     ("circle", "Circle of fifths (vi–ii–V–I)", "vi7 ii7 V7 I7"),
@@ -54,11 +62,21 @@ pub fn parse_progression(text: &str, scale: &Scale) -> Result<Vec<ChordSpec>, Pa
             continue;
         }
         let len = rest.find(is_sep).unwrap_or(rest.len());
-        out.push(parse_token(&text[i..i + len], scale).map_err(|message| ParseError { start: i, end: i + len, message })?);
+        out.push(
+            parse_token(&text[i..i + len], scale).map_err(|message| ParseError {
+                start: i,
+                end: i + len,
+                message,
+            })?,
+        );
         i += len;
     }
     if out.is_empty() {
-        return Err(ParseError { start: 0, end: text.len(), message: "enter at least one chord, e.g. \"ii7 V7 I\"".into() });
+        return Err(ParseError {
+            start: 0,
+            end: text.len(),
+            message: "enter at least one chord, e.g. \"ii7 V7 I\"".into(),
+        });
     }
     Ok(out)
 }
@@ -88,10 +106,17 @@ fn parse_token(tok: &str, scale: &Scale) -> Result<ChordSpec, String> {
         "9" => 5,
         "11" => 6,
         "13" => 7,
-        _ => return Err(format!("unknown chord size \"{rest}\" in \"{tok}\" (use 7, 9, 11 or 13)")),
+        _ => {
+            return Err(format!(
+                "unknown chord size \"{rest}\" in \"{tok}\" (use 7, 9, 11 or 13)"
+            ));
+        }
     };
     // Qualities are diatonic; a marker must agree with what the scale gives.
-    let chord = scale.realize(ChordSpec { degree, size: size.max(4) });
+    let chord = scale.realize(ChordSpec {
+        degree,
+        size: size.max(4),
+    });
     let third = chord.interval(chord.third());
     let fifth = chord.interval(chord.triad[2]);
     let seventh = chord.seventh.map(|s| chord.interval(s));
@@ -105,7 +130,10 @@ fn parse_token(tok: &str, scale: &Scale) -> Result<ChordSpec, String> {
     };
     if !ok {
         let actual = scale.realize(ChordSpec { degree, size }).roman();
-        return Err(format!("\"{tok}\" isn't diatonic in {}: that degree is {actual}", scale.name()));
+        return Err(format!(
+            "\"{tok}\" isn't diatonic in {}: that degree is {actual}",
+            scale.name()
+        ));
     }
     Ok(ChordSpec { degree, size })
 }
@@ -115,7 +143,10 @@ mod tests {
     use super::*;
     use crate::harmony::Mode;
 
-    const C: Scale = Scale { root: 0, mode: Mode::Ionian };
+    const C: Scale = Scale {
+        root: 0,
+        mode: Mode::Ionian,
+    };
 
     #[test]
     fn parses_numerals_and_sizes() {

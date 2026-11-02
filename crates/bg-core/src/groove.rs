@@ -14,7 +14,11 @@ pub struct GrooveNote {
 
 impl Default for GrooveNote {
     fn default() -> Self {
-        Self { step: 0, len_steps: 1, accent: false }
+        Self {
+            step: 0,
+            len_steps: 1,
+            accent: false,
+        }
     }
 }
 
@@ -77,7 +81,9 @@ impl Groove {
 
     /// Index of the note covering `step` (start or sustain), if any.
     pub fn note_at(&self, step: u32) -> Option<usize> {
-        self.notes.iter().position(|n| step >= n.step && step < n.step + n.len_steps.max(1))
+        self.notes
+            .iter()
+            .position(|n| step >= n.step && step < n.step + n.len_steps.max(1))
     }
 
     /// Toggle a note start at `step`: removes a note starting there, otherwise inserts a
@@ -90,13 +96,22 @@ impl Groove {
         if let Some(i) = self.note_at(step) {
             self.notes[i].len_steps = step - self.notes[i].step;
         }
-        self.notes.push(GrooveNote { step, len_steps: 1, accent: false });
+        self.notes.push(GrooveNote {
+            step,
+            len_steps: 1,
+            accent: false,
+        });
         self.notes.sort_by_key(|n| n.step);
     }
 
     /// Extend the closest preceding note so that it sustains through `step`.
     pub fn extend_to(&mut self, step: u32) {
-        if let Some(n) = self.notes.iter_mut().filter(|n| n.step <= step).max_by_key(|n| n.step) {
+        if let Some(n) = self
+            .notes
+            .iter_mut()
+            .filter(|n| n.step <= step)
+            .max_by_key(|n| n.step)
+        {
             n.len_steps = step - n.step + 1;
         }
     }
@@ -131,10 +146,19 @@ fn pattern(name: &str, sig: TimeSignature, spb: u32, per_beat: &[(u32, u32, bool
     let mut notes = Vec::new();
     for beat in 0..sig.num.max(1) {
         for &(step, len, accent) in per_beat {
-            notes.push(GrooveNote { step: beat * spb + step, len_steps: len, accent: accent && beat == 0 });
+            notes.push(GrooveNote {
+                step: beat * spb + step,
+                len_steps: len,
+                accent: accent && beat == 0,
+            });
         }
     }
-    Groove { name: name.to_owned(), steps_per_beat: spb, bars: 1, notes }
+    Groove {
+        name: name.to_owned(),
+        steps_per_beat: spb,
+        bars: 1,
+        notes,
+    }
 }
 
 /// Built-in groove library, generated for the given time signature.
@@ -145,30 +169,74 @@ pub fn builtin_grooves(sig: TimeSignature) -> Vec<Groove> {
         pattern("Offbeat eighths", sig, 2, &[(1, 1, false)]),
         pattern("Staccato eighths", sig, 4, &[(0, 1, true), (2, 1, false)]),
         pattern("Shuffle", sig, 3, &[(0, 2, true), (2, 1, false)]),
-        pattern("Triplets", sig, 3, &[(0, 1, true), (1, 1, false), (2, 1, false)]),
-        pattern("Sixteenth notes", sig, 4, &[(0, 1, true), (1, 1, false), (2, 1, false), (3, 1, false)]),
-        pattern("Gallop (8th + 2×16th)", sig, 4, &[(0, 2, true), (2, 1, false), (3, 1, false)]),
+        pattern(
+            "Triplets",
+            sig,
+            3,
+            &[(0, 1, true), (1, 1, false), (2, 1, false)],
+        ),
+        pattern(
+            "Sixteenth notes",
+            sig,
+            4,
+            &[(0, 1, true), (1, 1, false), (2, 1, false), (3, 1, false)],
+        ),
+        pattern(
+            "Gallop (8th + 2×16th)",
+            sig,
+            4,
+            &[(0, 2, true), (2, 1, false), (3, 1, false)],
+        ),
     ];
     // Two-bar syncopated funk figure on a 16th grid.
     let spb = 4;
     let steps_per_bar = spb * sig.num.max(1);
-    let figure = [(0u32, 3u32, true), (3, 1, false), (6, 2, false), (10, 1, false), (11, 1, false), (14, 2, false)];
+    let figure = [
+        (0u32, 3u32, true),
+        (3, 1, false),
+        (6, 2, false),
+        (10, 1, false),
+        (11, 1, false),
+        (14, 2, false),
+    ];
     let mut notes = Vec::new();
     for bar in 0..2 {
         for &(s, l, a) in &figure {
             let s = s % steps_per_bar;
-            notes.push(GrooveNote { step: bar * steps_per_bar + s, len_steps: l, accent: a });
+            notes.push(GrooveNote {
+                step: bar * steps_per_bar + s,
+                len_steps: l,
+                accent: a,
+            });
         }
     }
     notes.dedup_by_key(|n| n.step);
-    v.push(Groove { name: "Syncopated funk".into(), steps_per_beat: spb, bars: 2, notes });
+    v.push(Groove {
+        name: "Syncopated funk".into(),
+        steps_per_beat: spb,
+        bars: 2,
+        notes,
+    });
     v.push(Groove {
         name: "Dotted quarter + eighth".into(),
         steps_per_beat: 2,
         bars: 1,
         notes: (0..sig.num.max(1) * 2)
             .step_by(4)
-            .flat_map(|s| [GrooveNote { step: s, len_steps: 3, accent: s == 0 }, GrooveNote { step: s + 3, len_steps: 1, accent: false }])
+            .flat_map(|s| {
+                [
+                    GrooveNote {
+                        step: s,
+                        len_steps: 3,
+                        accent: s == 0,
+                    },
+                    GrooveNote {
+                        step: s + 3,
+                        len_steps: 1,
+                        accent: false,
+                    },
+                ]
+            })
             .filter(|n| n.step < sig.num.max(1) * 2)
             .collect(),
     });
@@ -194,7 +262,10 @@ mod tests {
     #[test]
     fn two_bar_groove_wraps() {
         let sig = TimeSignature::default();
-        let g = builtin_grooves(sig).into_iter().find(|g| g.bars == 2).unwrap();
+        let g = builtin_grooves(sig)
+            .into_iter()
+            .find(|g| g.bars == 2)
+            .unwrap();
         assert_eq!(g.bar_notes(sig, 0), g.bar_notes(sig, 2));
         assert!(!g.bar_notes(sig, 1).is_empty());
     }
@@ -202,7 +273,12 @@ mod tests {
     #[test]
     fn editing() {
         let sig = TimeSignature::default();
-        let mut g = Groove { name: "x".into(), steps_per_beat: 4, bars: 1, notes: vec![] };
+        let mut g = Groove {
+            name: "x".into(),
+            steps_per_beat: 4,
+            bars: 1,
+            notes: vec![],
+        };
         g.toggle_step(0);
         g.extend_to(3);
         assert_eq!(g.notes[0].len_steps, 4);
@@ -214,7 +290,14 @@ mod tests {
         g.toggle_step(2);
         assert_eq!(g.notes.len(), 1);
         g.set_steps_per_beat(2);
-        assert_eq!(g.notes[0], GrooveNote { step: 0, len_steps: 1, accent: false });
+        assert_eq!(
+            g.notes[0],
+            GrooveNote {
+                step: 0,
+                len_steps: 1,
+                accent: false
+            }
+        );
         assert_eq!(g.bar_notes(sig, 0)[0].len, PPQ / 2);
     }
 }

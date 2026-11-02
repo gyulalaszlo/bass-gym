@@ -34,7 +34,12 @@ pub struct PresetBar {
 impl ExerciseSlot {
     pub fn new(et: Box<dyn ExerciseType>, store: &PresetStore) -> Self {
         let baseline = et.save_preset();
-        let mut slot = Self { et, presets: Vec::new(), current: None, baseline };
+        let mut slot = Self {
+            et,
+            presets: Vec::new(),
+            current: None,
+            baseline,
+        };
         slot.refresh(store);
         slot
     }
@@ -48,11 +53,13 @@ impl ExerciseSlot {
     }
 
     fn current_preset(&self) -> Option<&StoredPreset> {
-        self.current.and_then(|id| self.presets.iter().find(|p| p.envelope.id == id))
+        self.current
+            .and_then(|id| self.presets.iter().find(|p| p.envelope.id == id))
     }
 
     pub fn current_name(&self) -> String {
-        self.current_preset().map_or_else(|| "Default".to_owned(), |p| p.envelope.name.clone())
+        self.current_preset()
+            .map_or_else(|| "Default".to_owned(), |p| p.envelope.name.clone())
     }
 
     /// Loads the factory default.
@@ -66,8 +73,17 @@ impl ExerciseSlot {
     }
 
     pub fn load(&mut self, id: Uuid) -> Result<(), String> {
-        let p = self.presets.iter().find(|p| p.envelope.id == id).ok_or("preset not found")?;
-        let data = migrate(self.et.as_ref(), p.envelope.version, p.envelope.data.clone()).map_err(|e| e.to_string())?;
+        let p = self
+            .presets
+            .iter()
+            .find(|p| p.envelope.id == id)
+            .ok_or("preset not found")?;
+        let data = migrate(
+            self.et.as_ref(),
+            p.envelope.version,
+            p.envelope.data.clone(),
+        )
+        .map_err(|e| e.to_string())?;
         self.et.load_preset(data).map_err(|e| format!("{e:#}"))?;
         self.current = Some(id);
         self.baseline = self.et.save_preset();
@@ -78,13 +94,19 @@ impl ExerciseSlot {
     pub fn restore_working(&mut self, data: Value) {
         let data = migrate(self.et.as_ref(), self.et.current_version(), data);
         if let Ok(d) = data
-            && let Err(e) = self.et.load_preset(d) {
-                log::warn!("{}: couldn't restore working state: {e:#}", self.et.id());
-            }
+            && let Err(e) = self.et.load_preset(d)
+        {
+            log::warn!("{}: couldn't restore working state: {e:#}", self.et.id());
+        }
     }
 
     fn save_as(&mut self, store: &PresetStore, name: &str) -> Result<(), String> {
-        let env = PresetEnvelope::new(self.et.id(), self.et.current_version(), name, self.et.save_preset());
+        let env = PresetEnvelope::new(
+            self.et.id(),
+            self.et.current_version(),
+            name,
+            self.et.save_preset(),
+        );
         store.save(&env).map_err(|e| e.to_string())?;
         let id = env.id;
         self.refresh(store);
@@ -94,7 +116,9 @@ impl ExerciseSlot {
     }
 
     fn save(&mut self, store: &PresetStore) -> Result<(), String> {
-        let Some(p) = self.current_preset() else { return Err("no preset selected".into()) };
+        let Some(p) = self.current_preset() else {
+            return Err("no preset selected".into());
+        };
         let mut env = p.envelope.clone();
         env.data = self.et.save_preset();
         env.version = self.et.current_version();
@@ -106,7 +130,9 @@ impl ExerciseSlot {
     }
 
     fn rename(&mut self, store: &PresetStore, name: &str) -> Result<(), String> {
-        let Some(p) = self.current_preset() else { return Err("no preset selected".into()) };
+        let Some(p) = self.current_preset() else {
+            return Err("no preset selected".into());
+        };
         let mut env = p.envelope.clone();
         env.name = name.to_owned();
         env.modified = Utc::now();
@@ -116,7 +142,9 @@ impl ExerciseSlot {
     }
 
     fn delete(&mut self, store: &PresetStore) -> Result<(), String> {
-        let Some(p) = self.current_preset() else { return Err("no preset selected".into()) };
+        let Some(p) = self.current_preset() else {
+            return Err("no preset selected".into());
+        };
         store.delete(&p.envelope).map_err(|e| e.to_string())?;
         self.current = None;
         self.refresh(store);
@@ -205,7 +233,11 @@ impl PresetBar {
             });
         });
         if let Some((msg, ok)) = &self.message {
-            ui.label(RichText::new(msg).small().color(if *ok { theme::green() } else { theme::red() }));
+            ui.label(RichText::new(msg).small().color(if *ok {
+                theme::green()
+            } else {
+                theme::red()
+            }));
         }
 
         if let Some(dialog) = &mut self.dialog {
@@ -215,15 +247,24 @@ impl PresetBar {
                 let is_new = matches!(dialog, Dialog::New(_));
                 match dialog {
                     Dialog::New(name) | Dialog::Rename(name) => {
-                        ui.heading(if is_new { "New preset" } else { "Rename preset" });
+                        ui.heading(if is_new {
+                            "New preset"
+                        } else {
+                            "Rename preset"
+                        });
                         let resp = ui.text_edit_singleline(name);
                         resp.request_focus();
                         let valid = !name.trim().is_empty();
-                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let enter =
+                            resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         ui.horizontal(|ui| {
                             if ui.add_enabled(valid, button("Save")).clicked() || (enter && valid) {
                                 let name = name.trim().to_owned();
-                                result = Some(if is_new { slot.save_as(store, &name) } else { slot.rename(store, &name) });
+                                result = Some(if is_new {
+                                    slot.save_as(store, &name)
+                                } else {
+                                    slot.rename(store, &name)
+                                });
                                 close = true;
                             }
                             if ui.add(button("Cancel")).clicked() {
@@ -233,7 +274,10 @@ impl PresetBar {
                     }
                     Dialog::Delete => {
                         ui.heading("Delete preset");
-                        ui.label(format!("Delete “{}”? This can't be undone.", slot.current_name()));
+                        ui.label(format!(
+                            "Delete “{}”? This can't be undone.",
+                            slot.current_name()
+                        ));
                         ui.horizontal(|ui| {
                             if ui.add(button("Delete").color(theme::red())).clicked() {
                                 result = Some(slot.delete(store));

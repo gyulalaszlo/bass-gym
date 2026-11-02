@@ -41,7 +41,10 @@ pub struct Clock {
 
 impl Default for Clock {
     fn default() -> Self {
-        Self { inner: Arc::default(), epoch: Instant::now() }
+        Self {
+            inner: Arc::default(),
+            epoch: Instant::now(),
+        }
     }
 }
 

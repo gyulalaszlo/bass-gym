@@ -11,7 +11,9 @@ use bg_core::session::{AutoStop, Span, StopCondition, Trigger};
 use bg_core::{Grade, GradeMode, Planner, ScoringThresholds, SessionConfig};
 use bg_dsp::{NoteDetector, NoteDetectorConfig, NoteEvent};
 use bg_exercises::basic_chords::accompaniment::{ChordAccompaniment, SharedChords, lock_chords};
-use bg_exercises::basic_chords::{BasicChords, BasicChordsData, ChordLength, FixedSource, ProgressionKind, resolve_progression};
+use bg_exercises::basic_chords::{
+    BasicChords, BasicChordsData, ChordLength, FixedSource, ProgressionKind, resolve_progression,
+};
 use bg_exercises::timing_session::{SharedTiming, TimingSession, lock};
 use bg_ui::ExerciseType;
 use serde_json::json;
@@ -25,8 +27,16 @@ fn pluck(out: &mut [f32], start: f64, dur: f64, midi: i32) {
     let len = ((dur + 0.03) * SR as f64) as usize;
     for i in 0..len.min(out.len().saturating_sub(s0)) {
         let t = i as f32 / SR;
-        let env = (t / 0.002).min(1.0) * (-t / 1.0).exp() * if t as f64 > dur { (-(t - dur as f32) / 0.006).exp() } else { 1.0 };
-        let tone: f32 = (1..6).map(|h| (TAU * freq * h as f32 * t).sin() / h as f32).sum();
+        let env = (t / 0.002).min(1.0)
+            * (-t / 1.0).exp()
+            * if t as f64 > dur {
+                (-(t - dur as f32) / 0.006).exp()
+            } else {
+                1.0
+            };
+        let tone: f32 = (1..6)
+            .map(|h| (TAU * freq * h as f32 * t).sin() / h as f32)
+            .sum();
         seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let click = ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * (-t / 0.0015).exp() * 0.3;
         out[s0 + i] += 0.4 * (env * tone + click);
@@ -37,22 +47,49 @@ fn session_cfg() -> SessionConfig {
     SessionConfig {
         tempo: 120.0,
         count_in_bars: 1,
-        auto_stop: AutoStop { enabled: true, when: StopCondition::Trigger(Trigger::After(Span::Bars(4))), ..Default::default() },
+        auto_stop: AutoStop {
+            enabled: true,
+            when: StopCondition::Trigger(Trigger::After(Span::Bars(4))),
+            ..Default::default()
+        },
         ..Default::default() // quarter-note groove
     }
 }
 
 fn run(mode: GradeMode) -> (SharedTiming, SharedChords) {
-    let scale = Scale { root: 0, mode: harmony::Mode::Ionian };
+    let scale = Scale {
+        root: 0,
+        mode: harmony::Mode::Ionian,
+    };
     let specs = harmony::parse_progression("ii7 V7 I7 I7", &scale).unwrap();
     let progression: Vec<_> = specs.iter().map(|&s| scale.realize(s)).collect();
     let chords = SharedChords::default();
-    let acc = ChordAccompaniment::new(progression, scale, harmony::checker("chord_or_scale"), "halves".into(), 1.0, 0.3, 0.7, 440.0, 7, chords.clone());
+    let acc = ChordAccompaniment::new(
+        progression,
+        scale,
+        harmony::checker("chord_or_scale"),
+        "halves".into(),
+        1.0,
+        0.3,
+        0.7,
+        440.0,
+        7,
+        chords.clone(),
+    );
     let timing = SharedTiming::default();
-    let mut session = TimingSession::with_accompaniment(session_cfg(), ScoringThresholds::default(), timing.clone(), Box::new(acc), mode);
+    let mut session = TimingSession::with_accompaniment(
+        session_cfg(),
+        ScoringThresholds::default(),
+        timing.clone(),
+        Box::new(acc),
+        mode,
+    );
 
     let mut planner = Planner::new(session_cfg(), 0.3);
-    let expected: Vec<f64> = std::iter::from_fn(|| planner.next_bar(&())).flat_map(|b| b.notes).map(|n| n.time).collect();
+    let expected: Vec<f64> = std::iter::from_fn(|| planner.next_bar(&()))
+        .flat_map(|b| b.notes)
+        .map(|n| n.time)
+        .collect();
     assert_eq!(expected.len(), 16);
     // (midi, timing error ms) per beat; None = rest.
     let bass: [Option<(i32, f64)>; 12] = [
@@ -118,8 +155,19 @@ fn chord_session_grades_harmony() {
     use Grade::*;
     let (timing, chords) = run(GradeMode::Combined);
     let t = lock(&timing);
-    let grades: Vec<Grade> = t.matcher.outcomes.iter().map(|o| o.grade.unwrap()).collect();
-    assert_eq!(grades, [Good, Good, Good, Good, Good, Good, Ok, Poor, Good, Ok, Good, Good, Missed, Missed, Missed, Missed]);
+    let grades: Vec<Grade> = t
+        .matcher
+        .outcomes
+        .iter()
+        .map(|o| o.grade.unwrap())
+        .collect();
+    assert_eq!(
+        grades,
+        [
+            Good, Good, Good, Good, Good, Good, Ok, Poor, Good, Ok, Good, Good, Missed, Missed,
+            Missed, Missed
+        ]
+    );
     let stats = t.matcher.stats();
     assert_eq!(stats.harmony, [10, 1, 1, 0]);
 
@@ -128,17 +176,31 @@ fn chord_session_grades_harmony() {
     let names: Vec<String> = c.spans.iter().map(|s| s.chord.name()).collect();
     assert_eq!(names, ["Dm7", "G7", "Cmaj7", "Cmaj7"]);
     for s in &c.spans {
-        assert!(c.piano.iter().any(|n| (n.time - s.start).abs() < 1e-6), "no attack at {}", s.start);
+        assert!(
+            c.piano.iter().any(|n| (n.time - s.start).abs() < 1e-6),
+            "no attack at {}",
+            s.start
+        );
         assert!((s.end - s.start - 2.0).abs() < 1e-6);
     }
     let top = |v: &Vec<u8>| *v.last().unwrap() as i32;
     for w in c.spans.windows(2) {
-        assert!((top(&w[0].voicing) - top(&w[1].voicing)).abs() <= 5, "{:?} -> {:?}", w[0].voicing, w[1].voicing);
+        assert!(
+            (top(&w[0].voicing) - top(&w[1].voicing)).abs() <= 5,
+            "{:?} -> {:?}",
+            w[0].voicing,
+            w[1].voicing
+        );
     }
 
     let (timing, _) = run(GradeMode::Separate);
     let t = lock(&timing);
-    let grades: Vec<Grade> = t.matcher.outcomes.iter().map(|o| o.grade.unwrap()).collect();
+    let grades: Vec<Grade> = t
+        .matcher
+        .outcomes
+        .iter()
+        .map(|o| o.grade.unwrap())
+        .collect();
     assert_eq!(grades[4..8], [Good, Good, Good, Good]);
     assert_eq!(t.matcher.outcomes[7].harmony_grade, Some(Poor));
     assert_eq!(t.matcher.outcomes[9].grade, Some(Ok));
@@ -162,7 +224,10 @@ fn v1_presets_migrate() {
     assert_eq!(d.progression.random_len, 6);
     assert_eq!(d.chord_length, ChordLength::Two);
     assert!((d.jazziness - 0.35).abs() < 1e-6);
-    assert_eq!((d.seed, d.checker.as_str(), d.session.tempo), (42, "chord_or_scale", 100.0));
+    assert_eq!(
+        (d.seed, d.checker.as_str(), d.session.tempo),
+        (42, "chord_or_scale", 100.0)
+    );
     let mut et = et;
     et.load_preset(data).unwrap();
     assert_eq!(et.current_version(), 2);
@@ -171,7 +236,11 @@ fn v1_presets_migrate() {
 #[test]
 fn progressions_resolve_in_every_mode() {
     let mut d = BasicChordsData::default();
-    for kind in [ProgressionKind::Fixed, ProgressionKind::SemiRandom, ProgressionKind::Random] {
+    for kind in [
+        ProgressionKind::Fixed,
+        ProgressionKind::SemiRandom,
+        ProgressionKind::Random,
+    ] {
         d.progression.kind = kind;
         let a = resolve_progression(&d, 5).unwrap();
         assert!(!a.is_empty());
@@ -183,6 +252,10 @@ fn progressions_resolve_in_every_mode() {
     assert!(resolve_progression(&d, 1).is_err());
     d.progression.kind = ProgressionKind::SemiRandom;
     d.progression.pool = vec!["ii_v_i".into()];
-    let names: Vec<String> = resolve_progression(&d, 3).unwrap().iter().map(|c| c.roman()).collect();
+    let names: Vec<String> = resolve_progression(&d, 3)
+        .unwrap()
+        .iter()
+        .map(|c| c.roman())
+        .collect();
     assert_eq!(&names[..2], ["ii7", "V7"]);
 }

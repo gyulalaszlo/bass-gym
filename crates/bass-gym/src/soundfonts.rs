@@ -11,11 +11,17 @@ pub fn user_dir() -> Option<PathBuf> {
 /// executable, in a macOS bundle's `Resources`), then the source tree for `cargo run`.
 pub fn dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = user_dir().into_iter().collect();
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+    {
         dirs.push(exe_dir.join("soundfonts"));
         dirs.push(exe_dir.join("../Resources/soundfonts"));
     }
-    dirs.push(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/soundfonts")));
+    dirs.push(PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/soundfonts"
+    )));
     dirs
 }
 

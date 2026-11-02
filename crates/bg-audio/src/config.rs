@@ -18,7 +18,13 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { input_device: None, input_channel: Some(0), output_device: None, sample_rate: None, buffer_frames: Some(256) }
+        Self {
+            input_device: None,
+            input_channel: Some(0),
+            output_device: None,
+            sample_rate: None,
+            buffer_frames: Some(256),
+        }
     }
 }
 
@@ -39,7 +45,12 @@ pub struct AnalysisConfig {
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
-        Self { latency_ms: 0.0, latency_trim_ms: 0.0, detector: NoteDetectorConfig::default(), tuner_gate_db: -60.0 }
+        Self {
+            latency_ms: 0.0,
+            latency_trim_ms: 0.0,
+            detector: NoteDetectorConfig::default(),
+            tuner_gate_db: -60.0,
+        }
     }
 }
 
@@ -96,7 +107,13 @@ impl SoundConfig {
     /// The stored cutoff for an instrument, or its default: the bright FM e-piano is
     /// softened, sampled instruments are left alone.
     pub fn lowpass_setting(&self, instrument: &str) -> f32 {
-        self.instrument_lowpass.get(instrument).copied().unwrap_or(if instrument == "synth.epiano" { 2_500.0 } else { LOWPASS_OFF })
+        self.instrument_lowpass.get(instrument).copied().unwrap_or(
+            if instrument == "synth.epiano" {
+                2_500.0
+            } else {
+                LOWPASS_OFF
+            },
+        )
     }
 }
 
@@ -106,7 +123,8 @@ mod tests {
 
     #[test]
     fn normalize_folds_trim_into_correction() {
-        let mut c: AnalysisConfig = serde_json::from_str(r#"{"latency_ms": 0.8, "latency_trim_ms": -8.0}"#).unwrap();
+        let mut c: AnalysisConfig =
+            serde_json::from_str(r#"{"latency_ms": 0.8, "latency_trim_ms": -8.0}"#).unwrap();
         let total = c.total_latency();
         c.normalize();
         assert!((c.latency_ms - -7.2).abs() < 1e-4);

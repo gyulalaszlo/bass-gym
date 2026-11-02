@@ -30,16 +30,34 @@ impl PreferencePage for BasicChordsPage {
     fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut PrefsCtx) {
         let mut p: BasicChordsPrefs = ctx.settings.get(BasicChordsPrefs::ID);
         theme::section(ui, "Grading", |ui| {
-            ui.radio_value(&mut p.grade_mode, GradeMode::Combined, "Worst of timing and harmony");
-            ui.label(egui::RichText::new("A note is only good when it's both on time and fits the chord.").small().color(theme::dim()));
+            ui.radio_value(
+                &mut p.grade_mode,
+                GradeMode::Combined,
+                "Worst of timing and harmony",
+            );
+            ui.label(
+                egui::RichText::new(
+                    "A note is only good when it's both on time and fits the chord.",
+                )
+                .small()
+                .color(theme::dim()),
+            );
             ui.add_space(4.0);
-            ui.radio_value(&mut p.grade_mode, GradeMode::Separate, "Separate timing and harmony");
+            ui.radio_value(
+                &mut p.grade_mode,
+                GradeMode::Separate,
+                "Separate timing and harmony",
+            );
             ui.label(
                 egui::RichText::new("Note colours and the hit rate cover timing only; harmony is shown as a dot above each note and in its own statistics.")
                     .small()
                     .color(theme::dim()),
             );
-            ui.label(egui::RichText::new("Applies to new sessions.").small().color(theme::dim()));
+            ui.label(
+                egui::RichText::new("Applies to new sessions.")
+                    .small()
+                    .color(theme::dim()),
+            );
         });
         ctx.settings.set(BasicChordsPrefs::ID, &p);
     }

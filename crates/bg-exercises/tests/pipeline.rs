@@ -18,8 +18,16 @@ fn pluck(out: &mut [f32], start: f64, dur: f64, freq: f32) {
     let len = ((dur + 0.03) * SR as f64) as usize;
     for i in 0..len.min(out.len().saturating_sub(s0)) {
         let t = i as f32 / SR;
-        let env = (t / 0.002).min(1.0) * (-t / 1.0).exp() * if t as f64 > dur { (-(t - dur as f32) / 0.006).exp() } else { 1.0 };
-        let tone: f32 = (1..6).map(|h| (TAU * freq * h as f32 * t).sin() / h as f32).sum();
+        let env = (t / 0.002).min(1.0)
+            * (-t / 1.0).exp()
+            * if t as f64 > dur {
+                (-(t - dur as f32) / 0.006).exp()
+            } else {
+                1.0
+            };
+        let tone: f32 = (1..6)
+            .map(|h| (TAU * freq * h as f32 * t).sin() / h as f32)
+            .sum();
         seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let click = ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * (-t / 0.0015).exp() * 0.3;
         out[s0 + i] += 0.4 * (env * tone + click);
@@ -33,12 +41,19 @@ fn injected_timing_errors_are_measured() {
         tempo: 120.0,
         count_in_bars: 1,
         groove: bg_core::groove::builtin_grooves(Default::default())[1].clone(),
-        auto_stop: AutoStop { enabled: true, when: StopCondition::Trigger(Trigger::After(Span::Bars(1))), ..Default::default() },
+        auto_stop: AutoStop {
+            enabled: true,
+            when: StopCondition::Trigger(Trigger::After(Span::Bars(1))),
+            ..Default::default()
+        },
         ..Default::default()
     };
     // The session starts 0.3 s after "now"; an identical planner tells us the note times.
     let mut planner = Planner::new(cfg.clone(), 0.3);
-    let expected: Vec<(f64, f64)> = std::iter::from_fn(|| planner.next_bar(&())).flat_map(|b| b.notes).map(|n| (n.time, n.len)).collect();
+    let expected: Vec<(f64, f64)> = std::iter::from_fn(|| planner.next_bar(&()))
+        .flat_map(|b| b.notes)
+        .map(|n| (n.time, n.len))
+        .collect();
     assert_eq!(expected.len(), 8);
 
     let shared = SharedTiming::default();
@@ -65,8 +80,12 @@ fn injected_timing_errors_are_measured() {
         detector.process(chunk, &mut events);
         for ev in &events {
             match *ev {
-                NoteEvent::On { sample, level_db } => session.note_on(sample as f64 / SR as f64, level_db),
-                NoteEvent::Off { sample, peak_db } => session.note_off(sample as f64 / SR as f64, peak_db, None),
+                NoteEvent::On { sample, level_db } => {
+                    session.note_on(sample as f64 / SR as f64, level_db)
+                }
+                NoteEvent::Off { sample, peak_db } => {
+                    session.note_off(sample as f64 / SR as f64, peak_db, None)
+                }
             }
         }
         let now = ((i + 1) * block) as f64 / SR as f64;
@@ -84,18 +103,30 @@ fn injected_timing_errors_are_measured() {
         if err.is_nan() {
             assert_eq!(o.grade, Some(Grade::Missed), "note {i}");
         } else {
-            let measured = o.timing_ms.unwrap_or_else(|| panic!("note {i} not matched: {o:?}"));
-            assert!((measured as f64 - err).abs() < 2.5, "note {i}: measured {measured} ms, injected {err} ms");
+            let measured = o
+                .timing_ms
+                .unwrap_or_else(|| panic!("note {i} not matched: {o:?}"));
+            assert!(
+                (measured as f64 - err).abs() < 2.5,
+                "note {i}: measured {measured} ms, injected {err} ms"
+            );
         }
     }
     let grades: Vec<Grade> = outcomes.iter().map(|o| o.grade.unwrap()).collect();
-    assert_eq!(&grades[..5], &[Grade::Good, Grade::Good, Grade::Good, Grade::Ok, Grade::Ok]);
+    assert_eq!(
+        &grades[..5],
+        &[Grade::Good, Grade::Good, Grade::Good, Grade::Ok, Grade::Ok]
+    );
     assert_eq!(grades[5], Grade::Missed);
     assert_eq!(grades[6], Grade::Poor);
     let stats = s.matcher.stats();
     assert_eq!(stats.extra, 1);
     assert_eq!(stats.count(Grade::Missed), 1);
-    let injected: Vec<f32> = errors_ms.iter().filter(|e| !e.is_nan()).map(|&e| e as f32).collect();
+    let injected: Vec<f32> = errors_ms
+        .iter()
+        .filter(|e| !e.is_nan())
+        .map(|&e| e as f32)
+        .collect();
     assert!((mean(&stats.timing_ms).unwrap() - mean(&injected).unwrap()).abs() < 1.5);
     assert!((std_dev(&stats.timing_ms).unwrap() - std_dev(&injected).unwrap()).abs() < 1.5);
     // Notes were held for 85% of their written length (plus a ~6 ms damped tail).
@@ -105,7 +136,11 @@ fn injected_timing_errors_are_measured() {
 
 #[test]
 fn next_bar_is_always_planned() {
-    let cfg = SessionConfig { tempo: 120.0, count_in_bars: 1, ..Default::default() };
+    let cfg = SessionConfig {
+        tempo: 120.0,
+        count_in_bars: 1,
+        ..Default::default()
+    };
     let shared = SharedTiming::default();
     let mut session = TimingSession::new(cfg, ScoringThresholds::default(), shared.clone());
     session.start(&mut SessionIo::offline(0.0, 0.0));
@@ -114,14 +149,22 @@ fn next_bar_is_always_planned() {
         session.tick(&mut SessionIo::offline(now, 0.0));
         let s = lock(&shared);
         let current = s.bars.iter().rposition(|b| b.start <= now).unwrap();
-        assert!(s.bars.len() >= current + 2, "at {now}: {} bars planned", s.bars.len());
+        assert!(
+            s.bars.len() >= current + 2,
+            "at {now}: {} bars planned",
+            s.bars.len()
+        );
         assert!(s.bars.last().unwrap().end() >= now + 2.0, "at {now}");
     }
 }
 
 #[test]
 fn stops_when_player_stops() {
-    let mut cfg = SessionConfig { tempo: 120.0, count_in_bars: 1, ..Default::default() };
+    let mut cfg = SessionConfig {
+        tempo: 120.0,
+        count_in_bars: 1,
+        ..Default::default()
+    };
     cfg.auto_stop.on_silence = true;
     cfg.auto_stop.silence_bars = 2;
     let shared = SharedTiming::default();
@@ -147,13 +190,21 @@ fn stops_when_player_stops() {
     }
     // 2 bars (4 s) of silence after the last note ended.
     let at = finished_at.expect("session should stop");
-    assert!((at - (last_end + 4.0)).abs() < 0.02, "stopped at {at}, last note ended {last_end}");
+    assert!(
+        (at - (last_end + 4.0)).abs() < 0.02,
+        "stopped at {at}, last note ended {last_end}"
+    );
 
     // Never playing at all stops 2 bars after the count-in.
-    let mut cfg = SessionConfig { tempo: 120.0, count_in_bars: 1, ..Default::default() };
+    let mut cfg = SessionConfig {
+        tempo: 120.0,
+        count_in_bars: 1,
+        ..Default::default()
+    };
     cfg.auto_stop.on_silence = true;
     cfg.auto_stop.silence_bars = 2;
-    let mut session = TimingSession::new(cfg, ScoringThresholds::default(), SharedTiming::default());
+    let mut session =
+        TimingSession::new(cfg, ScoringThresholds::default(), SharedTiming::default());
     session.start(&mut SessionIo::offline(0.0, 0.0));
     let mut t = 0.0;
     while session.tick(&mut SessionIo::offline(t, 0.0)) == SessionState::Running && t < 20.0 {

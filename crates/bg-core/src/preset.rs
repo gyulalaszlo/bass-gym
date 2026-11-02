@@ -29,13 +29,24 @@ pub struct PresetEnvelope {
 impl PresetEnvelope {
     pub fn new(exercise: &str, version: u32, name: &str, data: Value) -> Self {
         let now = Utc::now();
-        Self { format: ENVELOPE_FORMAT, id: Uuid::new_v4(), name: name.to_owned(), exercise: exercise.to_owned(), version, created: now, modified: now, data }
+        Self {
+            format: ENVELOPE_FORMAT,
+            id: Uuid::new_v4(),
+            name: name.to_owned(),
+            exercise: exercise.to_owned(),
+            version,
+            created: now,
+            modified: now,
+            data,
+        }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum PresetError {
-    #[error("preset was written by a newer version (schema v{found}, this app supports v{supported})")]
+    #[error(
+        "preset was written by a newer version (schema v{found}, this app supports v{supported})"
+    )]
     TooNew { found: u32, supported: u32 },
     #[error("no migration from schema v{0}")]
     NoMigration(u32),
@@ -58,10 +69,17 @@ pub trait PresetSchema {
 }
 
 /// Brings `data` from `version` up to the schema's current version.
-pub fn migrate(schema: &dyn PresetSchema, version: u32, mut data: Value) -> Result<Value, PresetError> {
+pub fn migrate(
+    schema: &dyn PresetSchema,
+    version: u32,
+    mut data: Value,
+) -> Result<Value, PresetError> {
     let current = schema.current_version();
     if version > current {
-        return Err(PresetError::TooNew { found: version, supported: current });
+        return Err(PresetError::TooNew {
+            found: version,
+            supported: current,
+        });
     }
     for v in version..current {
         data = schema.migrate_step(v, data)?;
@@ -99,7 +117,9 @@ impl PresetStore {
     /// Lists the presets of one exercise, sorted by name. Unreadable files are reported as
     /// incompatible entries (when their envelope parses) or skipped.
     pub fn list(&self, exercise: &str, schema: &dyn PresetSchema) -> Vec<StoredPreset> {
-        let Ok(entries) = std::fs::read_dir(self.dir(exercise)) else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(self.dir(exercise)) else {
+            return Vec::new();
+        };
         let mut out: Vec<StoredPreset> = entries
             .flatten()
             .map(|e| e.path())
@@ -113,8 +133,14 @@ impl PresetStore {
                         return None;
                     }
                 };
-                let incompatible = migrate(schema, envelope.version, envelope.data.clone()).err().map(|e| e.to_string());
-                Some(StoredPreset { path, envelope, incompatible })
+                let incompatible = migrate(schema, envelope.version, envelope.data.clone())
+                    .err()
+                    .map(|e| e.to_string());
+                Some(StoredPreset {
+                    path,
+                    envelope,
+                    incompatible,
+                })
             })
             .collect();
         out.sort_by_key(|p| p.envelope.name.to_lowercase());
@@ -122,7 +148,8 @@ impl PresetStore {
     }
 
     pub fn path_for(&self, envelope: &PresetEnvelope) -> PathBuf {
-        self.dir(&envelope.exercise).join(format!("{}.json", envelope.id))
+        self.dir(&envelope.exercise)
+            .join(format!("{}.json", envelope.id))
     }
 
     /// Writes atomically (temp file + rename).
@@ -173,7 +200,10 @@ mod tests {
     fn migrates_stepwise() {
         let d = migrate(&V3, 1, json!({"bpm": 100})).unwrap();
         assert_eq!(d, json!({"tempo": 100, "swing": 0.0}));
-        assert!(matches!(migrate(&V3, 4, json!({})), Err(PresetError::TooNew { .. })));
+        assert!(matches!(
+            migrate(&V3, 4, json!({})),
+            Err(PresetError::TooNew { .. })
+        ));
     }
 
     #[test]

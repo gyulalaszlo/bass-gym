@@ -11,20 +11,35 @@ pub fn groove_editor(ui: &mut egui::Ui, groove: &mut Groove, sig: TimeSignature)
     ui.horizontal_wrapped(|ui| {
         theme::caption(ui, "Grid");
         let mut spb = groove.steps_per_beat;
-        crate::widgets::controls::dropdown_value(ui, "groove_spb", &mut spb, [1, 2, 3, 4, 6, 8], |v| spb_label(*v).to_string());
+        crate::widgets::controls::dropdown_value(
+            ui,
+            "groove_spb",
+            &mut spb,
+            [1, 2, 3, 4, 6, 8],
+            |v| spb_label(*v).to_string(),
+        );
         if spb != groove.steps_per_beat {
             groove.set_steps_per_beat(spb);
             changed = true;
         }
         theme::caption(ui, "Bars");
         let mut bars = groove.bars;
-        if ui.add(crate::widgets::controls::number_field(&mut bars).range(1..=8)).changed() {
+        if ui
+            .add(crate::widgets::controls::number_field(&mut bars).range(1..=8))
+            .changed()
+        {
             groove.bars = bars;
             let total = groove.total_steps(sig);
             groove.notes.retain(|n| n.step < total);
             changed = true;
         }
-        if ui.add(crate::widgets::button(format!("{} Clear", crate::icons::ERASER))).clicked() {
+        if ui
+            .add(crate::widgets::button(format!(
+                "{} Clear",
+                crate::icons::ERASER
+            )))
+            .clicked()
+        {
             groove.notes.clear();
             changed = true;
         }
@@ -38,20 +53,44 @@ pub fn groove_editor(ui: &mut egui::Ui, groove: &mut Groove, sig: TimeSignature)
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 0.0, theme::bg());
     for step in 0..total {
-        let r = Rect::from_min_size(Pos2::new(rect.left() + step as f32 * cell, rect.top()), vec2(cell, rect.height())).shrink(1.0);
+        let r = Rect::from_min_size(
+            Pos2::new(rect.left() + step as f32 * cell, rect.top()),
+            vec2(cell, rect.height()),
+        )
+        .shrink(1.0);
         match groove.note_at(step).map(|i| groove.notes[i]) {
             Some(n) if n.step == step => {
-                p.rect_filled(r, 1.0, if n.accent { theme::text() } else { theme::cyan() });
+                p.rect_filled(
+                    r,
+                    1.0,
+                    if n.accent {
+                        theme::text()
+                    } else {
+                        theme::cyan()
+                    },
+                );
             }
             Some(n) => {
-                p.rect_filled(r.shrink2(vec2(0.0, 8.0)), 0.0, if n.accent { theme::text().gamma_multiply(0.5) } else { theme::cyan().gamma_multiply(0.45) });
+                p.rect_filled(
+                    r.shrink2(vec2(0.0, 8.0)),
+                    0.0,
+                    if n.accent {
+                        theme::text().gamma_multiply(0.5)
+                    } else {
+                        theme::cyan().gamma_multiply(0.45)
+                    },
+                );
             }
             None => {
                 p.rect_stroke(r, 0.0, Stroke::new(1.0, theme::grid()), StrokeKind::Inside);
             }
         }
         if step % spb == 0 {
-            let (w, c) = if step % per_bar == 0 { (2.0, theme::line()) } else { (1.0, theme::dim()) };
+            let (w, c) = if step % per_bar == 0 {
+                (2.0, theme::line())
+            } else {
+                (1.0, theme::dim())
+            };
             p.vline(r.left() - 1.0, rect.y_range(), Stroke::new(w, c));
         }
     }
@@ -70,7 +109,9 @@ pub fn groove_editor(ui: &mut egui::Ui, groove: &mut Groove, sig: TimeSignature)
             changed = true;
         }
     }
-    resp.on_hover_text("Click: add / remove note · Shift+click: extend previous note · Right-click: accent");
+    resp.on_hover_text(
+        "Click: add / remove note · Shift+click: extend previous note · Right-click: accent",
+    );
     if changed {
         groove.name = custom_name(&groove.name);
     }
@@ -90,6 +131,9 @@ fn spb_label(v: u32) -> String {
 }
 
 fn custom_name(name: &str) -> String {
-    if name.ends_with("(edited)") { name.to_owned() } else { format!("{name} (edited)") }
+    if name.ends_with("(edited)") {
+        name.to_owned()
+    } else {
+        format!("{name} (edited)")
+    }
 }
-

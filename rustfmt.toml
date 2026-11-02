@@ -1,0 +1,2 @@
+# Read by rustfmt, `cargo fmt`, editors and the pre-commit hook (.githooks/pre-commit).
+edition = "2024"

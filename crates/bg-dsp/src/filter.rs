@@ -53,7 +53,9 @@ impl Biquad {
 
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
+            - self.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = x;
         self.y2 = self.y1;
@@ -71,7 +73,10 @@ pub struct History {
 
 impl History {
     pub fn new(len: usize) -> Self {
-        Self { buf: vec![0.0; len], pos: 0 }
+        Self {
+            buf: vec![0.0; len],
+            pos: 0,
+        }
     }
 
     #[inline]

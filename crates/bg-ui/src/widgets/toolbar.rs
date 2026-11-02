@@ -82,15 +82,31 @@ pub fn show_toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Toolbar) -> R) -> R {
     let last: Measured = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     let tally = GapTally::default();
     let (r, now) = ui
-        .allocate_ui_with_layout(vec2(width, TOOLBAR_HEIGHT), Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_size(vec2(width, TOOLBAR_HEIGHT));
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let left = ui.cursor().left();
-            let extra = (width - last.items - last.min).max(0.0);
-            let r = add(&mut Toolbar { ui, tally: &tally, extra, weights: last.weight });
-            let used = ui.cursor().left() - left;
-            (r, Measured { items: used - tally.width.get(), min: tally.min.get(), weight: tally.weight.get() })
-        })
+        .allocate_ui_with_layout(
+            vec2(width, TOOLBAR_HEIGHT),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.set_min_size(vec2(width, TOOLBAR_HEIGHT));
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let left = ui.cursor().left();
+                let extra = (width - last.items - last.min).max(0.0);
+                let r = add(&mut Toolbar {
+                    ui,
+                    tally: &tally,
+                    extra,
+                    weights: last.weight,
+                });
+                let used = ui.cursor().left() - left;
+                (
+                    r,
+                    Measured {
+                        items: used - tally.width.get(),
+                        min: tally.min.get(),
+                        weight: tally.weight.get(),
+                    },
+                )
+            },
+        )
         .inner;
     if (now.items - last.items).abs() > 0.5 || now.weight != last.weight || now.min != last.min {
         ui.data_mut(|d| d.insert_temp(id, now));
@@ -101,7 +117,11 @@ pub fn show_toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Toolbar) -> R) -> R {
 
 impl Toolbar<'_> {
     fn gap_width(&self, gap: Gap) -> f32 {
-        let share = if self.weights > 0.0 { self.extra * gap.weight() / self.weights } else { 0.0 };
+        let share = if self.weights > 0.0 {
+            self.extra * gap.weight() / self.weights
+        } else {
+            0.0
+        };
         gap.min() + share
     }
 
@@ -123,10 +143,16 @@ impl Toolbar<'_> {
     /// the live status. Its contents don't change the layout.
     pub fn gap_with<R>(&mut self, gap: Gap, add: impl FnOnce(&mut Ui) -> R) -> R {
         let w = self.gap_width(gap);
-        let (rect, _) = self.ui.allocate_exact_size(vec2(w, TOOLBAR_HEIGHT), egui::Sense::hover());
+        let (rect, _) = self
+            .ui
+            .allocate_exact_size(vec2(w, TOOLBAR_HEIGHT), egui::Sense::hover());
         self.tally(gap, w);
         let inner = rect.shrink2(vec2(Gap::Medium.min(), 0.0));
-        let mut child = self.ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
+        let mut child = self.ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
         child.set_clip_rect(inner.intersect(self.ui.clip_rect()));
         child.spacing_mut().item_spacing.x = 10.0;
         add(&mut child)
@@ -140,17 +166,37 @@ impl Toolbar<'_> {
     /// A group of items, enabled or not (e.g. settings are locked while a session runs).
     pub fn group<R>(&mut self, enabled: bool, add: impl FnOnce(&mut Toolbar) -> R) -> R {
         let (tally, extra, weights) = (self.tally, self.extra, self.weights);
-        self.ui.add_enabled_ui(enabled, |ui| add(&mut Toolbar { ui, tally, extra, weights })).inner
+        self.ui
+            .add_enabled_ui(enabled, |ui| {
+                add(&mut Toolbar {
+                    ui,
+                    tally,
+                    extra,
+                    weights,
+                })
+            })
+            .inner
     }
 
     /// The boxed start / stop button. Also answers the Space key. Returns true when the
     /// session should start or stop.
     pub fn transport(&mut self, running: bool) -> bool {
         let ui = &mut *self.ui;
-        let space = ui.input(|i| i.key_pressed(egui::Key::Space)) && !ui.ctx().egui_wants_keyboard_input();
-        let (text, color) = if running { (format!("{}  STOP", icons::STOP), theme::amber()) } else { (format!("{}  START", icons::PLAY), theme::green()) };
+        let space =
+            ui.input(|i| i.key_pressed(egui::Key::Space)) && !ui.ctx().egui_wants_keyboard_input();
+        let (text, color) = if running {
+            (format!("{}  STOP", icons::STOP), theme::amber())
+        } else {
+            (format!("{}  START", icons::PLAY), theme::green())
+        };
         let clicked = ui
-            .add(button(text).color(color).strong().font(egui::FontId::proportional(16.0)).min_size([118.0, BUTTON_HEIGHT]))
+            .add(
+                button(text)
+                    .color(color)
+                    .strong()
+                    .font(egui::FontId::proportional(16.0))
+                    .min_size([118.0, BUTTON_HEIGHT]),
+            )
             .on_hover_text("Space: start / stop")
             .clicked();
         clicked || space
@@ -159,7 +205,9 @@ impl Toolbar<'_> {
     /// The boxed tap-tempo button. Sets `bpm` once tapped at least 3 times.
     pub fn tap(&mut self, bpm: &mut f32) -> bool {
         let ui = &mut *self.ui;
-        let r = ui.add(button(format!("{} TAP", icons::HAND_TAP)).min_size([88.0, BUTTON_HEIGHT])).on_hover_text("Tap at least 3 times in tempo");
+        let r = ui
+            .add(button(format!("{} TAP", icons::HAND_TAP)).min_size([88.0, BUTTON_HEIGHT]))
+            .on_hover_text("Tap at least 3 times in tempo");
         if r.clicked()
             && let Some(t) = tap_tempo(ui)
         {
@@ -174,12 +222,27 @@ impl Toolbar<'_> {
         let before = *bpm;
         self.ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let step = |ui: &mut Ui, icon: &str, tip: &str| ui.add(egui::Button::new(RichText::new(icon).size(18.0).color(theme::cyan())).frame(false)).on_hover_text(tip).clicked();
+            let step = |ui: &mut Ui, icon: &str, tip: &str| {
+                ui.add(
+                    egui::Button::new(RichText::new(icon).size(18.0).color(theme::cyan()))
+                        .frame(false),
+                )
+                .on_hover_text(tip)
+                .clicked()
+            };
             if step(ui, icons::MINUS, "−1 BPM") {
                 *bpm = (*bpm - 1.0).max(20.0);
             }
-            ui.add(number_field(bpm).range(20.0..=400.0).step(5.0).decimals(0).font(theme::mono(28.0)).suffix("bpm").id_salt("toolbar_bpm"))
-                .on_hover_text("Type a tempo, or use ↑ / ↓ (±5, Shift ±50)");
+            ui.add(
+                number_field(bpm)
+                    .range(20.0..=400.0)
+                    .step(5.0)
+                    .decimals(0)
+                    .font(theme::mono(28.0))
+                    .suffix("bpm")
+                    .id_salt("toolbar_bpm"),
+            )
+            .on_hover_text("Type a tempo, or use ↑ / ↓ (±5, Shift ±50)");
             if step(ui, icons::PLUS, "+1 BPM") {
                 *bpm = (*bpm + 1.0).min(400.0);
             }
@@ -192,8 +255,20 @@ impl Toolbar<'_> {
         let before = *sig;
         let text = RichText::new(format!("{}/{}", sig.num, sig.den)).font(theme::mono(20.0));
         controls::dropdown(self.ui, "toolbar_time_sig", text, |ui| {
-            for (n, d) in [(2, 4), (3, 4), (4, 4), (5, 4), (6, 8), (7, 8), (9, 8), (12, 8)] {
-                if ui.add(selectable(sig.num == n && sig.den == d, format!("{n}/{d}"))).clicked() {
+            for (n, d) in [
+                (2, 4),
+                (3, 4),
+                (4, 4),
+                (5, 4),
+                (6, 8),
+                (7, 8),
+                (9, 8),
+                (12, 8),
+            ] {
+                if ui
+                    .add(selectable(sig.num == n && sig.den == d, format!("{n}/{d}")))
+                    .clicked()
+                {
                     *sig = TimeSignature { num: n, den: d };
                 }
             }
@@ -201,7 +276,9 @@ impl Toolbar<'_> {
             ui.horizontal(|ui| {
                 ui.add(number_field(&mut sig.num).range(1..=15).id_salt("ts_num"));
                 ui.label("/");
-                controls::dropdown_value(ui, "ts_den", &mut sig.den, [2, 4, 8, 16], |d| d.to_string());
+                controls::dropdown_value(ui, "ts_den", &mut sig.den, [2, 4, 8, 16], |d| {
+                    d.to_string()
+                });
             });
         });
         *sig != before
@@ -210,7 +287,15 @@ impl Toolbar<'_> {
     /// An icon button with a caret that opens a panel of options below it. The open
     /// panel and the button form one shape: the panel with a tab on top. `active`
     /// highlights the icon (e.g. when any of the options is on).
-    pub fn menu<R>(&mut self, id_salt: &str, icon: &str, tooltip: &str, active: bool, width: f32, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    pub fn menu<R>(
+        &mut self,
+        id_salt: &str,
+        icon: &str,
+        tooltip: &str,
+        active: bool,
+        width: f32,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> Option<R> {
         let ui = &mut *self.ui;
         let id = ui.make_persistent_id(id_salt);
         let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
@@ -224,20 +309,37 @@ impl Toolbar<'_> {
         let label = format!("{icon} {}", icons::CARET_DOWN);
         let font = egui::FontId::proportional(20.0);
         // Drawn by hand so the label has a fixed horizontal margin (it becomes the tab).
-        let galley = ui.painter().layout_no_wrap(label.clone(), font.clone(), color);
-        let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 2.0 * MENU_PADDING, BUTTON_HEIGHT), egui::Sense::click());
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label.clone(), font.clone(), color);
+        let (rect, resp) = ui.allocate_exact_size(
+            vec2(galley.size().x + 2.0 * MENU_PADDING, BUTTON_HEIGHT),
+            egui::Sense::click(),
+        );
         let resp = resp.on_hover_text(tooltip);
         if ui.is_rect_visible(rect) {
-            let c = if resp.hovered() && ui.is_enabled() { theme::text() } else { color };
-            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, c);
+            let c = if resp.hovered() && ui.is_enabled() {
+                theme::text()
+            } else {
+                color
+            };
+            ui.painter()
+                .galley(rect.center() - galley.size() / 2.0, galley, c);
         }
         if resp.clicked() {
             open = !open;
         }
         // While one of the panel's own dropdowns is open, a click is that dropdown's.
         let child_open = egui::Popup::is_any_open(ui.ctx());
-        let behavior = if child_open { egui::PopupCloseBehavior::IgnoreClicks } else { egui::PopupCloseBehavior::CloseOnClickOutside };
-        let tab = resp.rect.with_min_y(resp.rect.top() - 2.0).with_max_y(resp.rect.bottom() + 6.0);
+        let behavior = if child_open {
+            egui::PopupCloseBehavior::IgnoreClicks
+        } else {
+            egui::PopupCloseBehavior::CloseOnClickOutside
+        };
+        let tab = resp
+            .rect
+            .with_min_y(resp.rect.top() - 2.0)
+            .with_max_y(resp.rect.bottom() + 6.0);
         let inner = egui::Popup::from_response(&resp)
             .id(id.with("panel"))
             .anchor(tab)
@@ -262,9 +364,22 @@ impl Toolbar<'_> {
             let (fill, stroke) = (theme::panel(), egui::Stroke::new(1.0, theme::line()));
             let p = inner.response.rect;
             let outline = sheet_outline(p, tab);
-            painter.set(sheet, Shape::Vec(vec![Shape::rect_filled(p, 0.0, fill), Shape::rect_filled(tab, 0.0, fill), Shape::closed_line(outline, stroke)]));
+            painter.set(
+                sheet,
+                Shape::Vec(vec![
+                    Shape::rect_filled(p, 0.0, fill),
+                    Shape::rect_filled(tab, 0.0, fill),
+                    Shape::closed_line(outline, stroke),
+                ]),
+            );
             // The button is under the sheet; draw its label again on the tab.
-            painter.text(resp.rect.center(), egui::Align2::CENTER_CENTER, label, font, color);
+            painter.text(
+                resp.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                font,
+                color,
+            );
         }
         Some(r)
     }
@@ -273,7 +388,6 @@ impl Toolbar<'_> {
     pub fn separator(&mut self) {
         self.ui.separator();
     }
-
 }
 
 fn tap_tempo(ui: &Ui) -> Option<f32> {
@@ -288,7 +402,8 @@ fn tap_tempo(ui: &Ui) -> Option<f32> {
         taps.remove(0);
     }
     ui.data_mut(|d| d.insert_temp(id, taps.clone()));
-    (taps.len() >= 3).then(|| 60.0 * (taps.len() - 1) as f32 / (taps[taps.len() - 1] - taps[0]) as f32)
+    (taps.len() >= 3)
+        .then(|| 60.0 * (taps.len() - 1) as f32 / (taps[taps.len() - 1] - taps[0]) as f32)
 }
 
 /// Outline of a panel with a tab on its top edge (the tab sits on the panel, flush with

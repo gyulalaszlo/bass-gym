@@ -1,8 +1,8 @@
 //! Basic Timing: play the selected groove on time against the click.
 
 use anyhow::Result;
-use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::SessionConfig;
+use bg_core::preset::{PresetError, PresetSchema};
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::results::results;
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
@@ -21,7 +21,6 @@ pub struct BasicTimingData {
     pub view: ViewOptions,
 }
 
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewOptions {
@@ -31,7 +30,10 @@ pub struct ViewOptions {
 
 impl Default for ViewOptions {
     fn default() -> Self {
-        Self { bars_behind: 1.0, bars_ahead: 2.0 }
+        Self {
+            bars_behind: 1.0,
+            bars_ahead: 2.0,
+        }
     }
 }
 
@@ -95,7 +97,11 @@ impl ExerciseType for BasicTiming {
             if running {
                 ctx.engine.stop_session();
             } else if ctx.engine.clock().is_running() {
-                let logic = TimingSession::new(self.data.session.clone(), ctx.scoring.clone(), self.shared.clone());
+                let logic = TimingSession::new(
+                    self.data.session.clone(),
+                    ctx.scoring.clone(),
+                    self.shared.clone(),
+                );
                 ctx.engine.start_session(Box::new(logic));
                 self.has_results = true;
             }
@@ -109,7 +115,13 @@ impl ExerciseType for BasicTiming {
 
     fn notices(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx) {
         if !ctx.engine.clock().is_running() {
-            ui.label(egui::RichText::new(format!("{} No audio output — check Preferences › Audio", icons::WARNING)).color(theme::amber()));
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} No audio output — check Preferences › Audio",
+                    icons::WARNING
+                ))
+                .color(theme::amber()),
+            );
         }
     }
 
@@ -120,13 +132,35 @@ impl ExerciseType for BasicTiming {
         let steps = self.data.session.groove.steps_per_beat;
         let view = self.data.view.clone();
         if self.has_results {
-            let now = if running { ctx.engine.clock().now() } else { last_time(&self.shared) };
+            let now = if running {
+                ctx.engine.clock().now()
+            } else {
+                last_time(&self.shared)
+            };
             let s = lock(&self.shared);
-            Beatgrid { now, bars: &s.bars, matcher: &s.matcher, steps_per_beat: steps, bars_behind: view.bars_behind, bars_ahead: view.bars_ahead, chords: &[] }.show(ui, 150.0);
+            Beatgrid {
+                now,
+                bars: &s.bars,
+                matcher: &s.matcher,
+                steps_per_beat: steps,
+                bars_behind: view.bars_behind,
+                bars_ahead: view.bars_ahead,
+                chords: &[],
+            }
+            .show(ui, 150.0);
         } else {
             let (bars, matcher) = preview(&self.data.session);
             let now = bars.first().map_or(0.0, |b| b.start);
-            Beatgrid { now, bars: &bars, matcher: &matcher, steps_per_beat: steps, bars_behind: view.bars_behind, bars_ahead: view.bars_ahead, chords: &[] }.show(ui, 150.0);
+            Beatgrid {
+                now,
+                bars: &bars,
+                matcher: &matcher,
+                steps_per_beat: steps,
+                bars_behind: view.bars_behind,
+                bars_ahead: view.bars_ahead,
+                chords: &[],
+            }
+            .show(ui, 150.0);
         }
         if running {
             ui.ctx().request_repaint();
@@ -135,7 +169,9 @@ impl ExerciseType for BasicTiming {
 
         if self.has_results {
             let stats = lock(&self.shared).matcher.stats();
-            theme::section(ui, if running { "Live results" } else { "Results" }, |ui| results(ui, &stats, ctx.scoring));
+            theme::section(ui, if running { "Live results" } else { "Results" }, |ui| {
+                results(ui, &stats, ctx.scoring)
+            });
             ui.add_space(8.0);
         }
 
@@ -159,7 +195,10 @@ fn status_line(ui: &mut egui::Ui, shared: &SharedTiming, ctx: &ExerciseCtx, runn
                 ui.label(mono(format!("BAR {:>3}", b.index + 1), theme::text()));
                 ui.label(mono(format!("{:>5.1} BPM", b.bpm), theme::green()));
                 if b.muted {
-                    ui.label(mono(format!("{} CLICK OFF", icons::SPEAKER_SLASH), theme::amber()));
+                    ui.label(mono(
+                        format!("{} CLICK OFF", icons::SPEAKER_SLASH),
+                        theme::amber(),
+                    ));
                 }
             }
             None => {

@@ -47,6 +47,15 @@ Debugging aid: `BASS_GYM_SCREENSHOT=<file.ppm>` saves the window after 2 s and q
 - **New progression / comp rhythm:** add an entry to `harmony::LIBRARY` (roman numerals, no quality markers, so it works in every mode) or `harmony::comp::PATTERNS` + `hits()`.
 - **Backing for a timing exercise:** implement `timing_session::Accompaniment` (schedule sounds per planned bar, judge played pitches) and start a `TimingSession::with_accompaniment`.
 
+## Formatting
+
+Rust sources are formatted with `rustfmt` (settings in `rustfmt.toml`). A pre-commit hook
+formats staged `.rs` files automatically; install it once per clone:
+
+```sh
+ln -sf ../../.githooks/pre-commit .git/hooks/pre-commit
+```
+
 ## License
 
 Copyright (C) 2026 Gyula Laszlo

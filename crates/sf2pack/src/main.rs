@@ -25,7 +25,9 @@ struct Recording {
 
 /// Parses `...vel064-Bb1.flac` into (velocity, MIDI note).
 fn parse_name(name: &str) -> Option<(u8, u8)> {
-    let stem = name.strip_suffix(".flac").or_else(|| name.strip_suffix(".FLAC"))?;
+    let stem = name
+        .strip_suffix(".flac")
+        .or_else(|| name.strip_suffix(".FLAC"))?;
     let (_, rest) = stem.rsplit_once("vel")?;
     let (vel, note) = rest.split_once('-')?;
     let vel: u8 = vel.parse().ok()?;
@@ -53,17 +55,29 @@ fn parse_name(name: &str) -> Option<(u8, u8)> {
     };
     let octave: i32 = octave.parse().ok()?;
     let midi = (octave + 1) * 12 + pc;
-    (0..=127).contains(&midi).then_some((vel.min(127), midi as u8))
+    (0..=127)
+        .contains(&midi)
+        .then_some((vel.min(127), midi as u8))
 }
 
 fn read_flac(path: &Path) -> Result<(Vec<f32>, u32)> {
-    let mut r = claxon::FlacReader::open(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut r =
+        claxon::FlacReader::open(path).with_context(|| format!("reading {}", path.display()))?;
     let info = r.streaminfo();
     let ch = info.channels.max(1) as usize;
     let scale = 1.0 / (1u64 << (info.bits_per_sample - 1)) as f32;
-    let raw: Vec<f32> = r.samples().map(|s| s.map(|s| s as f32 * scale)).collect::<Result<_, _>>().with_context(|| format!("decoding {}", path.display()))?;
+    let raw: Vec<f32> = r
+        .samples()
+        .map(|s| s.map(|s| s as f32 * scale))
+        .collect::<Result<_, _>>()
+        .with_context(|| format!("decoding {}", path.display()))?;
     // Mix down to mono.
-    Ok((raw.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect(), info.sample_rate))
+    Ok((
+        raw.chunks(ch)
+            .map(|f| f.iter().sum::<f32>() / ch as f32)
+            .collect(),
+        info.sample_rate,
+    ))
 }
 
 fn peak(x: &[f32]) -> f32 {
@@ -79,11 +93,20 @@ fn trim(x: &[f32], rate: u32, floor: f32, max_seconds: f32) -> Vec<f32> {
     let own = peak(x);
     let onset = own * 0.02; // −34 dB
     let lead = (rate / 1000) as usize; // keep 1 ms before the attack
-    let start = x.iter().position(|s| s.abs() > onset).unwrap_or(0).saturating_sub(lead);
+    let start = x
+        .iter()
+        .position(|s| s.abs() > onset)
+        .unwrap_or(0)
+        .saturating_sub(lead);
     let win = (rate / 100) as usize;
     let threshold = (own * 1e-3).max(floor); // −60 dB, or the set's noise floor
-    let last_loud = x[start..].chunks(win).rposition(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt() > threshold).map_or(0, |i| (i + 1) * win);
-    let len = last_loud.min((max_seconds * rate as f32) as usize).min(x.len() - start);
+    let last_loud = x[start..]
+        .chunks(win)
+        .rposition(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt() > threshold)
+        .map_or(0, |i| (i + 1) * win);
+    let len = last_loud
+        .min((max_seconds * rate as f32) as usize)
+        .min(x.len() - start);
     let mut out = x[start..start + len].to_vec();
     let fade = (len / 5).min((rate as f32 * 0.4) as usize).max(1);
     for (i, s) in out[len - fade..].iter_mut().enumerate() {
@@ -101,14 +124,22 @@ fn quantize(x: &[f32], gain: f32, seed: &mut u32) -> Vec<i16> {
         *seed ^= *seed << 5;
         *seed as f32 / u32::MAX as f32
     };
-    x.iter().map(|&s| (s * gain * 32_767.0 + rnd() - rnd()).round().clamp(-32_768.0, 32_767.0) as i16).collect()
+    x.iter()
+        .map(|&s| {
+            (s * gain * 32_767.0 + rnd() - rnd())
+                .round()
+                .clamp(-32_768.0, 32_767.0) as i16
+        })
+        .collect()
 }
 
 fn pack_set(dir: &Path, name: &str, max_seconds: f32) -> Result<Instrument> {
     let mut recs = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        let Some(file) = path.file_name().and_then(|f| f.to_str()) else { continue };
+        let Some(file) = path.file_name().and_then(|f| f.to_str()) else {
+            continue;
+        };
         let Some((velocity, root)) = parse_name(file) else {
             if file.to_ascii_lowercase().ends_with(".flac") {
                 eprintln!("  skipping {file}: expected <name>vel<velocity>-<note><octave>.flac");
@@ -116,7 +147,13 @@ fn pack_set(dir: &Path, name: &str, max_seconds: f32) -> Result<Instrument> {
             continue;
         };
         let (data, rate) = read_flac(&path)?;
-        recs.push(Recording { path, root, velocity, data, rate });
+        recs.push(Recording {
+            path,
+            root,
+            velocity,
+            data,
+            rate,
+        });
     }
     if recs.is_empty() {
         bail!("no samples in {}", dir.display());
@@ -129,11 +166,17 @@ fn pack_set(dir: &Path, name: &str, max_seconds: f32) -> Result<Instrument> {
         .iter()
         .filter_map(|r| {
             let tail = &r.data[r.data.len().saturating_sub((r.rate / 10) as usize)..];
-            (!tail.is_empty()).then(|| (tail.iter().map(|s| s * s).sum::<f32>() / tail.len() as f32).sqrt())
+            (!tail.is_empty())
+                .then(|| (tail.iter().map(|s| s * s).sum::<f32>() / tail.len() as f32).sqrt())
         })
         .fold(f32::MAX, f32::min);
     let floor = (floor * 2.0).max(set_peak * 10f32.powf(-80.0 / 20.0));
-    println!("{name}: {} samples, peak {:.1} dBFS, noise floor {:.1} dB", recs.len(), db(set_peak), db(floor));
+    println!(
+        "{name}: {} samples, peak {:.1} dBFS, noise floor {:.1} dB",
+        recs.len(),
+        db(set_peak),
+        db(floor)
+    );
 
     let gain = 10f32.powf(-1.0 / 20.0) / set_peak;
     let mut seed = 0x9E37_79B9;
@@ -144,9 +187,18 @@ fn pack_set(dir: &Path, name: &str, max_seconds: f32) -> Result<Instrument> {
         before += r.data.len();
         after += t.len();
         let label = r.path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
-        samples.push(Sample { name: label.rsplit("--").next().unwrap_or(label).to_owned(), rate: r.rate, root: r.root, data: quantize(&t, gain, &mut seed) });
+        samples.push(Sample {
+            name: label.rsplit("--").next().unwrap_or(label).to_owned(),
+            rate: r.rate,
+            root: r.root,
+            data: quantize(&t, gain, &mut seed),
+        });
     }
-    println!("  kept {:.1} of {:.1} seconds of audio", after as f32 / recs[0].rate as f32, before as f32 / recs[0].rate as f32);
+    println!(
+        "  kept {:.1} of {:.1} seconds of audio",
+        after as f32 / recs[0].rate as f32,
+        before as f32 / recs[0].rate as f32
+    );
 
     // Keys: split between the recorded notes. Velocities: split halfway between layers.
     let mut roots: Vec<u8> = recs.iter().map(|r| r.root).collect();
@@ -155,14 +207,34 @@ fn pack_set(dir: &Path, name: &str, max_seconds: f32) -> Result<Instrument> {
     let ranges = key_ranges(&roots);
     let mut zones = Vec::new();
     for (root, keys) in roots.iter().zip(ranges) {
-        let layers: Vec<(usize, u8)> = recs.iter().enumerate().filter(|(_, r)| r.root == *root).map(|(i, r)| (i, r.velocity)).collect();
+        let layers: Vec<(usize, u8)> = recs
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.root == *root)
+            .map(|(i, r)| (i, r.velocity))
+            .collect();
         for (j, &(sample, vel)) in layers.iter().enumerate() {
-            let lo = if j == 0 { 0 } else { ((layers[j - 1].1 as u16 + vel as u16) / 2) as u8 + 1 };
-            let hi = layers.get(j + 1).map_or(127, |n| ((vel as u16 + n.1 as u16) / 2) as u8);
-            zones.push(Zone { sample, keys, vels: (lo, hi) });
+            let lo = if j == 0 {
+                0
+            } else {
+                ((layers[j - 1].1 as u16 + vel as u16) / 2) as u8 + 1
+            };
+            let hi = layers
+                .get(j + 1)
+                .map_or(127, |n| ((vel as u16 + n.1 as u16) / 2) as u8);
+            zones.push(Zone {
+                sample,
+                keys,
+                vels: (lo, hi),
+            });
         }
     }
-    Ok(Instrument { name: name.to_owned(), samples, zones, release: 0.25 })
+    Ok(Instrument {
+        name: name.to_owned(),
+        samples,
+        zones,
+        release: 0.25,
+    })
 }
 
 fn slug(s: &str) -> String {
@@ -186,29 +258,42 @@ fn main() -> Result<()> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--name" => prefix = it.next().cloned(),
-            "--max-seconds" => max_seconds = it.next().context("--max-seconds needs a value")?.parse()?,
+            "--max-seconds" => {
+                max_seconds = it.next().context("--max-seconds needs a value")?.parse()?
+            }
             _ => positional.push(a.clone()),
         }
     }
     let [input, output] = positional.as_slice() else {
-        bail!("usage: sf2pack <input dir> <output dir> [--name <instrument name prefix>] [--max-seconds <s>]");
+        bail!(
+            "usage: sf2pack <input dir> <output dir> [--name <instrument name prefix>] [--max-seconds <s>]"
+        );
     };
     let (input, output) = (PathBuf::from(input), PathBuf::from(output));
     std::fs::create_dir_all(&output)?;
-    let mut sets: Vec<PathBuf> = std::fs::read_dir(&input)?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect();
+    let mut sets: Vec<PathBuf> = std::fs::read_dir(&input)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_dir())
+        .collect();
     sets.sort();
     if sets.is_empty() {
         bail!("no sample sets (subdirectories) in {}", input.display());
     }
     for set in sets {
         let set_name = set.file_name().and_then(|s| s.to_str()).unwrap_or("set");
-        let name = prefix.as_ref().map_or_else(|| set_name.to_owned(), |p| format!("{p} {set_name}"));
+        let name = prefix
+            .as_ref()
+            .map_or_else(|| set_name.to_owned(), |p| format!("{p} {set_name}"));
         let inst = pack_set(&set, &name, max_seconds)?;
         let path = output.join(format!("{}.sf2", slug(&name)));
         let mut file = std::io::BufWriter::new(std::fs::File::create(&path)?);
         sf2pack::write(&mut file, &inst)?;
         drop(file);
-        println!("  wrote {} ({:.1} MB)", path.display(), std::fs::metadata(&path)?.len() as f64 / 1e6);
+        println!(
+            "  wrote {} ({:.1} MB)",
+            path.display(),
+            std::fs::metadata(&path)?.len() as f64 / 1e6
+        );
     }
     Ok(())
 }
@@ -230,7 +315,9 @@ mod tests {
     fn trims_silence_and_tail() {
         let rate = 1000;
         let mut x = vec![0.0; 100];
-        x.extend((0..2000).map(|i| (-(i as f32) / 200.0).exp() * if i % 2 == 0 { 1.0 } else { -1.0 }));
+        x.extend(
+            (0..2000).map(|i| (-(i as f32) / 200.0).exp() * if i % 2 == 0 { 1.0 } else { -1.0 }),
+        );
         let t = trim(&x, rate, 1e-4, 12.0);
         assert!(t[0].abs() < 1e-6 && t[1].abs() > 0.5, "attack within 1 ms");
         assert!(t.len() < 1500, "tail trimmed: {}", t.len());

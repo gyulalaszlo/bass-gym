@@ -17,7 +17,11 @@ pub use synth::{FmPiano, PluckBass, SineClick, Woodblock};
 pub enum SoundKind {
     Click(ClickKind),
     /// `duration` in seconds; `midi` may be fractional.
-    Note { midi: f32, velocity: f32, duration: f32 },
+    Note {
+        midi: f32,
+        velocity: f32,
+        duration: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,18 +76,30 @@ impl<F: Fn(f32) -> Box<dyn Voice> + Sync> SoundSource for Src<F> {
     }
 }
 
-static SINE_CLICK: Src<fn(f32) -> Box<dyn Voice>> =
-    Src { id: "synth.click", name: "Synth click", roles: &[SoundRole::Click], make: |sr| Box::new(SineClick::new(sr)) };
-static WOODBLOCK: Src<fn(f32) -> Box<dyn Voice>> =
-    Src { id: "synth.woodblock", name: "Woodblock", roles: &[SoundRole::Click], make: |sr| Box::new(Woodblock::new(sr)) };
+static SINE_CLICK: Src<fn(f32) -> Box<dyn Voice>> = Src {
+    id: "synth.click",
+    name: "Synth click",
+    roles: &[SoundRole::Click],
+    make: |sr| Box::new(SineClick::new(sr)),
+};
+static WOODBLOCK: Src<fn(f32) -> Box<dyn Voice>> = Src {
+    id: "synth.woodblock",
+    name: "Woodblock",
+    roles: &[SoundRole::Click],
+    make: |sr| Box::new(Woodblock::new(sr)),
+};
 static PLUCK_BASS: Src<fn(f32) -> Box<dyn Voice>> = Src {
     id: "synth.pluck",
     name: "Synth pluck",
     roles: &[SoundRole::Click, SoundRole::Pitched],
     make: |sr| Box::new(PluckBass::new(sr)),
 };
-static FM_PIANO: Src<fn(f32) -> Box<dyn Voice>> =
-    Src { id: "synth.epiano", name: "FM e-piano", roles: &[SoundRole::Pitched], make: |sr| Box::new(FmPiano::new(sr)) };
+static FM_PIANO: Src<fn(f32) -> Box<dyn Voice>> = Src {
+    id: "synth.epiano",
+    name: "FM e-piano",
+    roles: &[SoundRole::Pitched],
+    make: |sr| Box::new(FmPiano::new(sr)),
+};
 
 /// Sources added at runtime (e.g. SoundFonts); they live for the rest of the program.
 static REGISTERED: RwLock<Vec<&'static dyn SoundSource>> = RwLock::new(Vec::new());
@@ -101,13 +117,25 @@ pub fn register(src: Box<dyn SoundSource>) -> bool {
 /// Registers every `.sf2` file in `dirs` as an instrument (`sf2:<file stem>`); earlier
 /// directories win when names clash. Returns the number added.
 pub fn register_soundfonts(dirs: &[PathBuf]) -> usize {
-    find_soundfonts(dirs).iter().filter_map(|p| SoundFontSource::new(p)).map(|s| register(Box::new(s))).filter(|&added| added).count()
+    find_soundfonts(dirs)
+        .iter()
+        .filter_map(|p| SoundFontSource::new(p))
+        .map(|s| register(Box::new(s)))
+        .filter(|&added| added)
+        .count()
 }
 
 /// All available sound sources: the built-in ones first.
 pub fn sources() -> Vec<&'static dyn SoundSource> {
-    let mut all: Vec<&'static dyn SoundSource> = vec![&SINE_CLICK, &WOODBLOCK, &PLUCK_BASS, &FM_PIANO];
-    all.extend(REGISTERED.read().unwrap_or_else(|e| e.into_inner()).iter().copied());
+    let mut all: Vec<&'static dyn SoundSource> =
+        vec![&SINE_CLICK, &WOODBLOCK, &PLUCK_BASS, &FM_PIANO];
+    all.extend(
+        REGISTERED
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .copied(),
+    );
     all
 }
 
@@ -124,7 +152,9 @@ pub fn default_source(role: SoundRole) -> &'static dyn SoundSource {
 }
 
 pub fn sources_for(role: SoundRole) -> impl Iterator<Item = &'static dyn SoundSource> {
-    sources().into_iter().filter(move |s| s.roles().contains(&role))
+    sources()
+        .into_iter()
+        .filter(move |s| s.roles().contains(&role))
 }
 
 #[cfg(test)]
@@ -136,7 +166,11 @@ mod tests {
         for src in sources() {
             let mut v = src.create(48_000.0);
             let kind = if src.roles().contains(&SoundRole::Pitched) {
-                SoundKind::Note { midi: 40.0, velocity: 1.0, duration: 0.2 }
+                SoundKind::Note {
+                    midi: 40.0,
+                    velocity: 1.0,
+                    duration: 0.2,
+                }
             } else {
                 SoundKind::Click(ClickKind::Accent)
             };
@@ -147,7 +181,9 @@ mod tests {
             assert!(peak > 0.05 && peak <= 1.0, "{}: peak {peak}", src.id());
             let mut tail = vec![0.0; 48_000 * 3];
             v.render(&mut tail);
-            let end = tail[tail.len() - 4800..].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            let end = tail[tail.len() - 4800..]
+                .iter()
+                .fold(0.0f32, |m, x| m.max(x.abs()));
             assert!(end < 1e-3, "{}: tail {end}", src.id());
         }
     }
@@ -155,11 +191,24 @@ mod tests {
     #[test]
     fn soundfont_instrument_plays_and_releases() {
         let sr = 48_000;
-        let tone: Vec<i16> = (0..sr * 4).map(|i| ((i as f32 / sr as f32 * 261.6 * std::f32::consts::TAU).sin() * 20_000.0) as i16).collect();
+        let tone: Vec<i16> = (0..sr * 4)
+            .map(|i| {
+                ((i as f32 / sr as f32 * 261.6 * std::f32::consts::TAU).sin() * 20_000.0) as i16
+            })
+            .collect();
         let inst = sf2pack::Instrument {
             name: "Test tone".into(),
-            samples: vec![sf2pack::Sample { name: "C4".into(), rate: sr as u32, root: 60, data: tone }],
-            zones: vec![sf2pack::Zone { sample: 0, keys: (0, 127), vels: (0, 127) }],
+            samples: vec![sf2pack::Sample {
+                name: "C4".into(),
+                rate: sr as u32,
+                root: 60,
+                data: tone,
+            }],
+            zones: vec![sf2pack::Zone {
+                sample: 0,
+                keys: (0, 127),
+                vels: (0, 127),
+            }],
             release: 0.05,
         };
         let dir = std::env::temp_dir().join(format!("bg-sound-test-{}", std::process::id()));
@@ -169,13 +218,24 @@ mod tests {
         drop(file);
 
         assert_eq!(register_soundfonts(std::slice::from_ref(&dir)), 1);
-        assert_eq!(register_soundfonts(std::slice::from_ref(&dir)), 0, "registered once");
+        assert_eq!(
+            register_soundfonts(std::slice::from_ref(&dir)),
+            0,
+            "registered once"
+        );
         let src = source("sf2:test-tone").expect("registered");
         assert_eq!(src.name(), "Test tone");
         assert!(sources_for(SoundRole::Pitched).any(|s| s.id() == "sf2:test-tone"));
 
         let mut v = src.create(sr as f32);
-        v.trigger(&SoundEvent { kind: SoundKind::Note { midi: 60.0, velocity: 1.0, duration: 0.2 }, gain: 1.0 });
+        v.trigger(&SoundEvent {
+            kind: SoundKind::Note {
+                midi: 60.0,
+                velocity: 1.0,
+                duration: 0.2,
+            },
+            gain: 1.0,
+        });
         let mut buf = vec![0.0; sr / 10];
         v.render(&mut buf);
         let first = buf.iter().position(|x| x.abs() > 1e-3).unwrap();
@@ -185,7 +245,9 @@ mod tests {
         // Released at 0.2 s (+ 50 ms release), long before the 4 s sample ends.
         let mut tail = vec![0.0; sr / 2];
         v.render(&mut tail);
-        let end = tail[tail.len() - 4800..].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let end = tail[tail.len() - 4800..]
+            .iter()
+            .fold(0.0f32, |m, x| m.max(x.abs()));
         assert!(end < 1e-3, "tail {end}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -207,14 +269,29 @@ mod tests {
                 let mut peaks = Vec::new();
                 for velocity in [0.2, 0.6, 1.0] {
                     let mut v = src.create(sr);
-                    v.trigger(&SoundEvent { kind: SoundKind::Note { midi: key as f32, velocity, duration: 0.3 }, gain: 1.0 });
+                    v.trigger(&SoundEvent {
+                        kind: SoundKind::Note {
+                            midi: key as f32,
+                            velocity,
+                            duration: 0.3,
+                        },
+                        gain: 1.0,
+                    });
                     let mut buf = vec![0.0; 9600];
                     v.render(&mut buf);
                     let first = buf.iter().position(|x| x.abs() > 1e-3);
-                    assert!(first.is_some_and(|f| f < 240), "{} key {key}: onset {first:?}", src.name());
+                    assert!(
+                        first.is_some_and(|f| f < 240),
+                        "{} key {key}: onset {first:?}",
+                        src.name()
+                    );
                     peaks.push(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
                 }
-                assert!(peaks.windows(2).all(|w| w[1] > w[0]) && peaks[2] <= 1.0, "{} key {key}: {peaks:?}", src.name());
+                assert!(
+                    peaks.windows(2).all(|w| w[1] > w[0]) && peaks[2] <= 1.0,
+                    "{} key {key}: {peaks:?}",
+                    src.name()
+                );
             }
         }
     }

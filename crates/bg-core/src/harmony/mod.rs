@@ -26,7 +26,15 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub const ALL: [Mode; 7] = [Self::Ionian, Self::Dorian, Self::Phrygian, Self::Lydian, Self::Mixolydian, Self::Aeolian, Self::Locrian];
+    pub const ALL: [Mode; 7] = [
+        Self::Ionian,
+        Self::Dorian,
+        Self::Phrygian,
+        Self::Lydian,
+        Self::Mixolydian,
+        Self::Aeolian,
+        Self::Locrian,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -57,7 +65,10 @@ pub struct Scale {
 
 impl Default for Scale {
     fn default() -> Self {
-        Self { root: 4, mode: Mode::Ionian }
+        Self {
+            root: 4,
+            mode: Mode::Ionian,
+        }
     }
 }
 
@@ -82,7 +93,10 @@ impl Scale {
 
     /// Diatonic triad or seventh chord on `degree` (0-based).
     pub fn chord(&self, degree: usize, sevenths: bool) -> Chord {
-        self.realize(ChordSpec { degree, size: if sevenths { 4 } else { 3 } })
+        self.realize(ChordSpec {
+            degree,
+            size: if sevenths { 4 } else { 3 },
+        })
     }
 
     /// Builds the diatonic chord for `spec`, stacking thirds up to `spec.size` notes and
@@ -104,7 +118,12 @@ impl Scale {
                 !(iv == 1 || iv == 8 || (ext == 11 && iv == 5 && major_third))
             })
             .collect();
-        Chord { degree, triad, seventh, colours }
+        Chord {
+            degree,
+            triad,
+            seventh,
+            colours,
+        }
     }
 }
 
@@ -211,7 +230,11 @@ impl Chord {
         const R: [&str; 7] = ["I", "II", "III", "IV", "V", "VI", "VII"];
         let r = R[self.degree % 7];
         let triad = self.triad_quality();
-        let base = if triad == "m" || triad == "dim" { r.to_lowercase() } else { r.to_owned() };
+        let base = if triad == "m" || triad == "dim" {
+            r.to_lowercase()
+        } else {
+            r.to_owned()
+        };
         let mut s = match (triad, self.seventh.map(|p| self.interval(p))) {
             ("dim", Some(10)) => format!("{base}ø7"),
             ("dim", Some(_)) => format!("{base}°7"),
@@ -299,26 +322,41 @@ pub fn checkers() -> [&'static dyn ChordChecker; 3] {
 }
 
 pub fn checker(id: &str) -> &'static dyn ChordChecker {
-    checkers().into_iter().find(|c| c.id() == id).unwrap_or(&ChordTones)
+    checkers()
+        .into_iter()
+        .find(|c| c.id() == id)
+        .unwrap_or(&ChordTones)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const C: Scale = Scale { root: 0, mode: Mode::Ionian };
+    const C: Scale = Scale {
+        root: 0,
+        mode: Mode::Ionian,
+    };
 
     #[test]
     fn scales_and_chords() {
         assert_eq!(C.pitch_classes(), [0, 2, 4, 5, 7, 9, 11]);
-        let a_minor = Scale { root: 9, mode: Mode::Aeolian };
+        let a_minor = Scale {
+            root: 9,
+            mode: Mode::Aeolian,
+        };
         assert_eq!(a_minor.pitch_classes(), [9, 11, 0, 2, 4, 5, 7]);
         let names: Vec<String> = (0..7).map(|d| C.chord(d, false).name()).collect();
         assert_eq!(names, ["C", "Dm", "Em", "F", "G", "Am", "Bdim"]);
         let sevenths: Vec<String> = (0..7).map(|d| C.chord(d, true).name()).collect();
-        assert_eq!(sevenths, ["Cmaj7", "Dm7", "Em7", "Fmaj7", "G7", "Am7", "Bm7b5"]);
+        assert_eq!(
+            sevenths,
+            ["Cmaj7", "Dm7", "Em7", "Fmaj7", "G7", "Am7", "Bm7b5"]
+        );
         let romans: Vec<String> = (0..7).map(|d| C.chord(d, true).roman()).collect();
-        assert_eq!(romans, ["Imaj7", "ii7", "iii7", "IVmaj7", "V7", "vi7", "viiø7"]);
+        assert_eq!(
+            romans,
+            ["Imaj7", "ii7", "iii7", "IVmaj7", "V7", "vi7", "viiø7"]
+        );
         assert_eq!(C.chord(6, false).roman(), "vii°");
     }
 

@@ -29,12 +29,18 @@ pub struct SessionIo<'a> {
 impl SessionIo<'_> {
     /// An I/O handle without audio output, for driving sessions offline (tests, analysis).
     pub fn offline(now: f64, latency: f64) -> SessionIo<'static> {
-        SessionIo { now, latency, out: None }
+        SessionIo {
+            now,
+            latency,
+            out: None,
+        }
     }
 
     /// Schedules a sound at transport time `at`. Returns false if output isn't available.
     pub fn play(&mut self, at: f64, slot: Slot, ev: SoundEvent) -> bool {
-        self.out.as_mut().is_some_and(|p| p.push(OutMsg::Play { at, slot, ev }).is_ok())
+        self.out
+            .as_mut()
+            .is_some_and(|p| p.push(OutMsg::Play { at, slot, ev }).is_ok())
     }
 
     /// Cancels all pending sounds and silences the voices.

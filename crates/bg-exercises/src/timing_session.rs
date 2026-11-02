@@ -76,13 +76,24 @@ impl TimingSession {
     }
 
     /// A session with backing whose judged pitches are graded according to `grade_mode`.
-    pub fn with_accompaniment(cfg: SessionConfig, thresholds: ScoringThresholds, shared: SharedTiming, accompaniment: Box<dyn Accompaniment>, grade_mode: GradeMode) -> Self {
-        Self { accompaniment: Some((accompaniment, grade_mode)), ..Self::new(cfg, thresholds, shared) }
+    pub fn with_accompaniment(
+        cfg: SessionConfig,
+        thresholds: ScoringThresholds,
+        shared: SharedTiming,
+        accompaniment: Box<dyn Accompaniment>,
+        grade_mode: GradeMode,
+    ) -> Self {
+        Self {
+            accompaniment: Some((accompaniment, grade_mode)),
+            ..Self::new(cfg, thresholds, shared)
+        }
     }
 
     /// Judges the pitch of played note `i` (at its target's time when matched).
     fn judge(&self, i: usize, freq: f32) {
-        let Some((acc, _)) = &self.accompaniment else { return };
+        let Some((acc, _)) = &self.accompaniment else {
+            return;
+        };
         let mut shared = lock(&self.shared);
         let m = &shared.matcher;
         let Some(p) = m.played.get(i) else { return };
@@ -102,12 +113,19 @@ impl SessionLogic for TimingSession {
             Some((_, mode)) => Matcher::with_harmony(self.thresholds.clone(), *mode),
             None => Matcher::new(self.thresholds.clone()),
         };
-        *lock(&self.shared) = TimingShared { matcher, running: true, bpm: planner.current_bpm(), bars: Vec::new() };
+        *lock(&self.shared) = TimingShared {
+            matcher,
+            running: true,
+            bpm: planner.current_bpm(),
+            bars: Vec::new(),
+        };
         self.planner = Some(planner);
     }
 
     fn tick(&mut self, io: &mut SessionIo) -> SessionState {
-        let Some(planner) = self.planner.as_mut() else { return SessionState::Finished };
+        let Some(planner) = self.planner.as_mut() else {
+            return SessionState::Finished;
+        };
         let mut shared = lock(&self.shared);
         shared.matcher.update(io.now);
         loop {
@@ -142,13 +160,22 @@ impl SessionLogic for TimingSession {
             && let Some(bar0) = self.bar0_start
         {
             let since = shared.matcher.last_activity().map_or(bar0, |t| t.max(bar0));
-            let bar_len = shared.bars.iter().rev().find(|b| b.start <= io.now).map_or(0.0, |b| b.duration);
+            let bar_len = shared
+                .bars
+                .iter()
+                .rev()
+                .find(|b| b.start <= io.now)
+                .map_or(0.0, |b| b.duration);
             if bar_len > 0.0 && io.now - since >= stop.silence_bars.max(1) as f64 * bar_len {
                 return SessionState::Finished;
             }
         }
         // Finished once auto-stop ended planning and the last bar (plus scoring window) passed.
-        if planner.is_finished() && io.now > self.planned_until + 0.3 { SessionState::Finished } else { SessionState::Running }
+        if planner.is_finished() && io.now > self.planned_until + 0.3 {
+            SessionState::Finished
+        } else {
+            SessionState::Running
+        }
     }
 
     fn note_on(&mut self, time: f64, level_db: f32) {
@@ -193,13 +220,31 @@ impl SessionLogic for TimingSession {
 
 fn schedule(cfg: &SessionConfig, io: &mut SessionIo, bar: &BarPlan) {
     for c in &bar.clicks {
-        io.play(c.time, Slot::Click, SoundEvent { kind: SoundKind::Click(c.kind), gain: cfg.click.volume });
+        io.play(
+            c.time,
+            Slot::Click,
+            SoundEvent {
+                kind: SoundKind::Click(c.kind),
+                gain: cfg.click.volume,
+            },
+        );
     }
     let gc = &cfg.groove_click;
     if gc.enabled && !bar.muted {
         for n in &bar.notes {
-            let kind = SoundKind::Note { midi: gc.pitch as f32, velocity: if n.accent { 1.0 } else { 0.75 }, duration: (n.len * 0.9) as f32 };
-            io.play(n.time, Slot::Groove, SoundEvent { kind, gain: gc.volume });
+            let kind = SoundKind::Note {
+                midi: gc.pitch as f32,
+                velocity: if n.accent { 1.0 } else { 0.75 },
+                duration: (n.len * 0.9) as f32,
+            };
+            io.play(
+                n.time,
+                Slot::Groove,
+                SoundEvent {
+                    kind,
+                    gain: gc.volume,
+                },
+            );
         }
     }
 }
@@ -217,7 +262,10 @@ pub fn last_time(shared: &SharedTiming) -> f64 {
 
 /// A few bars of `cfg` from time 0, for previewing the groove before starting.
 pub fn preview(cfg: &SessionConfig) -> (Vec<BarPlan>, Matcher) {
-    let cfg = SessionConfig { count_in_bars: 0, ..cfg.clone() };
+    let cfg = SessionConfig {
+        count_in_bars: 0,
+        ..cfg.clone()
+    };
     let mut planner = Planner::new(cfg, 0.0);
     let mut matcher = Matcher::default();
     let bars: Vec<_> = (0..4).filter_map(|_| planner.next_bar(&())).collect();

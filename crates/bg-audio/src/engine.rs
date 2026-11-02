@@ -1,8 +1,8 @@
 //! Device management and stream construction.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,12 @@ use crate::clock::Clock;
 use crate::config::{AnalysisConfig, AudioConfig, SoundConfig};
 use crate::output::{ControlMsg, Garbage, OutMsg, OutputState};
 
-type OutputParts = (Stream, Producer<ControlMsg>, Consumer<Garbage>, Producer<OutMsg>);
+type OutputParts = (
+    Stream,
+    Producer<ControlMsg>,
+    Consumer<Garbage>,
+    Producer<OutMsg>,
+);
 use crate::session::{SessionLogic, Slot};
 use crate::worker::{self, InChunk, InputLink, InputMeter, TunerState, WorkerCmd, WorkerShared};
 
@@ -56,12 +61,19 @@ struct Health {
     xruns: AtomicU32,
 }
 
-fn error_handler(direction: &'static str, health: Arc<Health>) -> impl FnMut(cpal::Error) + Send + 'static {
+fn error_handler(
+    direction: &'static str,
+    health: Arc<Health>,
+) -> impl FnMut(cpal::Error) + Send + 'static {
     move |e: cpal::Error| match e.kind() {
         ErrorKind::Xrun => {
             health.xruns.fetch_add(1, Ordering::Relaxed);
         }
-        ErrorKind::DeviceNotAvailable | ErrorKind::StreamInvalidated | ErrorKind::DeviceBusy | ErrorKind::HostUnavailable | ErrorKind::BackendError => {
+        ErrorKind::DeviceNotAvailable
+        | ErrorKind::StreamInvalidated
+        | ErrorKind::DeviceBusy
+        | ErrorKind::HostUnavailable
+        | ErrorKind::BackendError => {
             log::error!("{direction} stream failed: {e}");
             health.failed.store(true, Ordering::Release);
         }
@@ -100,7 +112,10 @@ impl AudioEngine {
         let worker = {
             let clock = clock.clone();
             let shared = shared.clone();
-            std::thread::Builder::new().name("bg-analysis".into()).spawn(move || worker::run(rx, clock, shared)).ok()
+            std::thread::Builder::new()
+                .name("bg-analysis".into())
+                .spawn(move || worker::run(rx, clock, shared))
+                .ok()
         };
         let _ = tx.send(WorkerCmd::SetAnalysis(analysis));
         let mut engine = Self {
@@ -185,7 +200,11 @@ impl AudioEngine {
         let sr = self.status.output_rate as f32;
         let new = &self.sounds;
         if let Some(ctl) = self.control.as_mut() {
-            for (slot, o, n) in [(Slot::Click, &old.click, &new.click), (Slot::Groove, &old.groove, &new.groove), (Slot::Instrument, &old.instrument, &new.instrument)] {
+            for (slot, o, n) in [
+                (Slot::Click, &old.click, &new.click),
+                (Slot::Groove, &old.groove, &new.groove),
+                (Slot::Instrument, &old.instrument, &new.instrument),
+            ] {
                 if changed(o, n) {
                     let _ = ctl.push(ControlMsg::Voice(slot, make_voice(n, slot, sr)));
                 }
@@ -194,7 +213,10 @@ impl AudioEngine {
                 let _ = ctl.push(ControlMsg::Master(new.master));
             }
             if (old.monitor, old.monitor_gain) != (new.monitor, new.monitor_gain) {
-                let _ = ctl.push(ControlMsg::Monitor { enabled: new.monitor, gain: new.monitor_gain });
+                let _ = ctl.push(ControlMsg::Monitor {
+                    enabled: new.monitor,
+                    gain: new.monitor_gain,
+                });
             }
             if old.lowpass() != new.lowpass() {
                 let _ = ctl.push(ControlMsg::InstrumentLowpass(new.lowpass()));
@@ -226,7 +248,12 @@ impl AudioEngine {
 
     pub fn devices(&self) -> DeviceLists {
         let info = |d: &Device, input: bool| -> Option<DeviceInfo> {
-            let cfg = if input { d.default_input_config() } else { d.default_output_config() }.ok()?;
+            let cfg = if input {
+                d.default_input_config()
+            } else {
+                d.default_output_config()
+            }
+            .ok()?;
             Some(DeviceInfo {
                 id: d.id().ok()?.to_string(),
                 name: device_name(d),
@@ -235,8 +262,16 @@ impl AudioEngine {
             })
         };
         DeviceLists {
-            inputs: self.host.input_devices().map(|it| it.filter_map(|d| info(&d, true)).collect()).unwrap_or_default(),
-            outputs: self.host.output_devices().map(|it| it.filter_map(|d| info(&d, false)).collect()).unwrap_or_default(),
+            inputs: self
+                .host
+                .input_devices()
+                .map(|it| it.filter_map(|d| info(&d, true)).collect())
+                .unwrap_or_default(),
+            outputs: self
+                .host
+                .output_devices()
+                .map(|it| it.filter_map(|d| info(&d, false)).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -273,13 +308,20 @@ impl AudioEngine {
 
     fn find_device(&self, id: &Option<String>, input: bool) -> Result<Device> {
         if let Some(id) = id {
-            let parsed = id.parse().map_err(|e| anyhow!("bad device id {id}: {e:?}"))?;
+            let parsed = id
+                .parse()
+                .map_err(|e| anyhow!("bad device id {id}: {e:?}"))?;
             if let Some(d) = self.host.device_by_id(&parsed) {
                 return Ok(d);
             }
             log::warn!("device {id} not found; using the default");
         }
-        if input { self.host.default_input_device() } else { self.host.default_output_device() }.context("no default device")
+        if input {
+            self.host.default_input_device()
+        } else {
+            self.host.default_output_device()
+        }
+        .context("no default device")
     }
 
     fn stream_config(&self, default: cpal::SupportedStreamConfig) -> StreamConfig {
@@ -298,15 +340,19 @@ impl AudioEngine {
         let default = device.default_output_config()?;
         let format = default.sample_format();
         let custom = self.stream_config(default);
-        let ((stream, ctl, garbage, events), config) = match self.try_output(&device, format, &custom) {
-            Ok(parts) => (parts, custom),
-            // Custom rates / buffer sizes are not supported everywhere; fall back to defaults.
-            Err(e) if custom != default.config() => {
-                log::warn!("output with custom settings failed ({e:#}); using device defaults");
-                (self.try_output(&device, format, &default.config())?, default.config())
-            }
-            Err(e) => return Err(e),
-        };
+        let ((stream, ctl, garbage, events), config) =
+            match self.try_output(&device, format, &custom) {
+                Ok(parts) => (parts, custom),
+                // Custom rates / buffer sizes are not supported everywhere; fall back to defaults.
+                Err(e) if custom != default.config() => {
+                    log::warn!("output with custom settings failed ({e:#}); using device defaults");
+                    (
+                        self.try_output(&device, format, &default.config())?,
+                        default.config(),
+                    )
+                }
+                Err(e) => return Err(e),
+            };
         let sr = config.sample_rate;
         stream.play()?;
         self.out_stream = Some(stream);
@@ -319,7 +365,12 @@ impl AudioEngine {
         Ok(())
     }
 
-    fn try_output(&self, device: &Device, format: SampleFormat, config: &StreamConfig) -> Result<OutputParts> {
+    fn try_output(
+        &self,
+        device: &Device,
+        format: SampleFormat,
+        config: &StreamConfig,
+    ) -> Result<OutputParts> {
         let sr = config.sample_rate;
         let (ev_tx, ev_rx) = RingBuffer::new(4096);
         let (ctl_tx, ctl_rx) = RingBuffer::new(64);
@@ -327,9 +378,22 @@ impl AudioEngine {
         let voices = [
             Some(make_voice(&self.sounds.click, Slot::Click, sr as f32)),
             Some(make_voice(&self.sounds.groove, Slot::Groove, sr as f32)),
-            Some(make_voice(&self.sounds.instrument, Slot::Instrument, sr as f32)),
+            Some(make_voice(
+                &self.sounds.instrument,
+                Slot::Instrument,
+                sr as f32,
+            )),
         ];
-        let mut state = OutputState::new(self.clock.clone(), sr, config.channels as usize, ev_rx, ctl_rx, garbage_tx, voices, self.sounds.master);
+        let mut state = OutputState::new(
+            self.clock.clone(),
+            sr,
+            config.channels as usize,
+            ev_rx,
+            ctl_rx,
+            garbage_tx,
+            voices,
+            self.sounds.master,
+        );
         state.set_monitor(self.sounds.monitor, self.sounds.monitor_gain);
         state.set_lowpass(self.sounds.lowpass());
         let on_err = error_handler("output", self.health.clone());
@@ -352,7 +416,9 @@ impl AudioEngine {
             let rate = self.status.output_rate;
             let supported = device
                 .supported_input_configs()
-                .map(|mut it| it.any(|r| r.min_sample_rate() <= rate && rate <= r.max_sample_rate()))
+                .map(|mut it| {
+                    it.any(|r| r.min_sample_rate() <= rate && rate <= r.max_sample_rate())
+                })
                 .unwrap_or(false);
             if supported {
                 preferred.sample_rate = rate;
@@ -366,7 +432,10 @@ impl AudioEngine {
             && *out_dev == device
         {
             self.status.shared_device = true;
-            candidates = vec![StreamConfig { channels: preferred.channels, ..*out_cfg }];
+            candidates = vec![StreamConfig {
+                channels: preferred.channels,
+                ..*out_cfg
+            }];
         }
         if preferred != default.config() {
             candidates.push(default.config());
@@ -376,7 +445,11 @@ impl AudioEngine {
             match self.try_input(&device, format, config) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    log::warn!("input with {} Hz / {:?} failed: {e:#}", config.sample_rate, config.buffer_size);
+                    log::warn!(
+                        "input with {} Hz / {:?} failed: {e:#}",
+                        config.sample_rate,
+                        config.buffer_size
+                    );
                     last_err = Some(e);
                 }
             }
@@ -384,15 +457,30 @@ impl AudioEngine {
         Err(last_err.unwrap_or_else(|| anyhow!("no input configuration")))
     }
 
-    fn try_input(&mut self, device: &Device, format: SampleFormat, config: StreamConfig) -> Result<()> {
+    fn try_input(
+        &mut self,
+        device: &Device,
+        format: SampleFormat,
+        config: StreamConfig,
+    ) -> Result<()> {
         let sr = config.sample_rate;
         let channels = config.channels as usize;
-        let channel = self.config.input_channel.map(|c| (c as usize).min(channels - 1));
+        let channel = self
+            .config
+            .input_channel
+            .map(|c| (c as usize).min(channels - 1));
 
         let (s_tx, s_rx) = RingBuffer::new(sr as usize * 2);
         let (c_tx, c_rx) = RingBuffer::new(1024);
         let (m_tx, m_rx) = RingBuffer::new(sr as usize / 2);
-        let sink = InputSink { samples: s_tx, chunks: c_tx, monitor: m_tx, clock: self.clock.clone(), channels, channel };
+        let sink = InputSink {
+            samples: s_tx,
+            chunks: c_tx,
+            monitor: m_tx,
+            clock: self.clock.clone(),
+            channels,
+            channel,
+        };
         let on_err = error_handler("input", self.health.clone());
         let stream = match format {
             SampleFormat::F32 => build_in::<f32>(device, &config, sink, on_err),
@@ -405,7 +493,11 @@ impl AudioEngine {
         if let Some(ctl) = self.control.as_mut() {
             let _ = ctl.push(ControlMsg::MonitorSource(m_rx, sr));
         }
-        let _ = self.worker_tx.send(WorkerCmd::SetInput(Some(InputLink { samples: s_rx, chunks: c_rx, sample_rate: sr as f32 })));
+        let _ = self.worker_tx.send(WorkerCmd::SetInput(Some(InputLink {
+            samples: s_rx,
+            chunks: c_rx,
+            sample_rate: sr as f32,
+        })));
         self.status.input = Some(device_name(device));
         self.status.input_rate = sr;
         self.status.input_channels = channels as u16;
@@ -425,20 +517,37 @@ impl Drop for AudioEngine {
 }
 
 fn device_name(d: &Device) -> String {
-    d.description().map(|d| d.name().to_owned()).unwrap_or_else(|_| d.to_string())
+    d.description()
+        .map(|d| d.name().to_owned())
+        .unwrap_or_else(|_| d.to_string())
 }
 
 fn make_voice(id: &str, slot: Slot, sr: f32) -> Box<dyn Voice> {
-    let role = if slot == Slot::Instrument { SoundRole::Pitched } else { SoundRole::Click };
-    let src: &dyn SoundSource = bg_sound::source(id).unwrap_or_else(|| bg_sound::default_source(role));
+    let role = if slot == Slot::Instrument {
+        SoundRole::Pitched
+    } else {
+        SoundRole::Click
+    };
+    let src: &dyn SoundSource =
+        bg_sound::source(id).unwrap_or_else(|| bg_sound::default_source(role));
     src.create(sr.max(8000.0))
 }
 
-fn build_out<T>(device: &Device, config: &StreamConfig, mut state: OutputState, on_err: impl FnMut(cpal::Error) + Send + 'static) -> Result<Stream>
+fn build_out<T>(
+    device: &Device,
+    config: &StreamConfig,
+    mut state: OutputState,
+    on_err: impl FnMut(cpal::Error) + Send + 'static,
+) -> Result<Stream>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
-    Ok(device.build_output_stream::<T, _, _>(*config, move |data, info| state.process(data, info), on_err, None)?)
+    Ok(device.build_output_stream::<T, _, _>(
+        *config,
+        move |data, info| state.process(data, info),
+        on_err,
+        None,
+    )?)
 }
 
 struct InputSink {
@@ -462,12 +571,19 @@ impl InputSink {
         if self.samples.slots() < frames || self.chunks.slots() == 0 {
             return; // Worker stalled; drop rather than block.
         }
-        let time = self.clock.map_host_ns(info.timestamp().capture.as_nanos() as u64);
-        let _ = self.chunks.push(InChunk { frames: frames as u32, time });
+        let time = self
+            .clock
+            .map_host_ns(info.timestamp().capture.as_nanos() as u64);
+        let _ = self.chunks.push(InChunk {
+            frames: frames as u32,
+            time,
+        });
         for frame in data.chunks(self.channels.max(1)) {
             let s = match self.channel {
                 Some(c) => f32::from_sample(frame[c]),
-                None => frame.iter().map(|&x| f32::from_sample(x)).sum::<f32>() / frame.len() as f32,
+                None => {
+                    frame.iter().map(|&x| f32::from_sample(x)).sum::<f32>() / frame.len() as f32
+                }
             };
             let _ = self.samples.push(s);
             let _ = self.monitor.push(s);
@@ -475,10 +591,20 @@ impl InputSink {
     }
 }
 
-fn build_in<T>(device: &Device, config: &StreamConfig, mut sink: InputSink, on_err: impl FnMut(cpal::Error) + Send + 'static) -> Result<Stream>
+fn build_in<T>(
+    device: &Device,
+    config: &StreamConfig,
+    mut sink: InputSink,
+    on_err: impl FnMut(cpal::Error) + Send + 'static,
+) -> Result<Stream>
 where
     T: cpal::SizedSample,
     f32: cpal::FromSample<T>,
 {
-    Ok(device.build_input_stream::<T, _, _>(*config, move |data, info| sink.process(data, info), on_err, None)?)
+    Ok(device.build_input_stream::<T, _, _>(
+        *config,
+        move |data, info| sink.process(data, info),
+        on_err,
+        None,
+    )?)
 }

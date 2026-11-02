@@ -76,6 +76,11 @@ pub struct SoundConfig {
     /// Mix the bass input into the output.
     pub monitor: bool,
     pub monitor_gain: f32,
+    /// Quiet practice: a low cut on the monitored input, so the bass carries less
+    /// through walls and floors.
+    pub quiet: bool,
+    /// Cutoff (Hz) of the quiet-practice low cut.
+    pub quiet_cutoff: f32,
     /// Low-pass cutoff (Hz) per instrument id; at or above [`LOWPASS_OFF`] = no filter.
     pub instrument_lowpass: BTreeMap<String, f32>,
 }
@@ -92,12 +97,25 @@ impl Default for SoundConfig {
             master: 0.8,
             monitor: false,
             monitor_gain: 0.8,
+            quiet: false,
+            quiet_cutoff: 150.0,
             instrument_lowpass: BTreeMap::new(),
         }
     }
 }
 
+/// Range of the quiet-practice low-cut frequency (Hz).
+pub const QUIET_CUTOFF_RANGE: std::ops::RangeInclusive<f32> = 40.0..=400.0;
+
 impl SoundConfig {
+    /// The low-cut frequency on the monitored input (Hz), if quiet practice is on.
+    pub fn monitor_lowcut(&self) -> Option<f32> {
+        self.quiet.then(|| {
+            self.quiet_cutoff
+                .clamp(*QUIET_CUTOFF_RANGE.start(), *QUIET_CUTOFF_RANGE.end())
+        })
+    }
+
     /// The low-pass cutoff for the current instrument (Hz), if filtered.
     pub fn lowpass(&self) -> Option<f32> {
         let hz = self.lowpass_setting(&self.instrument);

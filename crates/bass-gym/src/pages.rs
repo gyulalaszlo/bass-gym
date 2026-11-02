@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use bg_audio::{
     AnalysisConfig, AudioConfig, CALIBRATION_CLICKS, Calibration, CalibrationState, DeviceLists,
-    LOWPASS_OFF, SoundConfig,
+    LOWPASS_OFF, QUIET_CUTOFF_RANGE, SoundConfig,
 };
 use bg_core::ScoringThresholds;
 use bg_sound::SoundRole;
@@ -216,6 +216,19 @@ impl PreferencePage for AudioPage {
                             sounds.monitor,
                             slider_field(&mut sounds.monitor_gain, 0.0..=2.0),
                         );
+                    });
+                    ui.end_row();
+                    ui.label(format!("{} Quiet practice", icons::MOON))
+                        .on_hover_text("A low cut on the monitored bass, so it carries less through walls and floors");
+                    ui.horizontal(|ui| {
+                        checkbox(ui, &mut sounds.quiet, "");
+                        ui.add_enabled(
+                            sounds.quiet,
+                            slider_field(&mut sounds.quiet_cutoff, QUIET_CUTOFF_RANGE)
+                                .step_by(5.0)
+                                .suffix("Hz"),
+                        )
+                        .on_hover_text("Low-cut frequency: lower keeps more of the bass, higher is quieter");
                     });
                     ui.end_row();
                 });

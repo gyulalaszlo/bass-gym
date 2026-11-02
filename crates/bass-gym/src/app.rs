@@ -267,15 +267,32 @@ impl BassGymApp {
                 ui.add(egui::Slider::new(&mut sounds.monitor_gain, 0.0..=2.0).show_value(false))
                     .on_hover_text("Monitor volume");
             });
-            let on = sounds.monitor;
-            let label = format!("{}  MONITOR {}", icons::EAR, if on { "ON" } else { "OFF" });
-            if ui
-                .add(selectable(on, label).color(if on { theme::green() } else { theme::cyan() }))
-                .on_hover_text("Mix the bass input into the output")
-                .clicked()
-            {
-                sounds.monitor = !on;
-            }
+            let toggle_color = |on: bool| if on { theme::green() } else { theme::cyan() };
+            ui.horizontal(|ui| {
+                let on = sounds.monitor;
+                let label = format!("{}  MONITOR {}", icons::EAR, if on { "ON" } else { "OFF" });
+                if ui
+                    .add(selectable(on, label).color(toggle_color(on)))
+                    .on_hover_text("Mix the bass input into the output")
+                    .clicked()
+                {
+                    sounds.monitor = !on;
+                }
+                // Quiet practice: a low cut on the monitored bass (cutoff in Preferences › Sounds).
+                let quiet = sounds.quiet;
+                let tip = format!(
+                    "Quiet practice {}: cut the monitored bass below {:.0} Hz, so it carries less through walls and floors (frequency in Preferences › Sounds)",
+                    if quiet { "on" } else { "off" },
+                    sounds.quiet_cutoff,
+                );
+                if ui
+                    .add(selectable(quiet, icons::MOON).color(toggle_color(quiet)))
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    sounds.quiet = !quiet;
+                }
+            });
             self.settings.set(pages::SOUNDS, &sounds);
             self.engine.set_sounds(sounds);
         });

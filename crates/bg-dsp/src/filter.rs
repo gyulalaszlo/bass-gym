@@ -51,6 +51,12 @@ impl Biquad {
         }
     }
 
+    /// Moves the cutoff of a running high-pass filter, keeping its state (no click).
+    pub fn set_highpass(&mut self, sr: f32, freq: f32, q: f32) {
+        let f = Self::highpass(sr, freq, q);
+        (self.b0, self.b1, self.b2, self.a1, self.a2) = (f.b0, f.b1, f.b2, f.a1, f.a2);
+    }
+
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2

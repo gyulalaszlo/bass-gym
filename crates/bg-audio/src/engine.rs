@@ -218,6 +218,9 @@ impl AudioEngine {
                     gain: new.monitor_gain,
                 });
             }
+            if old.monitor_lowcut() != new.monitor_lowcut() {
+                let _ = ctl.push(ControlMsg::MonitorLowcut(new.monitor_lowcut()));
+            }
             if old.lowpass() != new.lowpass() {
                 let _ = ctl.push(ControlMsg::InstrumentLowpass(new.lowpass()));
             }
@@ -395,6 +398,7 @@ impl AudioEngine {
             self.sounds.master,
         );
         state.set_monitor(self.sounds.monitor, self.sounds.monitor_gain);
+        state.set_monitor_lowcut(self.sounds.monitor_lowcut());
         state.set_lowpass(self.sounds.lowpass());
         let on_err = error_handler("output", self.health.clone());
         let stream = match format {

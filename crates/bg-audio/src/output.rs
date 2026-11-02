@@ -19,6 +19,8 @@ pub(crate) enum ControlMsg {
         enabled: bool,
         gain: f32,
     },
+    /// Low-cut frequency (Hz) on the monitored input; `None` = unfiltered.
+    MonitorLowcut(Option<f32>),
     /// Low-pass cutoff (Hz) for the instrument slot; `None` = unfiltered.
     InstrumentLowpass(Option<f32>),
     /// Raw input samples and their sample rate, for monitoring.
@@ -101,6 +103,42 @@ impl Monitor {
     }
 }
 
+/// The quiet-practice low cut: two cascaded high-pass sections (4th-order Butterworth,
+/// 24 dB/octave), steep enough to take out the booming fundamentals while the notes'
+/// upper harmonics (and so their pitch) stay audible.
+#[derive(Default)]
+struct LowCut {
+    cutoff: Option<f32>,
+    filters: [Biquad; 2],
+}
+
+impl LowCut {
+    /// Engages (`Some(Hz)`), retunes or bypasses (`None`) the filter.
+    fn set(&mut self, sample_rate: f32, cutoff: Option<f32>) {
+        if let Some(hz) = cutoff {
+            let hz = hz.clamp(20.0, sample_rate * 0.45);
+            for (f, q) in self.filters.iter_mut().zip([0.541, 1.307]) {
+                if self.cutoff.is_some() {
+                    // Keep the running state when retuning, so moving the cutoff doesn't click.
+                    f.set_highpass(sample_rate, hz, q);
+                } else {
+                    *f = Biquad::highpass(sample_rate, hz, q);
+                }
+            }
+        }
+        self.cutoff = cutoff;
+    }
+
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        if self.cutoff.is_some() {
+            self.filters.iter_mut().fold(x, |y, f| f.process(y))
+        } else {
+            x
+        }
+    }
+}
+
 const BLOCK: usize = 16;
 const MAX_PENDING: usize = 4096;
 
@@ -118,6 +156,7 @@ pub(crate) struct OutputState {
     monitor: Option<Monitor>,
     monitor_on: bool,
     monitor_gain: f32,
+    monitor_lowcut: LowCut,
     lowpass: Option<f32>,
     /// Two cascaded sections (24 dB/octave), so the cutoff works as a tone control.
     lowpass_filters: [Biquad; 2],
@@ -151,6 +190,7 @@ impl OutputState {
             monitor: None,
             monitor_on: false,
             monitor_gain: 0.0,
+            monitor_lowcut: LowCut::default(),
             lowpass: None,
             lowpass_filters: Default::default(),
             pending: Vec::with_capacity(MAX_PENDING),
@@ -172,6 +212,10 @@ impl OutputState {
             }
         }
         self.lowpass = cutoff;
+    }
+
+    pub fn set_monitor_lowcut(&mut self, cutoff: Option<f32>) {
+        self.monitor_lowcut.set(self.sample_rate as f32, cutoff);
     }
 
     pub fn set_monitor(&mut self, enabled: bool, gain: f32) {
@@ -202,6 +246,7 @@ impl OutputState {
                 }
                 ControlMsg::Master(m) => self.master = m,
                 ControlMsg::Monitor { enabled, gain } => self.set_monitor(enabled, gain),
+                ControlMsg::MonitorLowcut(cutoff) => self.set_monitor_lowcut(cutoff),
                 ControlMsg::InstrumentLowpass(cutoff) => self.set_lowpass(cutoff),
                 ControlMsg::MonitorSource(src, rate) => {
                     if let Some(old) =
@@ -267,7 +312,7 @@ impl OutputState {
             if let Some(m) = self.monitor.as_mut() {
                 if self.monitor_on {
                     for x in mix.iter_mut() {
-                        *x += m.sample() * self.monitor_gain;
+                        *x += self.monitor_lowcut.process(m.sample()) * self.monitor_gain;
                     }
                 } else {
                     m.drain();
@@ -294,6 +339,29 @@ fn soft_clip(x: f32) -> f32 {
 mod tests {
     use super::*;
     use rtrb::RingBuffer;
+
+    /// RMS gain (dB) of `f` on a sine at `hz`, after the filter has settled.
+    fn gain_db(f: &mut LowCut, hz: f32) -> f32 {
+        let sr = 48_000.0;
+        let sine = |i: usize| (2.0 * std::f32::consts::PI * hz * i as f32 / sr).sin();
+        let out: Vec<f32> = (0..48_000).map(|i| f.process(sine(i))).collect();
+        let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
+        let input: Vec<f32> = (24_000..48_000).map(sine).collect();
+        20.0 * (rms(&out[24_000..]) / rms(&input)).log10()
+    }
+
+    #[test]
+    fn quiet_low_cut_removes_lows_and_keeps_highs() {
+        let mut f = LowCut::default();
+        assert!(gain_db(&mut f, 50.0).abs() < 0.1, "bypassed by default");
+        f.set(48_000.0, Some(150.0));
+        // Low E (41 Hz) is cut hard, the cutoff is -3 dB, upper harmonics pass.
+        assert!(gain_db(&mut f, 41.0) < -40.0);
+        assert!((gain_db(&mut f, 150.0) + 3.0).abs() < 0.5);
+        assert!(gain_db(&mut f, 1_000.0).abs() < 0.1);
+        f.set(48_000.0, None);
+        assert!(gain_db(&mut f, 41.0).abs() < 0.1, "bypassed again");
+    }
 
     #[test]
     fn monitor_resamples_and_bounds_latency() {

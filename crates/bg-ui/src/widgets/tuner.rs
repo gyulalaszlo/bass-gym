@@ -52,12 +52,6 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 0.0, theme::bg());
-    p.rect_stroke(
-        rect,
-        0.0,
-        Stroke::new(1.0, theme::grid()),
-        StrokeKind::Inside,
-    );
 
     let fresh = state.updated.is_some_and(|t| t.elapsed() < STALE);
     let reading = state.reading.filter(|_| fresh);
@@ -75,21 +69,6 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
     } else {
         theme::dim()
     };
-
-    // Title, like an ECAM page name.
-    let title_pos = rect.left_top() + vec2(10.0, 6.0);
-    let tr = p.text(
-        title_pos,
-        Align2::LEFT_TOP,
-        "TUNER",
-        mono(13.0),
-        theme::text(),
-    );
-    p.hline(
-        tr.x_range(),
-        tr.bottom() + 1.0,
-        Stroke::new(1.5, theme::text()),
-    );
 
     // Note name.
     let name_w = 130.0 * k;

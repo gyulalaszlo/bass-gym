@@ -3,15 +3,19 @@
 use anyhow::Result;
 use bg_core::SessionConfig;
 use bg_core::preset::{PresetError, PresetSchema};
+use bg_ui::view::ViewPrefs;
 use bg_ui::widgets::beatgrid::Beatgrid;
-use bg_ui::widgets::results::results;
+use bg_ui::widgets::performance::performance_strip;
+use bg_ui::widgets::results::{results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::{ExerciseCtx, ExerciseType, egui, icons, theme};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::timing_session::{SharedTiming, TimingSession, last_time, lock, preview};
+use crate::timing_session::{
+    PERFORMANCE_HEIGHT, SharedTiming, TimingSession, last_time, lock, preview, timing_meter,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -43,6 +47,10 @@ pub struct BasicTiming {
     shared: SharedTiming,
     /// A session ran since the last configuration change, so its results are shown.
     has_results: bool,
+    /// The results dialog is open.
+    show_results: bool,
+    /// Running on the previous frame (to open the results when the session ends).
+    was_running: bool,
 }
 
 impl PresetSchema for BasicTiming {
@@ -93,6 +101,10 @@ impl ExerciseType for BasicTiming {
 
     fn toolbar(&mut self, tb: &mut Toolbar, ctx: &mut ExerciseCtx) {
         let running = ctx.engine.session_running() && self.is_running();
+        if self.was_running && !running && self.has_results {
+            self.show_results = true;
+        }
+        self.was_running = running;
         if tb.transport(running) {
             if running {
                 ctx.engine.stop_session();
@@ -104,7 +116,12 @@ impl ExerciseType for BasicTiming {
                 );
                 ctx.engine.start_session(Box::new(logic));
                 self.has_results = true;
+                self.show_results = false;
             }
+        }
+        tb.gap(Gap::Small);
+        if tb.results_button(self.has_results && !running) {
+            self.show_results = true;
         }
         // Live status in the space between START and the settings.
         tb.gap_with(Gap::Large, |ui| status_line(ui, &self.shared, ctx, running));
@@ -131,12 +148,26 @@ impl ExerciseType for BasicTiming {
         // Beat grid: the live / last session, or a preview of the configured groove.
         let steps = self.data.session.groove.steps_per_beat;
         let view = self.data.view.clone();
+        let mut prefs: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
+        let zoom_before = prefs.grid_zoom;
+
+        // Live performance, large, above the grid.
+        let now = if running {
+            ctx.engine.clock().now()
+        } else {
+            last_time(&self.shared)
+        };
+        let meter = timing_meter(
+            &self.shared,
+            self.has_results,
+            now,
+            prefs.indicator_bars,
+            ctx.scoring,
+        );
+        performance_strip(ui, PERFORMANCE_HEIGHT, &[&meter]);
+        ui.add_space(4.0);
+
         if self.has_results {
-            let now = if running {
-                ctx.engine.clock().now()
-            } else {
-                last_time(&self.shared)
-            };
             let s = lock(&self.shared);
             Beatgrid {
                 now,
@@ -147,7 +178,7 @@ impl ExerciseType for BasicTiming {
                 bars_ahead: view.bars_ahead,
                 chords: &[],
             }
-            .show(ui, 150.0);
+            .show_zoomable(ui, 150.0, &mut prefs.grid_zoom);
         } else {
             let (bars, matcher) = preview(&self.data.session);
             let now = bars.first().map_or(0.0, |b| b.start);
@@ -160,24 +191,29 @@ impl ExerciseType for BasicTiming {
                 bars_ahead: view.bars_ahead,
                 chords: &[],
             }
-            .show(ui, 150.0);
+            .show_zoomable(ui, 150.0, &mut prefs.grid_zoom);
+        }
+        if prefs.grid_zoom != zoom_before {
+            ctx.settings.set(ViewPrefs::ID, &prefs);
         }
         if running {
             ui.ctx().request_repaint();
         }
         ui.add_space(8.0);
 
-        if self.has_results {
-            let stats = lock(&self.shared).matcher.stats();
-            theme::section(ui, if running { "Live results" } else { "Results" }, |ui| {
-                results(ui, &stats, ctx.scoring)
-            });
-            ui.add_space(8.0);
-        }
-
         if session_panel(ui, &mut self.data.session, !running) {
             self.has_results = false;
         }
+
+        self.show_results &= self.has_results;
+        let stats = self
+            .show_results
+            .then(|| lock(&self.shared).matcher.stats());
+        results_dialog(ui.ctx(), &mut self.show_results, "Results", |ui| {
+            if let Some(stats) = &stats {
+                results(ui, stats, ctx.scoring, |_| {});
+            }
+        });
     }
 }
 

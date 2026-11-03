@@ -67,10 +67,15 @@ impl Histogram<'_> {
         if let Some(t) = self.target {
             p.vline(x_of(t), plot.y_range(), Stroke::new(1.0, theme::magenta()));
         }
-        for v in [self.min, (self.min + self.max) / 2.0, self.max] {
+        // Edge labels are aligned inwards so they are not clipped.
+        for (v, align) in [
+            (self.min, Align2::LEFT_BOTTOM),
+            ((self.min + self.max) / 2.0, Align2::CENTER_BOTTOM),
+            (self.max, Align2::RIGHT_BOTTOM),
+        ] {
             p.text(
                 Pos2::new(x_of(v), rect.bottom()),
-                Align2::CENTER_BOTTOM,
+                align,
                 format!("{v}{}", self.unit),
                 mono(12.0),
                 theme::dim(),

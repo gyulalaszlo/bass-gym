@@ -1,9 +1,14 @@
 //! Piano voicings with voice leading.
 //!
-//! The right hand plays a close (or, when jazzier, drop-2) voicing between C3 and C6,
-//! choosing the inversion that moves least from the previous chord, which is what makes
-//! a pianist's hand positions readable. The left hand plays the root (plain), a root +
-//! seventh shell (medium), or nothing (jazzy, rootless voicings).
+//! One hand (the narrow default): the right hand plays a close (or, when jazzier, drop-2)
+//! voicing around the centre octave, choosing the inversion that moves least from the
+//! previous chord, which is what makes a pianist's hand positions readable. The left
+//! hand plays the root (plain), a root + seventh shell (medium), or nothing (jazzy,
+//! rootless voicings).
+//!
+//! Wider voicings ([`VoicingStyle::width`]) use two hands: the left hand plays a root +
+//! fifth (or a shell / tenth when jazzier) an octave or so below, the right hand moves
+//! up; "stacked" voicings also double the bass and the top voice in octaves.
 
 use rand::Rng;
 
@@ -12,6 +17,49 @@ use super::Chord;
 pub const RH_LOW: u8 = 48;
 pub const RH_HIGH: u8 = 84;
 const LH_LOW: u8 = 36;
+/// Centre octave of the default voicings (around E4).
+pub const CENTER_OCTAVE: i8 = 4;
+/// How far up the right hand moves when both hands play.
+const TWO_HAND_RH_SHIFT: i32 = 7;
+
+/// How the keyboard player voices chords.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VoicingStyle {
+    /// 0 = plain triads … 1 = rootless, coloured voicings.
+    pub jazziness: f32,
+    /// 0 = one hand, 1 = two hands, 2 = two hands with octave doublings. Fractions mix
+    /// the neighbouring widths chord by chord.
+    pub width: f32,
+    /// Moves everything by octaves ([`CENTER_OCTAVE`] = the default register).
+    pub center_octave: i8,
+}
+
+impl Default for VoicingStyle {
+    fn default() -> Self {
+        Self {
+            jazziness: 0.0,
+            width: 0.0,
+            center_octave: CENTER_OCTAVE,
+        }
+    }
+}
+
+/// A chord as played by both hands (each ascending).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Voicing {
+    pub lh: Vec<u8>,
+    pub rh: Vec<u8>,
+}
+
+impl Voicing {
+    /// All notes, ascending, without duplicates.
+    pub fn notes(&self) -> Vec<u8> {
+        let mut v: Vec<u8> = self.lh.iter().chain(&self.rh).copied().collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+}
 
 fn rh_pitch_classes(chord: &Chord, j: f32) -> Vec<u8> {
     let third = chord.third();
@@ -79,41 +127,54 @@ fn mean(v: &[u8]) -> f32 {
     v.iter().map(|&n| n as f32).sum::<f32>() / v.len().max(1) as f32
 }
 
-/// Voices `chord` for piano. `prev` is the previous voicing (for voice leading).
-/// Returns ascending MIDI notes.
-pub fn voice(chord: &Chord, prev: Option<&[u8]>, jazziness: f32, rng: &mut impl Rng) -> Vec<u8> {
-    let j = jazziness.clamp(0.0, 1.0);
-    let pcs = rh_pitch_classes(chord, j);
-    let prev_rh: Vec<u8> = prev
-        .map(|p| p.iter().copied().filter(|&n| n >= RH_LOW).collect())
-        .unwrap_or_default();
+fn midi(n: i32) -> u8 {
+    n.clamp(0, 127) as u8
+}
 
+/// The lowest note of pitch class `pc` at or above `low`.
+fn at_or_above(pc: u8, low: u8) -> u8 {
+    low + (pc + 12 - low % 12) % 12
+}
+
+/// The right-hand voicing of `pcs` within `low..=high` (bottom note below `low + 20`)
+/// that moves least from `prev_rh` (or sits closest to `centre` when there is none).
+#[allow(clippy::too_many_arguments)]
+fn right_hand(
+    pcs: &[u8],
+    low: u8,
+    high: u8,
+    centre: f32,
+    prev_rh: &[u8],
+    j: f32,
+    drop2: bool,
+    rng: &mut impl Rng,
+) -> Vec<u8> {
     let mut best: Option<(f32, Vec<u8>)> = None;
     for r in 0..pcs.len() {
-        let mut order = pcs.clone();
+        let mut order = pcs.to_vec();
         order.rotate_left(r);
-        for bottom in RH_LOW..RH_LOW + 20 {
+        for bottom in low..low.saturating_add(20) {
             if bottom % 12 != order[0] {
                 continue;
             }
             let close = close_voicing(&order, bottom);
             let mut candidates = vec![close.clone()];
-            if j >= 0.5 && close.len() >= 4 {
-                let mut drop2 = close.clone();
-                let i = drop2.len() - 2;
-                drop2[i] -= 12;
-                drop2.sort_unstable();
-                candidates.push(drop2);
+            if drop2 && close.len() >= 4 {
+                let mut d = close.clone();
+                let i = d.len() - 2;
+                d[i] -= 12;
+                d.sort_unstable();
+                candidates.push(d);
             }
             for c in candidates {
-                if c[0] < RH_LOW || *c.last().unwrap() > RH_HIGH {
+                if c[0] < low || *c.last().unwrap() > high {
                     continue;
                 }
-                let centre = (mean(&c) - 64.0).abs();
+                let off_centre = (mean(&c) - centre).abs();
                 let mut cost = if prev_rh.is_empty() {
-                    centre + if r != 0 && j < 0.25 { 3.0 } else { 0.0 }
+                    off_centre + if r != 0 && j < 0.25 { 3.0 } else { 0.0 }
                 } else {
-                    movement(&c, &prev_rh) + 0.3 * centre
+                    movement(&c, prev_rh) + 0.3 * off_centre
                 };
                 cost += rng.random::<f32>() * j * 2.0;
                 if best.as_ref().is_none_or(|b| cost < b.0) {
@@ -122,25 +183,111 @@ pub fn voice(chord: &Chord, prev: Option<&[u8]>, jazziness: f32, rng: &mut impl 
             }
         }
     }
-    let mut notes = best
-        .map(|b| b.1)
-        .unwrap_or_else(|| close_voicing(&pcs, RH_LOW + pcs[0] % 12));
+    best.map(|b| b.1)
+        .unwrap_or_else(|| close_voicing(pcs, at_or_above(pcs[0], low)))
+}
 
-    // Left hand.
-    let rh_low = notes[0];
-    let root = LH_LOW + (chord.root() + 12 - LH_LOW % 12) % 12;
-    if j < 0.75 && root < rh_low {
-        let mut lh = vec![root];
-        if j >= 0.5 {
-            let shell = chord.seventh.unwrap_or(chord.third());
-            let n = root + (shell + 12 - chord.root()) % 12;
-            if n < rh_low {
-                lh.push(n);
+/// Voices `chord` for piano. `prev` is the previous voicing (for voice leading).
+pub fn voice(
+    chord: &Chord,
+    prev: Option<&Voicing>,
+    style: &VoicingStyle,
+    rng: &mut impl Rng,
+) -> Voicing {
+    let j = style.jazziness.clamp(0.0, 1.0);
+    let shift = 12 * (style.center_octave as i32 - CENTER_OCTAVE as i32);
+    // Width level of this chord: fractions pick the wider level with that probability.
+    let w = style.width.clamp(0.0, 2.0);
+    let mut level = w.floor() as u8;
+    if w.fract() > 0.0 && rng.random::<f32>() < w.fract() {
+        level += 1;
+    }
+    let level = level.min(2);
+    let prev_rh: &[u8] = prev.map_or(&[], |p| &p.rh);
+    let root_pc = chord.root();
+
+    if level == 0 {
+        let pcs = rh_pitch_classes(chord, j);
+        let (low, high) = (midi(RH_LOW as i32 + shift), midi(RH_HIGH as i32 + shift));
+        let rh = right_hand(
+            &pcs,
+            low,
+            high,
+            (64 + shift) as f32,
+            prev_rh,
+            j,
+            j >= 0.5,
+            rng,
+        );
+        let root = at_or_above(root_pc, midi(LH_LOW as i32 + shift));
+        let mut lh = Vec::new();
+        if j < 0.75 && root < rh[0] {
+            lh.push(root);
+            if j >= 0.5 {
+                let shell = chord.seventh.unwrap_or(chord.third());
+                let n = root + (shell + 12 - root_pc) % 12;
+                if n < rh[0] {
+                    lh.push(n);
+                }
             }
         }
-        notes.splice(0..0, lh);
+        return Voicing { lh, rh };
     }
-    notes
+
+    // Two hands: the left hand covers the bass, so the right hand can leave out the root.
+    let mut pcs = rh_pitch_classes(chord, j);
+    if pcs.len() >= 4 && pcs[0] == root_pc {
+        pcs.remove(0);
+    }
+    let rh_shift = shift + TWO_HAND_RH_SHIFT;
+    let (low, high) = (
+        midi(RH_LOW as i32 + rh_shift),
+        midi(RH_HIGH as i32 + rh_shift),
+    );
+    let mut rh = right_hand(
+        &pcs,
+        low,
+        high,
+        (64 + rh_shift) as f32,
+        prev_rh,
+        j,
+        true,
+        rng,
+    );
+    let interval = |pc: u8| (pc + 12 - root_pc) % 12;
+    let root = at_or_above(root_pc, midi(LH_LOW as i32 + shift));
+    let mut lh: Vec<u8> = if j < 0.75 {
+        let upper = if j < 0.5 {
+            interval(chord.triad[2])
+        } else {
+            interval(chord.seventh.unwrap_or(chord.triad[2]))
+        };
+        let mut v = vec![root, root + upper];
+        if j >= 0.5 {
+            v.push(root + 12 + interval(chord.third())); // the tenth
+        }
+        v
+    } else {
+        // Rootless: a third / seventh shell.
+        let third = root + interval(chord.third());
+        let mut v = vec![third];
+        if let Some(s) = chord.seventh {
+            v.push(third + (s + 12 - chord.third()) % 12);
+        }
+        v
+    };
+    lh.retain(|&n| n < rh[0]);
+
+    if level == 2 {
+        if j < 0.75 && root >= 33 {
+            lh.insert(0, root - 12);
+        }
+        let top = *rh.last().unwrap();
+        if top <= 96 {
+            rh.push(top + 12);
+        }
+    }
+    Voicing { lh, rh }
 }
 
 #[cfg(test)]
@@ -155,14 +302,86 @@ mod tests {
         mode: Mode::Ionian,
     };
 
-    fn chain(chords: &[Chord], j: f32) -> Vec<Vec<u8>> {
+    fn chain_styled(chords: &[Chord], style: VoicingStyle) -> Vec<Voicing> {
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let mut out: Vec<Vec<u8>> = Vec::new();
+        let mut out: Vec<Voicing> = Vec::new();
         for c in chords {
-            let v = voice(c, out.last().map(|v| v.as_slice()), j, &mut rng);
+            let v = voice(c, out.last(), &style, &mut rng);
             out.push(v);
         }
         out
+    }
+
+    fn chain(chords: &[Chord], j: f32) -> Vec<Vec<u8>> {
+        let style = VoicingStyle {
+            jazziness: j,
+            ..Default::default()
+        };
+        chain_styled(chords, style)
+            .into_iter()
+            .map(|v| v.notes())
+            .collect()
+    }
+
+    fn diatonic(mode: Mode, size: u8) -> Vec<Chord> {
+        let scale = Scale { root: 5, mode };
+        (0..7)
+            .map(|d| scale.realize(ChordSpec { degree: d, size }))
+            .collect()
+    }
+
+    #[test]
+    fn wide_voicings_use_two_hands_and_double() {
+        for mode in Mode::ALL {
+            for size in 3..=5 {
+                for j in [0.0, 0.6, 0.9] {
+                    let chords = diatonic(mode, size);
+                    for width in [1.0, 2.0] {
+                        let style = VoicingStyle {
+                            jazziness: j,
+                            width,
+                            ..Default::default()
+                        };
+                        for (c, v) in chords.iter().zip(chain_styled(&chords, style)) {
+                            let n = v.notes();
+                            assert!(!v.lh.is_empty(), "{} {v:?}", c.name());
+                            assert!(v.lh.iter().all(|&l| l < v.rh[0]), "{v:?}");
+                            assert!(n.iter().all(|&m| (21..=108).contains(&m)), "{v:?}");
+                            let pcs: Vec<u8> = n.iter().map(|m| m % 12).collect();
+                            assert!(pcs.contains(&c.third()), "{} {v:?}", c.name());
+                            let span = n.last().unwrap() - n[0];
+                            assert!(span >= 18, "two hands span 1.5 octaves: {v:?}");
+                            if width == 2.0 {
+                                let top = *v.rh.last().unwrap();
+                                assert!(v.rh.contains(&(top - 12)), "top doubled: {v:?}");
+                                assert!(span >= 24, "{v:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn centre_octave_moves_the_voicings() {
+        let chords = diatonic(Mode::Ionian, 4);
+        let avg = |octave: i8| {
+            let style = VoicingStyle {
+                jazziness: 0.3,
+                center_octave: octave,
+                ..Default::default()
+            };
+            let v: Vec<u8> = chain_styled(&chords, style)
+                .iter()
+                .flat_map(|v| v.notes())
+                .collect();
+            mean(&v)
+        };
+        for (o, d) in [(3, -12.0), (5, 12.0)] {
+            let shift = avg(o) - avg(CENTER_OCTAVE);
+            assert!((shift - d).abs() < 3.0, "octave {o}: shift {shift}");
+        }
     }
 
     #[test]

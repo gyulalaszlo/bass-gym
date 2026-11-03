@@ -9,8 +9,9 @@ use bg_audio::{
 use bg_core::ScoringThresholds;
 use bg_sound::SoundRole;
 use bg_ui::theme::{PRESETS, Palette, Rgb, ThemePrefs};
+use bg_ui::view::{ViewPrefs, ZOOM_STEPS};
 use bg_ui::widgets::button::{button, selectable, selectable_value};
-use bg_ui::widgets::controls::{checkbox, dropdown, number_field, slider_field};
+use bg_ui::widgets::controls::{checkbox, dropdown, dropdown_value, number_field, slider_field};
 use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{PreferencePage, PrefsCtx, egui, icons, theme};
 use egui::{RichText, Slider};
@@ -799,6 +800,43 @@ impl PreferencePage for DisplayPage {
                     ui.end_row();
                 });
         });
+        ui.add_space(6.0);
+        let mut v: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
+        let v_before = v.clone();
+        theme::section(ui, "Exercise view", |ui| {
+            egui::Grid::new("display_view")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Beat grid zoom");
+                    dropdown_value(
+                        ui,
+                        "view_zoom",
+                        &mut v.grid_zoom,
+                        0..ZOOM_STEPS.len(),
+                        |i| format!("×{}", ZOOM_STEPS[*i]),
+                    );
+                    ui.end_row();
+                    ui.label("");
+                    ui.label(
+                        RichText::new("Also with the magnifier buttons left of the grid")
+                            .small()
+                            .color(theme::dim()),
+                    );
+                    ui.end_row();
+                    ui.label("Performance indicator range");
+                    let unit = if v.indicator_bars == 1 { "bar" } else { "bars" };
+                    ui.add(
+                        number_field(&mut v.indicator_bars)
+                            .range(1..=8)
+                            .suffix(format!("last {unit}")),
+                    );
+                    ui.end_row();
+                });
+        });
+        if v != v_before {
+            ctx.settings.set(ViewPrefs::ID, &v);
+        }
         ui.add_space(6.0);
         theme::section(ui, "Buttons", |ui| {
             egui::Grid::new("display_buttons").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {

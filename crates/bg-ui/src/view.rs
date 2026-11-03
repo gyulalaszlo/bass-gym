@@ -1,0 +1,38 @@
+//! View preferences shared by all exercises: beat grid zoom and the live performance
+//! indicator. Stored in the settings (not in presets), so changing them never marks a
+//! preset as modified.
+
+use serde::{Deserialize, Serialize};
+
+/// Beat grid zoom levels, as a divisor of the visible span (larger = zoomed in, so notes
+/// move slower).
+pub const ZOOM_STEPS: [f64; 5] = [0.5, 0.75, 1.0, 1.5, 2.0];
+/// Index of the 1:1 zoom in [`ZOOM_STEPS`].
+pub const ZOOM_DEFAULT: usize = 2;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewPrefs {
+    /// Index into [`ZOOM_STEPS`].
+    pub grid_zoom: usize,
+    /// The performance indicator's range covers the last this many bars.
+    pub indicator_bars: u32,
+}
+
+impl Default for ViewPrefs {
+    fn default() -> Self {
+        Self {
+            grid_zoom: ZOOM_DEFAULT,
+            indicator_bars: 2,
+        }
+    }
+}
+
+impl ViewPrefs {
+    pub const ID: &'static str = "view";
+
+    /// The span divisor of the current zoom level.
+    pub fn zoom_factor(&self) -> f64 {
+        ZOOM_STEPS[self.grid_zoom.min(ZOOM_STEPS.len() - 1)]
+    }
+}

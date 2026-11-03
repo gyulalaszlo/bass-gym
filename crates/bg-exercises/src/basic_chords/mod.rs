@@ -11,11 +11,13 @@ use bg_core::music::note_name;
 use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
+use bg_ui::view::ViewPrefs;
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::button::{button, selectable_value};
 use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
 use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
-use bg_ui::widgets::results::results;
+use bg_ui::widgets::performance::performance_strip;
+use bg_ui::widgets::results::{block, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::widgets::tuner::TunerPrefs;
@@ -28,7 +30,9 @@ use serde_json::{Value, json};
 
 use self::accompaniment::{ChordAccompaniment, SharedChords, lock_chords};
 use self::prefs::{BasicChordsPage, BasicChordsPrefs};
-use crate::timing_session::{SharedTiming, TimingSession, last_time, lock, preview};
+use crate::timing_session::{
+    PERFORMANCE_HEIGHT, SharedTiming, TimingSession, last_time, lock, preview, timing_meter,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProgressionKind {
@@ -141,6 +145,12 @@ pub struct BasicChordsData {
     pub comp: String,
     /// 0 = plain triads … 1 = rich, rootless voicings.
     pub jazziness: f32,
+    /// Voicing width: 0 = one hand, 1 = two hands, 2 = two hands with octave doublings.
+    pub width: f32,
+    /// Register of the comp, in octaves (4 = around middle C).
+    pub center_octave: i8,
+    /// 0 = machine-exact … 1 = loose timing and dynamics.
+    pub humanize: f32,
     pub piano_volume: f32,
     /// Chord-compatibility checker id.
     pub checker: String,
@@ -158,6 +168,9 @@ impl Default for BasicChordsData {
             chord_length: ChordLength::One,
             comp: "halves".into(),
             jazziness: 0.2,
+            width: 0.0,
+            center_octave: harmony::voicing::CENTER_OCTAVE,
+            humanize: 0.0,
             piano_volume: 0.7,
             checker: "chord_tones".into(),
             seed: 1,
@@ -209,6 +222,10 @@ pub struct BasicChords {
     timing: SharedTiming,
     chords: SharedChords,
     has_results: bool,
+    /// The results dialog is open.
+    show_results: bool,
+    /// Running on the previous frame (to open the results when the session ends).
+    was_running: bool,
     /// Seed of the last started session.
     run_seed: Option<u64>,
     error: Option<String>,
@@ -316,12 +333,20 @@ impl ExerciseType for BasicChords {
     fn toolbar(&mut self, tb: &mut Toolbar, ctx: &mut ExerciseCtx) {
         self.a4 = ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4;
         let running = ctx.engine.session_running() && self.is_running();
+        if self.was_running && !running && self.has_results {
+            self.show_results = true;
+        }
+        self.was_running = running;
         if tb.transport(running) {
             if running {
                 ctx.engine.stop_session();
             } else if ctx.engine.clock().is_running() {
                 self.start(ctx);
             }
+        }
+        tb.gap(Gap::Small);
+        if tb.results_button(self.has_results && !running) {
+            self.show_results = true;
         }
         // Current / next chord in the space between START and the settings.
         let now = if running {
@@ -365,23 +390,40 @@ impl ExerciseType for BasicChords {
         ui.add_space(6.0);
         self.progression_strip(ui, now);
         ui.add_space(6.0);
-        self.grid(ui, now);
+        let mut prefs: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
+        let zoom_before = prefs.grid_zoom;
+        let meter = timing_meter(
+            &self.timing,
+            self.has_results,
+            now,
+            prefs.indicator_bars,
+            ctx.scoring,
+        );
+        performance_strip(ui, PERFORMANCE_HEIGHT, &[&meter]);
+        ui.add_space(4.0);
+        self.grid(ui, now, &mut prefs.grid_zoom);
+        if prefs.grid_zoom != zoom_before {
+            ctx.settings.set(ViewPrefs::ID, &prefs);
+        }
         if running {
             ui.ctx().request_repaint();
         }
         ui.add_space(8.0);
-        if self.has_results {
-            let stats = lock(&self.timing).matcher.stats();
-            theme::section(ui, if running { "Live results" } else { "Results" }, |ui| {
-                results(ui, &stats, ctx.scoring);
-                self.per_chord_table(ui);
-            });
-            ui.add_space(8.0);
-        }
         if self.config(ui, !running) {
             self.has_results = false;
             self.run_seed = None;
         }
+
+        let mut open = self.show_results && self.has_results;
+        let stats = open.then(|| lock(&self.timing).matcher.stats());
+        results_dialog(ui.ctx(), &mut open, "Results", |ui| {
+            if let Some(stats) = &stats {
+                results(ui, stats, ctx.scoring, |ui| {
+                    block(ui, "Per chord", |ui| self.per_chord_table(ui))
+                });
+            }
+        });
+        self.show_results = open;
     }
 }
 
@@ -414,12 +456,17 @@ impl BasicChords {
             harmony::checker(&d.checker),
             d.comp.clone(),
             d.chord_length.bars(),
-            d.jazziness,
+            harmony::VoicingStyle {
+                jazziness: d.jazziness,
+                width: d.width,
+                center_octave: d.center_octave,
+            },
             d.piano_volume,
             a4,
             seed,
             self.chords.clone(),
-        );
+        )
+        .with_humanize(d.humanize);
         let logic = TimingSession::with_accompaniment(
             d.session.clone(),
             ctx.scoring.clone(),
@@ -429,6 +476,7 @@ impl BasicChords {
         );
         ctx.engine.start_session(Box::new(logic));
         self.has_results = true;
+        self.show_results = false;
         self.run_seed = Some(seed);
     }
 
@@ -620,7 +668,7 @@ impl BasicChords {
             });
     }
 
-    fn grid(&self, ui: &mut egui::Ui, now: f64) {
+    fn grid(&self, ui: &mut egui::Ui, now: f64, zoom: &mut usize) {
         let steps = self.data.session.groove.steps_per_beat;
         if self.has_results {
             let labels: Vec<(f64, f64, String)> = lock_chords(&self.chords)
@@ -638,7 +686,7 @@ impl BasicChords {
                 bars_ahead: 2.0,
                 chords: &labels,
             }
-            .show(ui, 180.0);
+            .show_zoomable(ui, 180.0, zoom);
         } else {
             let (bars, matcher) = preview(&self.data.session);
             let progression = self.shown_progression();
@@ -667,7 +715,7 @@ impl BasicChords {
                 bars_ahead: 2.0,
                 chords: &labels,
             }
-            .show(ui, 180.0);
+            .show_zoomable(ui, 180.0, zoom);
         }
     }
 
@@ -701,8 +749,6 @@ impl BasicChords {
                 }
             }
         }
-        ui.add_space(6.0);
-        theme::caption(ui, "Per chord");
         let pct = |a: usize, b: usize| {
             if b == 0 {
                 "--".to_owned()
@@ -912,6 +958,16 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
     }
 }
 
+fn width_description(w: f32) -> &'static str {
+    match w {
+        w if w < 0.05 => "One hand, close voicings",
+        w if w < 0.95 => "Mostly one hand, sometimes two",
+        w if w < 1.05 => "Two hands: bass and fifth below, chord above",
+        w if w < 1.95 => "Two hands, sometimes doubled in octaves",
+        _ => "Two hands, doubled in octaves: big and full",
+    }
+}
+
 fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
     egui::Grid::new("bc_piano")
         .num_columns(2)
@@ -936,6 +992,45 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
                     .suffix("%"),
             );
             d.jazziness = pct / 100.0;
+            ui.end_row();
+            ui.label("Width");
+            let mut pct = d.width * 100.0;
+            ui.add(
+                bg_ui::widgets::controls::slider_field(&mut pct, 0.0..=200.0)
+                    .step_by(10.0)
+                    .suffix("%"),
+            )
+            .on_hover_text("0% one hand · 100% two hands · 200% two hands with octave doublings; in between mixes them");
+            d.width = pct / 100.0;
+            ui.end_row();
+            ui.label("");
+            ui.label(
+                RichText::new(width_description(d.width))
+                    .small()
+                    .color(theme::dim()),
+            );
+            ui.end_row();
+            ui.label("Register");
+            bg_ui::widgets::controls::dropdown_value(
+                ui,
+                "bc_octave",
+                &mut d.center_octave,
+                2..=6i8,
+                |o| match o - harmony::voicing::CENTER_OCTAVE {
+                    0 => "Middle (default)".to_owned(),
+                    n => format!("{n:+} octave{}", if n.abs() == 1 { "" } else { "s" }),
+                },
+            );
+            ui.end_row();
+            ui.label("Humanize");
+            let mut pct = d.humanize * 100.0;
+            ui.add(
+                bg_ui::widgets::controls::slider_field(&mut pct, 0.0..=100.0)
+                    .step_by(5.0)
+                    .suffix("%"),
+            )
+            .on_hover_text("Small random changes in timing, chord rolls and dynamics");
+            d.humanize = pct / 100.0;
             ui.end_row();
             ui.label("Volume");
             ui.add(egui::Slider::new(&mut d.piano_volume, 0.0..=1.0).show_value(false));

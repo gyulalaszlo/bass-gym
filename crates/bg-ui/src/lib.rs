@@ -5,6 +5,7 @@ pub mod exercise;
 pub mod prefs;
 pub mod settings;
 pub mod theme;
+pub mod view;
 pub mod widgets;
 
 pub use egui;

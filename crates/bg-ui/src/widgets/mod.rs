@@ -4,6 +4,7 @@ pub mod controls;
 pub mod groove_editor;
 pub mod histogram;
 pub mod keyboard;
+pub mod performance;
 pub mod results;
 pub mod session_panel;
 pub mod toolbar;

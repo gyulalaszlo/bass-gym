@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bg_audio::{SessionIo, Slot};
-use bg_core::harmony::{Chord, ChordChecker, Scale, comp, voice};
+use bg_core::harmony::{Chord, ChordChecker, Scale, Voicing, VoicingStyle, comp, voice};
 use bg_core::music::freq_to_midi;
 use bg_core::plan::BarPlan;
 use bg_sound::{SoundEvent, SoundKind};
@@ -21,6 +21,7 @@ pub struct ChordSpan {
     /// Index into the progression.
     pub step: usize,
     pub chord: Chord,
+    /// All notes of the piano voicing, ascending.
     pub voicing: Vec<u8>,
 }
 
@@ -45,6 +46,13 @@ pub fn lock_chords(shared: &SharedChords) -> MutexGuard<'_, ChordShared> {
     shared.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Largest humanize changes (at humanize = 1): hit timing (s), hit velocity, chord roll
+/// (s) and per-note velocity.
+const HUMANIZE_TIMING: f32 = 0.012;
+const HUMANIZE_VELOCITY: f32 = 0.15;
+const HUMANIZE_ROLL: f32 = 0.010;
+const HUMANIZE_NOTE_VELOCITY: f32 = 0.05;
+
 pub struct ChordAccompaniment {
     pub progression: Vec<Chord>,
     pub scale: Scale,
@@ -52,14 +60,18 @@ pub struct ChordAccompaniment {
     pub comp: String,
     /// Chord length as a multiple of the bar (0.5, 1, 2, 4).
     pub bars_per_chord: f32,
-    pub jazziness: f32,
+    pub style: VoicingStyle,
+    /// 0 = machine-exact … 1 = loose: random timing, rolled chords and velocity changes.
+    pub humanize: f32,
     pub volume: f32,
     pub a4: f32,
     pub shared: SharedChords,
     rng: ChaCha8Rng,
-    prev_voicing: Option<Vec<u8>>,
-    /// Voicing prepared early for an anticipated chord (progression position, notes).
-    anticipated: Option<(usize, Vec<u8>)>,
+    /// Randomness of the humanized feel (separate, so voicings don't depend on it).
+    feel_rng: ChaCha8Rng,
+    prev_voicing: Option<Voicing>,
+    /// Voicing prepared early for an anticipated chord (progression position, voicing).
+    anticipated: Option<(usize, Voicing)>,
     /// Skip the first hit of the next bar (it was anticipated).
     skip_downbeat: bool,
     /// Progression position of the last span, to extend chords held across bar lines.
@@ -74,7 +86,7 @@ impl ChordAccompaniment {
         checker: &'static dyn ChordChecker,
         comp: String,
         bars_per_chord: f32,
-        jazziness: f32,
+        style: VoicingStyle,
         volume: f32,
         a4: f32,
         seed: u64,
@@ -90,11 +102,13 @@ impl ChordAccompaniment {
             checker,
             comp,
             bars_per_chord,
-            jazziness,
+            style,
+            humanize: 0.0,
             volume,
             a4,
             shared,
             rng: ChaCha8Rng::seed_from_u64(seed ^ 0x5eed),
+            feel_rng: ChaCha8Rng::seed_from_u64(seed ^ 0xfee1),
             prev_voicing: None,
             anticipated: None,
             skip_downbeat: false,
@@ -102,8 +116,14 @@ impl ChordAccompaniment {
         }
     }
 
+    /// A humanized player (see [`ChordAccompaniment::humanize`]).
+    pub fn with_humanize(mut self, humanize: f32) -> Self {
+        self.humanize = humanize.clamp(0.0, 1.0);
+        self
+    }
+
     /// Voicing for chord number `pos` (counting from the start, not wrapped).
-    fn voicing_for(&mut self, pos: usize) -> Vec<u8> {
+    fn voicing_for(&mut self, pos: usize) -> Voicing {
         if let Some((p, v)) = self.anticipated.take()
             && p == pos
         {
@@ -113,16 +133,21 @@ impl ChordAccompaniment {
         let chord = &self.progression[pos % self.progression.len()];
         let v = voice(
             chord,
-            self.prev_voicing.as_deref(),
-            self.jazziness,
+            self.prev_voicing.as_ref(),
+            &self.style,
             &mut self.rng,
         );
         self.prev_voicing = Some(v.clone());
         v
     }
 
+    /// Plays `notes` at `time` for `len` seconds, humanized by `humanize`, and records
+    /// them for the UI.
+    #[allow(clippy::too_many_arguments)]
     fn play(
-        &self,
+        rng: &mut ChaCha8Rng,
+        humanize: f32,
+        volume: f32,
         io: &mut SessionIo,
         shared: &mut ChordShared,
         time: f64,
@@ -130,21 +155,36 @@ impl ChordAccompaniment {
         velocity: f32,
         notes: &[u8],
     ) {
-        for &midi in notes {
+        let h = humanize.clamp(0.0, 1.0);
+        let mut jitter = |amount: f32| {
+            if h > 0.0 {
+                rng.random_range(-1.0f32..=1.0) * amount * h
+            } else {
+                0.0
+            }
+        };
+        // Per hit: timing push / drag and dynamics; per note: a roll from the bottom and
+        // a little velocity variation.
+        let hit_dt = jitter(HUMANIZE_TIMING) as f64;
+        let hit_dv = jitter(HUMANIZE_VELOCITY);
+        let roll = jitter(HUMANIZE_ROLL).abs() as f64;
+        let end = time + len;
+        for (k, &midi) in notes.iter().enumerate() {
+            let spread = if notes.len() > 1 {
+                roll * k as f64 / (notes.len() - 1) as f64
+            } else {
+                0.0
+            };
+            let t = (time + hit_dt + spread).max(io.now + 0.005);
+            let len = (end - t).max(0.05);
+            let velocity = (velocity + hit_dv + jitter(HUMANIZE_NOTE_VELOCITY)).clamp(0.05, 1.0);
             let kind = SoundKind::Note {
                 midi: midi as f32,
                 velocity,
                 duration: (len * 0.95) as f32,
             };
-            io.play(
-                time,
-                Slot::Instrument,
-                SoundEvent {
-                    kind,
-                    gain: self.volume,
-                },
-            );
-            shared.piano.push(PianoNote { time, len, midi });
+            io.play(t, Slot::Instrument, SoundEvent { kind, gain: volume });
+            shared.piano.push(PianoNote { time: t, len, midi });
         }
     }
 }
@@ -175,8 +215,8 @@ impl Accompaniment for ChordAccompaniment {
         // this bar's hits can make room for it.
         let next_pos = pos_at(beats + 1e-3);
         let push = beats - 0.5;
-        let anticipate =
-            next_pos != pos_at(beats - 1e-3) && self.rng.random::<f32>() < self.jazziness * 0.4;
+        let anticipate = next_pos != pos_at(beats - 1e-3)
+            && self.rng.random::<f32>() < self.style.jazziness * 0.4;
         let cut = if anticipate { push } else { beats };
 
         let mut shared = lock_chords(&self.shared);
@@ -197,7 +237,7 @@ impl Accompaniment for ChordAccompaniment {
                 end: time_at(e),
                 step,
                 chord: self.progression[step].clone(),
-                voicing,
+                voicing: voicing.notes(),
             });
             self.last_pos = Some(pos);
         }
@@ -240,7 +280,10 @@ impl Accompaniment for ChordAccompaniment {
             };
             let notes = span.voicing.clone();
             let end = (h.pos + h.len).min(seg_end).min(cut);
-            self.play(
+            Self::play(
+                &mut self.feel_rng,
+                self.humanize,
+                self.volume,
                 io,
                 &mut shared,
                 time_at(h.pos),
@@ -255,7 +298,17 @@ impl Accompaniment for ChordAccompaniment {
             let v = self.voicing_for(next_pos);
             self.anticipated = Some((next_pos, v.clone()));
             shared = lock_chords(&self.shared);
-            self.play(io, &mut shared, time_at(push), 1.5 * beat, 0.8, &v);
+            Self::play(
+                &mut self.feel_rng,
+                self.humanize,
+                self.volume,
+                io,
+                &mut shared,
+                time_at(push),
+                1.5 * beat,
+                0.8,
+                &v.notes(),
+            );
             self.skip_downbeat = true;
         }
     }

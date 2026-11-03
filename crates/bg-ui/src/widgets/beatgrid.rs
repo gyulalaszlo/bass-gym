@@ -5,6 +5,11 @@ use bg_core::{BarPlan, Matcher};
 use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, vec2};
 
 use crate::theme::{self, mono};
+use crate::view::ZOOM_STEPS;
+use crate::widgets::button::button;
+
+/// Width of the zoom button column left of the grid.
+const ZOOM_COLUMN: f32 = 26.0;
 
 pub struct Beatgrid<'a> {
     pub now: f64,
@@ -22,6 +27,55 @@ pub struct Beatgrid<'a> {
 impl Beatgrid<'_> {
     pub fn show(&self, ui: &mut egui::Ui, height: f32) {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+        self.paint(ui, rect, 1.0);
+    }
+
+    /// The grid with small zoom buttons on its left; `zoom` is an index into
+    /// [`ZOOM_STEPS`] (larger = zoomed in, so notes move slower).
+    pub fn show_zoomable(&self, ui: &mut egui::Ui, height: f32, zoom: &mut usize) {
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+        let column = Rect::from_x_y_ranges(rect.left()..=rect.left() + ZOOM_COLUMN, rect.y_range());
+        let grid = rect.with_min_x(column.right() + 2.0);
+        let last = ZOOM_STEPS.len() - 1;
+        *zoom = (*zoom).min(last);
+        let size = vec2(ZOOM_COLUMN, ZOOM_COLUMN);
+        let zoom_in = Rect::from_min_size(column.left_top() + vec2(0.0, 2.0), size);
+        let zoom_out = Rect::from_min_size(zoom_in.left_bottom() + vec2(0.0, 4.0), size);
+        let small = |icon: &str| {
+            button(icon)
+                .small()
+                .font(egui::FontId::proportional(14.0))
+                .min_size(size)
+        };
+        // Buttons in a child ui: `Ui::put` would move this ui's cursor back up.
+        let mut col = ui.new_child(egui::UiBuilder::new().max_rect(column));
+        if col
+            .put(zoom_in, small(crate::icons::MAGNIFYING_GLASS_PLUS))
+            .on_hover_text("Zoom in (notes move slower)")
+            .clicked()
+            && *zoom < last
+        {
+            *zoom += 1;
+        }
+        if col
+            .put(zoom_out, small(crate::icons::MAGNIFYING_GLASS_MINUS))
+            .on_hover_text("Zoom out (see further ahead)")
+            .clicked()
+            && *zoom > 0
+        {
+            *zoom -= 1;
+        }
+        ui.painter().text(
+            Pos2::new(column.center().x, zoom_out.bottom() + 6.0),
+            Align2::CENTER_TOP,
+            format!("×{}", ZOOM_STEPS[*zoom]),
+            mono(11.0),
+            theme::dim(),
+        );
+        self.paint(ui, grid, ZOOM_STEPS[*zoom]);
+    }
+
+    fn paint(&self, ui: &mut egui::Ui, rect: Rect, zoom: f64) {
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 0.0, theme::bg());
         p.rect_stroke(
@@ -38,8 +92,8 @@ impl Beatgrid<'_> {
             .find(|b| b.start <= self.now)
             .or(self.bars.first())
             .map_or(2.0, |b| b.duration);
-        let behind = self.bars_behind * bar_len;
-        let ahead = self.bars_ahead * bar_len;
+        let behind = self.bars_behind * bar_len / zoom;
+        let ahead = self.bars_ahead * bar_len / zoom;
         let x_now = rect.left() + rect.width() * (behind / (behind + ahead)) as f32;
         let pps = rect.width() as f64 / (behind + ahead);
         let x_of = |t: f64| x_now + ((t - self.now) * pps) as f32;

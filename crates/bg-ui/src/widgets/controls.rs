@@ -186,13 +186,19 @@ impl Widget for TextField<'_> {
 // ---------------------------------------------------------------------------------------
 // Number field
 
-/// A number on a dotted underline. Type to edit (Enter or leaving the field commits, Esc
-/// reverts); ↑ / ↓ step the value while editing (Shift: ×10).
+/// Pixels of vertical drag per step of a [`NumberField`].
+const DRAG_PX: f32 = 6.0;
+
+/// A number on a dotted underline. Drag it up / down to change it (Shift: ×10), or click
+/// to type (Enter or leaving the field commits, Esc reverts); ↑ / ↓ step the value while
+/// editing (Shift: ×10).
 pub struct NumberField<'a, T: Numeric> {
     value: &'a mut T,
     min: f64,
     max: f64,
     step: f64,
+    /// Value change per drag notch; `None` disables dragging.
+    drag_step: Option<f64>,
     decimals: usize,
     suffix: Option<String>,
     font: Option<FontId>,
@@ -207,6 +213,7 @@ pub fn number_field<T: Numeric>(value: &mut T) -> NumberField<'_, T> {
         min: T::MIN.to_f64(),
         max: T::MAX.to_f64(),
         step: 1.0,
+        drag_step: Some(f64::NAN),
         decimals: if T::INTEGRAL { 0 } else { 1 },
         suffix: None,
         font: None,
@@ -224,6 +231,16 @@ impl<T: Numeric> NumberField<'_, T> {
     }
     pub fn step(mut self, s: f64) -> Self {
         self.step = s;
+        self
+    }
+    /// Value change per drag notch (defaults to the ↑ / ↓ step).
+    pub fn drag_step(mut self, s: f64) -> Self {
+        self.drag_step = Some(s);
+        self
+    }
+    /// Only typing changes the value.
+    pub fn no_drag(mut self) -> Self {
+        self.drag_step = None;
         self
     }
     pub fn decimals(mut self, d: usize) -> Self {
@@ -294,7 +311,7 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
             }
         }
 
-        // Width: fits the widest value in range (or a fixed width).
+        // Width: fits the widest value in range and the current text (or a fixed width).
         let font = self
             .font
             .clone()
@@ -317,22 +334,53 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                         .x
                 })
             };
-            w(lo).max(w(hi)) + 4.0
+            // Wide enough for the range and for the current value / typed text (large
+            // ranges, e.g. seeds, fall back to a 4-digit estimate).
+            w(lo).max(w(hi)).max(w(buf.clone())) + 4.0
         });
 
+        let drag_step = self
+            .drag_step
+            .map(|s| if s.is_nan() { self.step } else { s });
+        let editing = focused || drag_step.is_none();
         let inner = ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut buf)
-                    .id(id)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin::symmetric(1, 1))
-                    .horizontal_align(self.align)
-                    .font(font.clone())
-                    .text_color(value_color(ui))
-                    .desired_width(width),
-            );
-            underline(ui, r.rect, r.has_focus() || r.hovered());
+            let r = if editing {
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut buf)
+                        .id(id)
+                        .frame(egui::Frame::NONE)
+                        .margin(egui::Margin::symmetric(1, 1))
+                        .horizontal_align(self.align)
+                        .font(font.clone())
+                        .text_color(value_color(ui))
+                        .desired_width(width),
+                );
+                underline(ui, r.rect, r.has_focus() || r.hovered());
+                r
+            } else {
+                // Not editing: the value as a drag handle (same size as the text edit).
+                let line_h =
+                    ui.fonts_mut(|f| f.row_height(&font)) + ui.spacing().extra_text_line_spacing;
+                let (rect, _) =
+                    ui.allocate_exact_size(vec2(width + 2.0, line_h + 2.0), Sense::hover());
+                let r = ui.interact(rect, id, Sense::click_and_drag());
+                if ui.is_rect_visible(rect) {
+                    let galley =
+                        ui.painter()
+                            .layout_no_wrap(buf.clone(), font.clone(), value_color(ui));
+                    let x = match self.align {
+                        Align::Min => rect.left() + 1.0,
+                        Align::Center => rect.center().x - galley.size().x / 2.0,
+                        Align::Max => rect.right() - 1.0 - galley.size().x,
+                    };
+                    let y = rect.center().y - galley.size().y / 2.0;
+                    ui.painter()
+                        .galley(Pos2::new(x, y), galley, value_color(ui));
+                }
+                underline(ui, rect, r.hovered() || r.dragged());
+                r.on_hover_cursor(egui::CursorIcon::ResizeVertical)
+            };
             if let Some(s) = &self.suffix {
                 ui.label(egui::RichText::new(s).color(theme::dim()));
             }
@@ -340,16 +388,42 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
         });
         let r = inner.inner;
 
-        if r.lost_focus() {
-            if !ui.input(|i| i.key_pressed(Key::Escape))
-                && let Ok(v) = buf.trim().replace(',', ".").parse::<f64>()
-            {
-                new_value = self.clamp(v);
-                changed |= new_value != current;
+        if editing {
+            if r.lost_focus() {
+                if !ui.input(|i| i.key_pressed(Key::Escape))
+                    && let Ok(v) = buf.trim().replace(',', ".").parse::<f64>()
+                {
+                    new_value = self.clamp(v);
+                    changed |= new_value != current;
+                }
+                ui.data_mut(|d| d.remove::<String>(id));
+            } else if r.has_focus() {
+                ui.data_mut(|d| d.insert_temp(id, buf));
             }
-            ui.data_mut(|d| d.remove::<String>(id));
-        } else if r.has_focus() {
-            ui.data_mut(|d| d.insert_temp(id, buf));
+        } else if let Some(drag_step) = drag_step {
+            let acc_id = id.with("drag_acc");
+            if r.drag_started() {
+                ui.data_mut(|d| d.insert_temp(acc_id, 0.0f32));
+            }
+            if r.dragged() {
+                // Up increases; one notch per DRAG_PX pixels.
+                let mut acc: f32 = ui.data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
+                acc -= r.drag_delta().y;
+                let notches = (acc / DRAG_PX).trunc();
+                if notches != 0.0 {
+                    acc -= notches * DRAG_PX;
+                    let mult = if ui.input(|i| i.modifiers.shift) {
+                        10.0
+                    } else {
+                        1.0
+                    };
+                    new_value = self.clamp(current + notches as f64 * drag_step * mult);
+                    changed = true;
+                }
+                ui.data_mut(|d| d.insert_temp(acc_id, acc));
+            } else if r.clicked() {
+                ui.memory_mut(|m| m.request_focus(id));
+            }
         }
 
         let mut r = clear_changed(r);

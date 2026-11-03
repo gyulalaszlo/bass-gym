@@ -12,7 +12,7 @@ use crate::music::note_name;
 
 pub use generate::{colourize, random_progression, resolve};
 pub use parse::{LIBRARY, ParseError, library, parse_progression};
-pub use voicing::voice;
+pub use voicing::{Voicing, VoicingStyle, voice};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {

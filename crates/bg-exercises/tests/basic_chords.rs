@@ -70,7 +70,10 @@ fn run(mode: GradeMode) -> (SharedTiming, SharedChords) {
         harmony::checker("chord_or_scale"),
         "halves".into(),
         1.0,
-        0.3,
+        harmony::VoicingStyle {
+            jazziness: 0.3,
+            ..Default::default()
+        },
         0.7,
         440.0,
         7,

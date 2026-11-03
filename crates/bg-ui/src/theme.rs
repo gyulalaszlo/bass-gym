@@ -321,6 +321,12 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
             }
         }
     }
+    // Icons in monospaced text too (phosphor only registers itself for proportional).
+    if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace)
+        && !mono.iter().any(|f| f == "phosphor")
+    {
+        mono.push("phosphor".to_owned());
+    }
     ctx.set_fonts(fonts);
 
     let dark = p.bg.luminance() < 0.5;

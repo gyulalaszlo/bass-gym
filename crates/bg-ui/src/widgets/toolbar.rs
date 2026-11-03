@@ -8,6 +8,7 @@
 use std::cell::Cell;
 
 use bg_core::TimeSignature;
+use bg_core::session::TempoRamp;
 use egui::{Align, Layout, Pos2, Rect, RichText, Shape, Ui, vec2};
 
 use crate::widgets::button::{button, selectable};
@@ -22,6 +23,16 @@ const MENU_PADDING: f32 = 12.0;
 
 /// Height of the buttons in the toolbar.
 pub const BUTTON_HEIGHT: f32 = 36.0;
+
+/// A chip for [`Toolbar::chips`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chip {
+    pub icon: &'static str,
+    /// A few words, e.g. "4+4 bars".
+    pub label: String,
+    /// The full description, shown on hover.
+    pub tooltip: String,
+}
 
 /// Space between toolbar items. Each gap has a minimum width and takes a share of the
 /// free width in proportion to its weight.
@@ -182,8 +193,9 @@ impl Toolbar<'_> {
     /// session should start or stop.
     pub fn transport(&mut self, running: bool) -> bool {
         let ui = &mut *self.ui;
-        let space =
-            ui.input(|i| i.key_pressed(egui::Key::Space)) && !ui.ctx().egui_wants_keyboard_input();
+        let space = ui.input(|i| i.key_pressed(egui::Key::Space))
+            && !ui.ctx().egui_wants_keyboard_input()
+            && !crate::widgets::results::modal_open(ui.ctx());
         let (text, color) = if running {
             (format!("{}  STOP", icons::STOP), theme::amber())
         } else {
@@ -200,6 +212,23 @@ impl Toolbar<'_> {
             .on_hover_text("Space: start / stop")
             .clicked();
         clicked || space
+    }
+
+    /// A small button that (re)opens the last session's results; disabled while there
+    /// are none. Returns true when clicked.
+    pub fn results_button(&mut self, available: bool) -> bool {
+        let ui = &mut *self.ui;
+        ui.add_enabled_ui(available, |ui| {
+            ui.add(
+                button(icons::CHART_BAR)
+                    .font(egui::FontId::proportional(18.0))
+                    .min_size([BUTTON_HEIGHT, BUTTON_HEIGHT]),
+            )
+            .on_hover_text("Results of the last session")
+            .on_disabled_hover_text("No results yet: run a session")
+            .clicked()
+        })
+        .inner
     }
 
     /// The boxed tap-tempo button. Sets `bpm` once tapped at least 3 times.
@@ -237,17 +266,101 @@ impl Toolbar<'_> {
                 number_field(bpm)
                     .range(20.0..=400.0)
                     .step(5.0)
+                    .drag_step(1.0)
                     .decimals(0)
                     .font(theme::mono(28.0))
                     .suffix("bpm")
                     .id_salt("toolbar_bpm"),
             )
-            .on_hover_text("Type a tempo, or use ↑ / ↓ (±5, Shift ±50)");
+            .on_hover_text("Drag up / down (Shift ×10), or click to type (↑ / ↓: ±5, Shift ±50)");
             if step(ui, icons::PLUS, "+1 BPM") {
                 *bpm = (*bpm + 1.0).min(400.0);
             }
         });
         *bpm != before
+    }
+
+    /// The tempo: the [`Toolbar::bpm`] readout, or with a tempo ramp, start → target
+    /// with a short summary of the ramp below.
+    pub fn tempo(&mut self, bpm: &mut f32, ramp: &mut TempoRamp) -> bool {
+        if !ramp.enabled {
+            return self.bpm(bpm);
+        }
+        let before = (*bpm, ramp.target);
+        let summary = crate::widgets::session_panel::ramp_summary(*bpm, ramp);
+        self.ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                fn field<'a>(v: &'a mut f32, salt: &str) -> controls::NumberField<'a, f32> {
+                    number_field(v)
+                        .range(20.0..=400.0)
+                        .step(5.0)
+                        .drag_step(1.0)
+                        .decimals(0)
+                        .font(theme::mono(20.0))
+                        .id_salt(salt.to_owned())
+                }
+                ui.add(field(bpm, "toolbar_bpm"))
+                    .on_hover_text("Start tempo: drag up / down, or click to type");
+                ui.label(RichText::new(icons::ARROW_RIGHT).color(theme::dim()));
+                ui.add(field(&mut ramp.target, "toolbar_bpm_target").suffix("bpm"))
+                    .on_hover_text("Target tempo of the ramp");
+            });
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label(
+                    RichText::new(icons::TRAY_ARROW_UP)
+                        .font(theme::prop(13.0))
+                        .color(theme::green()),
+                );
+                ui.label(
+                    RichText::new(summary)
+                        .font(theme::mono(13.0))
+                        .color(theme::text()),
+                );
+            });
+        });
+        (*bpm, ramp.target) != before
+    }
+
+    /// Compact chips naming active options (icon + short label, full text on hover).
+    /// Returns true when one was clicked.
+    pub fn chips(&mut self, chips: &[Chip]) -> bool {
+        let ui = &mut *self.ui;
+        let mut clicked = false;
+        for (i, c) in chips.iter().enumerate() {
+            if i > 0 {
+                ui.add_space(4.0);
+            }
+            let color = if ui.is_enabled() {
+                theme::amber()
+            } else {
+                theme::dim()
+            };
+            let galley = ui.painter().layout_no_wrap(
+                format!("{} {}", c.icon, c.label),
+                theme::mono(12.0),
+                color,
+            );
+            let size = galley.size() + vec2(12.0, 8.0);
+            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+            let resp = resp.on_hover_text(&c.tooltip);
+            if ui.is_rect_visible(rect) {
+                let fill = color.gamma_multiply(if resp.hovered() { 0.22 } else { 0.1 });
+                ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+                ui.painter()
+                    .galley(rect.center() - galley.size() / 2.0, galley, color);
+            }
+            clicked |= resp.clicked();
+        }
+        clicked
+    }
+
+    /// Opens the [`Toolbar::menu`] with this `id_salt` (call before drawing the menu).
+    pub fn open_menu(&mut self, id_salt: &str) {
+        let id = self.ui.make_persistent_id(id_salt);
+        self.ui.data_mut(|d| d.insert_temp(id, true));
     }
 
     /// The time signature, as a "4/4" dropdown with common signatures and custom fields.

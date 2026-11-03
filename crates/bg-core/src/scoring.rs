@@ -124,9 +124,38 @@ pub struct Outcome {
     pub grade: Option<Grade>,
 }
 
+/// The most recently decided expected note, for the live indicator.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LastNote {
+    /// Timing offset (late +); `None` when the note was missed.
+    pub timing_ms: Option<f32>,
+    /// Timing-only grade ([`Grade::Missed`] for a missed note).
+    pub grade: Grade,
+}
+
+/// Timing of the recent notes: the last decided note and the range of offsets since a
+/// given time.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RecentTiming {
+    pub last: Option<LastNote>,
+    /// (min, max) timing offset of the played notes since the start of the window.
+    pub range: Option<(f32, f32)>,
+}
+
+/// A bar of the session (count-in excluded), as planned.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarInfo {
+    pub index: i64,
+    pub start: f64,
+    pub duration: f64,
+    pub bpm: f32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Matcher {
     pub thresholds: ScoringThresholds,
+    /// The planned bars, count-in excluded.
+    pub bars: Vec<BarInfo>,
     /// Whether played pitches are judged against chords.
     pub harmony_enabled: bool,
     pub grade_mode: GradeMode,
@@ -187,6 +216,14 @@ impl Matcher {
     }
 
     pub fn add_bar(&mut self, bar: &BarPlan) {
+        if !bar.is_count_in() {
+            self.bars.push(BarInfo {
+                index: bar.index,
+                start: bar.start,
+                duration: bar.duration,
+                bpm: bar.bpm,
+            });
+        }
         let max_window = self.thresholds.window_ms as f64 / 1000.0;
         for n in &bar.notes {
             self.expected.push(Expected {
@@ -291,11 +328,76 @@ impl Matcher {
             .map(|p| p.offset.unwrap_or(f64::INFINITY))
     }
 
+    /// The last decided note and the range of timing offsets of notes expected at or
+    /// after `since`.
+    pub fn recent_timing(&self, since: f64) -> RecentTiming {
+        let last = self
+            .outcomes
+            .iter()
+            .rposition(|o| o.grade.is_some())
+            .map(|i| {
+                let o = &self.outcomes[i];
+                LastNote {
+                    timing_ms: o.timing_ms,
+                    grade: o
+                        .timing_ms
+                        .map_or(Grade::Missed, |ms| self.thresholds.timing_grade(ms)),
+                }
+            });
+        let first = self.expected.partition_point(|e| e.time < since);
+        let range = self.outcomes[first..]
+            .iter()
+            .filter_map(|o| o.timing_ms)
+            .fold(None, |r: Option<(f32, f32)>, ms| {
+                Some(r.map_or((ms, ms), |(lo, hi)| (lo.min(ms), hi.max(ms))))
+            });
+        RecentTiming { last, range }
+    }
+
     pub fn stats(&self) -> SessionStats {
         let mut s = SessionStats::default();
+        // The session runs from the first bar to the last bar with a decided note.
+        let last_bar = self
+            .expected
+            .iter()
+            .zip(&self.outcomes)
+            .filter(|(_, o)| o.grade.is_some())
+            .map(|(e, _)| e.bar)
+            .max();
+        if let Some(last) = last_bar {
+            let bars: Vec<&BarInfo> = self.bars.iter().filter(|b| b.index <= last).collect();
+            if let (Some(first), Some(lb)) = (bars.first(), bars.last()) {
+                let end = lb.start + lb.duration;
+                // A session stopped mid-bar ends when it was stopped.
+                let end = if self.now > lb.start {
+                    end.min(self.now)
+                } else {
+                    end
+                };
+                s.bars = bars.len();
+                s.duration_s = end - first.start;
+                s.per_bar = bars
+                    .iter()
+                    .map(|b| BarStats {
+                        index: b.index,
+                        start: b.start - first.start,
+                        duration: b.duration,
+                        bpm: b.bpm,
+                        notes: 0,
+                        hits: 0,
+                        counts: [0; 4],
+                    })
+                    .collect();
+            }
+        }
         for (e, o) in self.expected.iter().zip(&self.outcomes) {
             let Some(g) = o.grade else { continue };
             s.counts[g as usize] += 1;
+            if let Ok(i) = s.per_bar.binary_search_by_key(&e.bar, |b| b.index) {
+                s.per_bar[i].notes += 1;
+                s.per_bar[i].hits += g.is_hit() as usize;
+                s.per_bar[i].counts[g as usize] += 1;
+            }
             let tempo = match s.per_tempo.iter_mut().find(|t| t.bpm == e.bpm) {
                 Some(t) => t,
                 None => {
@@ -370,8 +472,34 @@ pub struct TempoStats {
     pub timing_ms: Vec<f32>,
 }
 
+/// One bar of a session: when it was, its tempo and how it went.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BarStats {
+    pub index: i64,
+    /// Start, in seconds from the start of the session.
+    pub start: f64,
+    pub duration: f64,
+    pub bpm: f32,
+    /// Decided notes in the bar and how many of them were hits.
+    pub notes: usize,
+    pub hits: usize,
+    /// Decided notes by grade, indexed by `Grade as usize`.
+    pub counts: [usize; 4],
+}
+
+impl BarStats {
+    pub fn hit_rate(&self) -> Option<f32> {
+        (self.notes > 0).then(|| self.hits as f32 / self.notes as f32)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SessionStats {
+    /// Length of the session (count-in excluded), in bars and seconds.
+    pub bars: usize,
+    pub duration_s: f64,
+    /// Every bar of the session, in order.
+    pub per_bar: Vec<BarStats>,
     /// Indexed by `Grade as usize`.
     pub counts: [usize; 4],
     pub extra: usize,
@@ -456,7 +584,18 @@ mod tests {
         assert!((mean(&s.timing_ms).unwrap() - 12.5).abs() < 1e-3);
         assert_eq!(m.bar_rate(0), Some(0.5));
         assert_eq!(m.bar_rate(1), None);
+        // Only bar 0 has decided notes, and the session is "now" within it.
+        assert_eq!(s.bars, 1);
+        assert!((s.duration_s - 1.7).abs() < 1e-9);
+        assert_eq!(s.per_bar[0].notes, 4);
+        assert_eq!(s.per_bar[0].hits, 2);
+        assert_eq!(s.per_bar[0].counts, [1, 1, 0, 2]);
         m.update(10.0);
+        let s = m.stats();
+        assert_eq!(s.bars, 2);
+        assert!((s.duration_s - 4.0).abs() < 1e-9);
+        assert_eq!(s.per_bar[1].start, 2.0);
+        assert_eq!(s.per_bar[1].hit_rate(), Some(0.0));
         assert_eq!(m.bar_rate(0), Some(0.5));
         assert_eq!(m.bar_rate(1), Some(0.0));
     }
@@ -487,6 +626,35 @@ mod tests {
             assert_eq!(s.harmony, [1, 1, 1, 0]);
             assert!((s.harmony_rate().unwrap() - 1.0 / 3.0).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn recent_timing() {
+        let (mut m, _) = setup();
+        assert_eq!(m.recent_timing(0.0), RecentTiming::default());
+        m.on_onset(0.010, -10.0); // +10 ms
+        m.on_onset(0.480, -10.0); // -20 ms
+        m.on_onset(1.040, -10.0); // +40 ms
+        let r = m.recent_timing(0.0);
+        let (lo, hi) = r.range.unwrap();
+        assert!((lo + 20.0).abs() < 1e-3 && (hi - 40.0).abs() < 1e-3);
+        let last = r.last.unwrap();
+        assert!((last.timing_ms.unwrap() - 40.0).abs() < 1e-3);
+        assert_eq!(last.grade, Grade::Poor);
+        // The window only covers notes from `since` on.
+        let r = m.recent_timing(0.4);
+        let (lo, hi) = r.range.unwrap();
+        assert!((lo + 20.0).abs() < 1e-3 && (hi - 40.0).abs() < 1e-3);
+        // A miss becomes the last note, without an offset.
+        m.update(1.8);
+        let last = m.recent_timing(0.0).last.unwrap();
+        assert_eq!(
+            last,
+            LastNote {
+                timing_ms: None,
+                grade: Grade::Missed
+            }
+        );
     }
 
     #[test]

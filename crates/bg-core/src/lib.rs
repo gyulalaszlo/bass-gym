@@ -12,5 +12,8 @@ pub mod session;
 pub use groove::{Groove, GrooveNote};
 pub use music::{PPQ, TimeSignature};
 pub use plan::{BarPlan, ClickKind, Planner};
-pub use scoring::{Grade, GradeMode, Matcher, ScoringThresholds, SessionStats};
+pub use scoring::{
+    BarInfo, BarStats, Grade, GradeMode, LastNote, Matcher, RecentTiming, ScoringThresholds,
+    SessionStats,
+};
 pub use session::SessionConfig;

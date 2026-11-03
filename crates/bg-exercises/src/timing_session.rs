@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use bg_audio::{SessionIo, SessionLogic, SessionState, Slot};
 use bg_core::plan::BarPlan;
-use bg_core::{GradeMode, Matcher, Planner, ScoringThresholds, SessionConfig};
+use bg_core::{GradeMode, Matcher, Planner, RecentTiming, ScoringThresholds, SessionConfig};
 use bg_sound::{SoundEvent, SoundKind};
 
 /// Minimum scheduling lead for sounds.
@@ -257,6 +257,41 @@ pub fn last_time(shared: &SharedTiming) -> f64 {
     match (last_note, last_bar) {
         (Some(n), Some(b)) => n.max(b - 0.001).min(b),
         (n, b) => n.or(b).unwrap_or(0.0),
+    }
+}
+
+/// Height of the live performance strip above the beat grid.
+pub const PERFORMANCE_HEIGHT: f32 = 64.0;
+
+/// Timing of the last note and of the notes in the last `bars` bars (the bar at `now`
+/// included), for the live performance indicator.
+pub fn recent_timing(shared: &SharedTiming, now: f64, bars: u32) -> RecentTiming {
+    let s = lock(shared);
+    let Some(cur) = s.bars.iter().rposition(|b| b.start <= now) else {
+        return RecentTiming::default();
+    };
+    let first = cur.saturating_sub(bars.max(1) as usize - 1);
+    s.matcher.recent_timing(s.bars[first].start)
+}
+
+/// The timing meter of the performance strip: the running / last session's recent
+/// timing, or an empty meter before the first session.
+pub fn timing_meter(
+    shared: &SharedTiming,
+    has_results: bool,
+    now: f64,
+    bars: u32,
+    th: &ScoringThresholds,
+) -> bg_ui::widgets::performance::TimingMeter {
+    bg_ui::widgets::performance::TimingMeter {
+        recent: if has_results {
+            recent_timing(shared, now, bars)
+        } else {
+            RecentTiming::default()
+        },
+        scale_ms: th.window_ms,
+        good_ms: th.good_ms,
+        ok_ms: th.ok_ms,
     }
 }
 

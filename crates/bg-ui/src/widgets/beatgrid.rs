@@ -7,6 +7,7 @@ use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, vec2};
 use crate::theme::{self, mono};
 use crate::view::ZOOM_STEPS;
 use crate::widgets::button::button;
+use crate::widgets::time_axis::TimeAxis;
 
 /// Width of the zoom button column left of the grid.
 const ZOOM_COLUMN: f32 = 26.0;
@@ -94,10 +95,10 @@ impl Beatgrid<'_> {
             .map_or(2.0, |b| b.duration);
         let behind = self.bars_behind * bar_len / zoom;
         let ahead = self.bars_ahead * bar_len / zoom;
-        let x_now = rect.left() + rect.width() * (behind / (behind + ahead)) as f32;
-        let pps = rect.width() as f64 / (behind + ahead);
-        let x_of = |t: f64| x_now + ((t - self.now) * pps) as f32;
         let (t0, t1) = (self.now - behind, self.now + ahead);
+        let axis = TimeAxis::new(rect.x_range(), t0, t1);
+        let x_now = axis.x(self.now);
+        let x_of = |t: f64| axis.x(t);
 
         let band = if self.chords.is_empty() { 0.0 } else { 24.0 };
         let lane_top = rect.top() + 30.0 + band;
@@ -252,8 +253,9 @@ impl Beatgrid<'_> {
             if pl.onset > t1 {
                 continue;
             }
-            let target = pl.matched.map(|i| &m.expected[i]);
-            let color = match pl.matched.and_then(|i| m.outcomes[i].grade) {
+            let target = pl.matched.and_then(|i| m.expected.get(i));
+            let outcome = pl.matched.and_then(|i| m.outcomes.get(i));
+            let color = match outcome.and_then(|o| o.grade) {
                 Some(g) => theme::grade_color(g),
                 None => theme::red(),
             };

@@ -6,13 +6,15 @@
 //! The palette is runtime-configurable ([`ThemePrefs`]); widgets read colours through
 //! the accessor functions (`theme::green()`, ...), so a theme change applies everywhere.
 
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, RwLock};
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 use serde::{Deserialize, Serialize};
 
 use bg_core::Grade;
+
+use crate::widgets::score::MUSIC_FONT;
 
 /// An sRGB colour, stored as `[r, g, b]` in the settings file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,6 +329,17 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
     {
         mono.push("phosphor".to_owned());
     }
+    // Notation, in its own family: music glyphs must not mix with text or icons.
+    fonts.font_data.insert(
+        MUSIC_FONT.to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../../../assets/fonts/Bravura.otf"
+        ))),
+    );
+    fonts.families.insert(
+        FontFamily::Name(MUSIC_FONT.into()),
+        vec![MUSIC_FONT.to_owned()],
+    );
     ctx.set_fonts(fonts);
 
     let dark = p.bg.luminance() < 0.5;

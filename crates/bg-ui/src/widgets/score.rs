@@ -1,0 +1,462 @@
+//! Paints a [`bg_core::score`] bass staff along a [`TimeAxis`], so notes line up with
+//! whatever shares that axis. Notation glyphs come from the Bravura music font.
+
+use bg_core::TimeSignature;
+use bg_core::score::{
+    Accidental, MIDDLE_LINE, ScoreBar, ScoreEvent, ScoreKind, ScoreNote, TOP_LINE,
+};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Shape, Stroke, pos2};
+
+use crate::theme::{self, mono};
+use crate::widgets::time_axis::TimeAxis;
+
+/// Name of the bundled music font's family.
+pub const MUSIC_FONT: &str = "music";
+
+// Glyphs of the SMuFL standard.
+const F_CLEF: char = '\u{E062}';
+const HEAD_WHOLE: char = '\u{E0A2}';
+const HEAD_HALF: char = '\u{E0A3}';
+const HEAD_BLACK: char = '\u{E0A4}';
+const HEAD_X: char = '\u{E0A9}';
+const FLAT: char = '\u{E260}';
+const SHARP: char = '\u{E262}';
+const SIG_ZERO: u32 = 0xE080;
+const FLAGS_UP: [char; 4] = ['\u{E240}', '\u{E242}', '\u{E244}', '\u{E246}'];
+const FLAGS_DOWN: [char; 4] = ['\u{E241}', '\u{E243}', '\u{E245}', '\u{E247}'];
+const REST_WHOLE: char = '\u{E4E3}';
+const REST_HALF: char = '\u{E4E4}';
+const REST_QUARTER: char = '\u{E4E5}';
+const RESTS_FLAGGED: [char; 4] = ['\u{E4E6}', '\u{E4E7}', '\u{E4E8}', '\u{E4E9}'];
+
+/// Height of the bar label above the staff.
+const LABEL_HEIGHT: f32 = 16.0;
+/// Stem length, in staff spaces.
+const STEM: f32 = 3.5;
+
+/// Vertical layout of a staff: `lo..=hi` are the staff positions to make room for (see
+/// [`bg_core::score::extent`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffLayout {
+    /// Distance between staff lines.
+    pub spacing: f32,
+    pub lo: i32,
+    pub hi: i32,
+}
+
+impl StaffLayout {
+    pub fn height(&self) -> f32 {
+        LABEL_HEIGHT + self.above() + 4.0 * self.spacing + self.below()
+    }
+
+    fn above(&self) -> f32 {
+        ((self.hi - TOP_LINE).max(0) as f32 / 2.0 + 1.5) * self.spacing
+    }
+
+    fn below(&self) -> f32 {
+        ((-self.lo).max(0) as f32 / 2.0 + 1.5) * self.spacing
+    }
+
+    /// Screen y of the bottom staff line within `rect`.
+    fn bottom_line(&self, rect: Rect) -> f32 {
+        rect.top() + LABEL_HEIGHT + self.above() + 4.0 * self.spacing
+    }
+}
+
+/// Where the staff lines begin, left of the axis, to fit the clef and time signature.
+pub fn lead_width(spacing: f32, clef: bool) -> f32 {
+    (if clef { 3.2 } else { 0.5 } + 2.0) * spacing
+}
+
+pub struct ScoreView<'a> {
+    pub bars: &'a [ScoreBar],
+    pub axis: TimeAxis,
+    pub layout: StaffLayout,
+    /// Draw the clef and/or time signature at the left end of the staff.
+    pub lead: Option<Lead>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Lead {
+    pub clef: bool,
+    pub sig: TimeSignature,
+}
+
+impl ScoreView<'_> {
+    /// Paints into `rect`, which should be as tall as the layout's height.
+    pub fn paint(&self, p: &Painter, rect: Rect) {
+        let d = Draw {
+            p,
+            sp: self.layout.spacing,
+            bottom: self.layout.bottom_line(rect),
+            axis: self.axis,
+        };
+        d.staff(rect);
+        if let Some(lead) = self.lead {
+            d.lead(rect, lead);
+        }
+        for (i, bar) in self.bars.iter().enumerate() {
+            d.bar(bar, rect, i == 0);
+            let next = self.bars.get(i + 1);
+            d.events(bar, next, rect);
+        }
+    }
+}
+
+struct Draw<'a> {
+    p: &'a Painter,
+    sp: f32,
+    bottom: f32,
+    axis: TimeAxis,
+}
+
+impl Draw<'_> {
+    fn y(&self, pos: i32) -> f32 {
+        self.bottom - pos as f32 * self.sp / 2.0
+    }
+
+    /// Draws a glyph with its origin at `(x, y)`: SMuFL glyphs are designed around their
+    /// baseline, at a font size of four staff spaces.
+    fn glyph(&self, c: char, x: f32, y: f32, color: Color32) {
+        let font = FontId::new(4.0 * self.sp, FontFamily::Name(MUSIC_FONT.into()));
+        let galley = self.p.layout_no_wrap(c.to_string(), font, color);
+        let baseline = galley
+            .rows
+            .first()
+            .and_then(|r| r.row.glyphs.first().map(|g| r.pos.y + g.pos.y))
+            .unwrap_or(0.0);
+        self.p.galley(pos2(x, y - baseline), galley, color);
+    }
+
+    fn staff(&self, rect: Rect) {
+        let stroke = Stroke::new(1.0, theme::dim());
+        for line in 0..5 {
+            self.p.hline(rect.x_range(), self.y(line * 2), stroke);
+        }
+    }
+
+    fn lead(&self, rect: Rect, lead: Lead) {
+        let color = theme::text();
+        let mut x = rect.left() + 0.4 * self.sp;
+        if lead.clef {
+            self.glyph(F_CLEF, x, self.y(6), color);
+            x += 3.0 * self.sp;
+        }
+        for (n, pos) in [(lead.sig.num, 6), (lead.sig.den, 2)] {
+            let mut digit_x = x;
+            for c in n.to_string().chars() {
+                let digit = c.to_digit(10).unwrap_or(0);
+                let glyph = char::from_u32(SIG_ZERO + digit).unwrap_or(' ');
+                self.glyph(glyph, digit_x, self.y(pos), color);
+                digit_x += 1.6 * self.sp;
+            }
+        }
+    }
+
+    fn bar(&self, bar: &ScoreBar, rect: Rect, first: bool) {
+        let lines = self.y(TOP_LINE)..=self.bottom;
+        let stroke = Stroke::new(1.0, theme::text());
+        let (left, right) = (self.axis.x(bar.start), self.axis.x(bar.end));
+        if first {
+            self.p.vline(left, lines.clone(), stroke);
+        }
+        self.p.vline(right, lines, stroke);
+        let label = if bar.show_bpm {
+            format!("BAR {} / {:.0} BPM", bar.index + 1, bar.bpm)
+        } else {
+            format!("BAR {}", bar.index + 1)
+        };
+        self.p.text(
+            pos2(left + 2.0, rect.top()),
+            Align2::LEFT_TOP,
+            label,
+            mono(10.0),
+            theme::dim(),
+        );
+    }
+
+    fn events(&self, bar: &ScoreBar, next: Option<&ScoreBar>, rect: Rect) {
+        let e = &bar.events;
+        self.beams(e);
+        for (i, ev) in e.iter().enumerate() {
+            match &ev.kind {
+                ScoreKind::Note(n) => {
+                    self.note(ev, n);
+                    if n.tied {
+                        let following = e[i + 1..]
+                            .iter()
+                            .chain(next.iter().flat_map(|b| b.events.iter()))
+                            .find(|e| matches!(e.kind, ScoreKind::Note(_)));
+                        let to = following.map_or(rect.right(), |f| self.head_x(f));
+                        self.tie(self.head_x(ev), to, n);
+                    }
+                }
+                ScoreKind::Rest => self.rest(ev),
+                ScoreKind::BarRest => {
+                    let x = (self.axis.x(bar.start) + self.axis.x(bar.end)) / 2.0;
+                    self.glyph(REST_WHOLE, x - 0.6 * self.sp, self.y(6), theme::dim());
+                }
+            }
+        }
+        self.tuplets(e);
+    }
+
+    fn head_x(&self, e: &ScoreEvent) -> f32 {
+        self.axis.x(e.time) + 1.0
+    }
+
+    fn head_width(&self) -> f32 {
+        1.18 * self.sp
+    }
+
+    fn pos(n: &ScoreNote) -> i32 {
+        n.pitch.map_or(MIDDLE_LINE, |p| p.pos)
+    }
+
+    fn color(n: &ScoreNote) -> Color32 {
+        if n.clash {
+            theme::red()
+        } else if n.pitch.is_none() {
+            theme::dim()
+        } else {
+            theme::text()
+        }
+    }
+
+    fn note(&self, e: &ScoreEvent, n: &ScoreNote) {
+        let x = self.head_x(e);
+        let pos = Self::pos(n);
+        let color = Self::color(n);
+        let w = self.head_width();
+
+        let mark = if n.clash {
+            theme::red()
+        } else {
+            theme::green()
+        };
+        let stroke = Stroke::new(2.0, mark.gamma_multiply(0.7));
+        for &m in &n.chord_marks {
+            self.p
+                .hline((x - 0.5 * w)..=(x + 1.5 * w), self.y(m), stroke);
+        }
+
+        for ledger in (2..=-pos)
+            .step_by(2)
+            .map(|l| -l)
+            .chain((TOP_LINE + 2..=pos).step_by(2))
+        {
+            self.p.hline(
+                (x - 0.3 * w)..=(x + 1.3 * w),
+                self.y(ledger),
+                Stroke::new(1.0, theme::dim()),
+            );
+        }
+
+        let head = match (n.pitch, e.value.denominator) {
+            (None, _) => HEAD_X,
+            (_, 1) => HEAD_WHOLE,
+            (_, 2) => HEAD_HALF,
+            _ => HEAD_BLACK,
+        };
+        self.glyph(head, x, self.y(pos), color);
+
+        if !n.continuation
+            && let Some(a) = n.pitch.and_then(|p| p.accidental)
+        {
+            let glyph = match a {
+                Accidental::Sharp => SHARP,
+                Accidental::Flat => FLAT,
+            };
+            self.glyph(glyph, x - 1.1 * self.sp, self.y(pos), color);
+        }
+
+        for dot in 0..e.value.dots {
+            let dot_pos = if pos.rem_euclid(2) == 0 { pos + 1 } else { pos };
+            let dx = w + 0.4 * self.sp + dot as f32 * 0.5 * self.sp;
+            self.p
+                .circle_filled(pos2(x + dx, self.y(dot_pos)), 0.2 * self.sp, color);
+        }
+
+        if e.value.denominator >= 2 && n.beam_group.is_none() {
+            let (stem_x, tip) = self.stem(x, pos, n.stem_up, STEM * self.sp);
+            self.stem_line(stem_x, self.y(pos), tip, color);
+            let flag = e.value.beams() as usize;
+            if flag > 0 {
+                let flags = if n.stem_up { FLAGS_UP } else { FLAGS_DOWN };
+                self.glyph(flags[(flag - 1).min(3)], stem_x, tip, color);
+            }
+        }
+    }
+
+    fn stem(&self, head_x: f32, pos: i32, up: bool, len: f32) -> (f32, f32) {
+        if up {
+            (head_x + self.head_width() - 0.5, self.y(pos) - len)
+        } else {
+            (head_x + 0.5, self.y(pos) + len)
+        }
+    }
+
+    fn stem_line(&self, x: f32, from: f32, to: f32, color: Color32) {
+        self.p
+            .line_segment([pos2(x, from), pos2(x, to)], Stroke::new(1.2, color));
+    }
+
+    /// Stems and beams of every beam group in a bar. Beams are flat, at the note furthest
+    /// in the stem direction.
+    fn beams(&self, events: &[ScoreEvent]) {
+        let notes = || {
+            events.iter().filter_map(|e| match &e.kind {
+                ScoreKind::Note(n) => n.beam_group.map(|g| (g, e, n)),
+                _ => None,
+            })
+        };
+        let groups = notes().map(|(g, ..)| g).max().map_or(0, |g| g + 1);
+        for group in 0..groups {
+            let members: Vec<_> = notes().filter(|(g, ..)| *g == group).collect();
+            let Some(&(_, _, first)) = members.first() else {
+                continue;
+            };
+            let up = first.stem_up;
+            let len = STEM * self.sp;
+            let tips = members.iter().map(|(_, _, n)| self.y(Self::pos(n)));
+            let tip = if up {
+                tips.fold(f32::INFINITY, f32::min) - len
+            } else {
+                tips.fold(f32::NEG_INFINITY, f32::max) + len
+            };
+            let stems: Vec<f32> = members
+                .iter()
+                .map(|(_, e, n)| self.stem(self.head_x(e), Self::pos(n), up, len).0)
+                .collect();
+            let any_clash = members.iter().any(|(_, _, n)| n.clash);
+            let beam_color = if any_clash {
+                theme::red()
+            } else {
+                theme::text()
+            };
+            for ((_, _, n), &x) in members.iter().zip(&stems) {
+                self.stem_line(x, self.y(Self::pos(n)), tip, Self::color(n));
+            }
+            let thick = 0.5 * self.sp;
+            let inward = if up { 1.0 } else { -1.0 };
+            for (k, pair) in members.windows(2).enumerate() {
+                let shared = pair[0].1.value.beams().min(pair[1].1.value.beams());
+                for level in 0..shared {
+                    let y = tip + inward * level as f32 * 0.75 * self.sp;
+                    let (y0, y1) = if up { (y, y + thick) } else { (y - thick, y) };
+                    self.p.rect_filled(
+                        Rect::from_x_y_ranges(stems[k]..=stems[k + 1], y0..=y1),
+                        0.0,
+                        beam_color,
+                    );
+                }
+            }
+        }
+    }
+
+    fn rest(&self, e: &ScoreEvent) {
+        let x = self.head_x(e);
+        let color = theme::dim();
+        let glyph = match e.value.denominator {
+            1 => REST_WHOLE,
+            2 => REST_HALF,
+            4 => REST_QUARTER,
+            _ => RESTS_FLAGGED[(e.value.beams() as usize).saturating_sub(1).min(3)],
+        };
+        let pos = if e.value.denominator == 1 {
+            6
+        } else {
+            MIDDLE_LINE
+        };
+        self.glyph(glyph, x, self.y(pos), color);
+        for dot in 0..e.value.dots {
+            let dx = 1.5 * self.sp + dot as f32 * 0.5 * self.sp;
+            self.p
+                .circle_filled(pos2(x + dx, self.y(5)), 0.2 * self.sp, color);
+        }
+    }
+
+    /// A curve between two noteheads, away from the stems.
+    fn tie(&self, from: f32, to: f32, n: &ScoreNote) {
+        let w = self.head_width();
+        let side = if n.stem_up { 1.0 } else { -1.0 };
+        let y = self.y(Self::pos(n)) + side * 0.7 * self.sp;
+        let (x0, x1) = (from + w, to.max(from + w + 1.0));
+        let points: Vec<Pos2> = (0..=12)
+            .map(|i| {
+                let f = i as f32 / 12.0;
+                let bulge = 4.0 * f * (1.0 - f) * 0.5 * self.sp;
+                pos2(x0 + (x1 - x0) * f, y + side * bulge)
+            })
+            .collect();
+        self.p
+            .add(Shape::line(points, Stroke::new(1.2, Self::color(n))));
+    }
+
+    /// The tuplet number over each run of tuplet events within a beat.
+    fn tuplets(&self, events: &[ScoreEvent]) {
+        let mut i = 0;
+        while i < events.len() {
+            let Some(n) = events[i].tuplet else {
+                i += 1;
+                continue;
+            };
+            let beat = events[i].step / n;
+            let run = events[i..]
+                .iter()
+                .take_while(|e| e.tuplet == Some(n) && e.step / n == beat)
+                .count();
+            let (a, b) = (self.head_x(&events[i]), self.head_x(&events[i + run - 1]));
+            self.p.text(
+                pos2((a + b) / 2.0 + 0.5 * self.sp, self.y(TOP_LINE) - 2.0),
+                Align2::CENTER_BOTTOM,
+                n.to_string(),
+                mono(10.0),
+                theme::dim(),
+            );
+            i += run;
+        }
+    }
+}
+
+/// A dotted vertical line, as used for expected note positions.
+pub fn dotted_vline(p: &Painter, x: f32, y: std::ops::RangeInclusive<f32>, color: Color32) {
+    let stroke = Stroke::new(1.0, color);
+    let mut at = *y.start();
+    while at < *y.end() {
+        p.line_segment([pos2(x, at), pos2(x, (at + 2.0).min(*y.end()))], stroke);
+        at += 5.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::vec2;
+
+    #[test]
+    fn low_notes_make_the_staff_taller() {
+        let plain = StaffLayout {
+            spacing: 8.0,
+            lo: 0,
+            hi: TOP_LINE,
+        };
+        let low = StaffLayout { lo: -6, ..plain };
+        let high = StaffLayout { hi: 14, ..plain };
+        assert_eq!(low.height() - plain.height(), 3.0 * 8.0);
+        assert_eq!(high.height() - plain.height(), 3.0 * 8.0);
+    }
+
+    #[test]
+    fn lines_keep_their_place_within_the_rect() {
+        let l = StaffLayout {
+            spacing: 8.0,
+            lo: -4,
+            hi: TOP_LINE,
+        };
+        let rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, l.height()));
+        let bottom = l.bottom_line(rect);
+        assert!(bottom - 4.0 * 8.0 > rect.top() + LABEL_HEIGHT);
+        assert!(bottom + 2.0 * 8.0 < rect.bottom());
+    }
+}

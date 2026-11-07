@@ -43,7 +43,7 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 5. Hover details through `resp.on_hover_ui_at_pointer`.
 6. Child buttons use `ui.new_child(UiBuilder::new().max_rect(..))`, because `Ui::put`
    moves the cursor back.
-7. Interaction so far is click only (`groove_editor`). Nothing uses `Sense::drag` yet.
+7. Most interaction is click only (`groove_editor`). `marker_editor` shows drag gestures.
 8. `is_rect_visible` culling appears only in `performance.rs`.
 
 `button.rs::selectable` and `selectable_value` work as tab-like primitives. The
@@ -105,6 +105,21 @@ Draw order:
 7. Magenta now line with a triangle.
 
 Culling relies on time-sorted vectors.
+
+## Score, waveform and marker editor
+
+- `widgets/time_axis.rs::TimeAxis` maps time to x. Anything that must line up shares one.
+- `widgets/score.rs::ScoreView` paints `bg_core::score` bars along a `TimeAxis`, with
+  `StaffLayout` for vertical sizes. Notation glyphs come from Bravura
+  (`assets/fonts/`, SIL OFL), a separate `FontFamily::Name(MUSIC_FONT)` set up in
+  `theme::apply`. `Draw::glyph` places glyphs by their baseline, since SMuFL fonts have
+  extreme line metrics; font size is four staff spaces.
+- `widgets/waveform.rs` paints any `PeakSource` with auto vertical zoom and an optional
+  log scale.
+- `widgets/marker_editor.rs::MarkerEditor` is generic: it takes a `PeakSource`, read-only
+  overlays, editable `Marker`s, a snap function and a `new_marker` closure, and holds no
+  session types. `add_remove: false` fixes the marker set, for loop points. The owner
+  keeps `EditorState`. It's the first widget using `Sense::drag`.
 
 ## Results dialog (`bg-ui/src/widgets/results.rs`)
 

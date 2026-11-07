@@ -90,6 +90,8 @@ Transport time resets when the output stream is rebuilt.
 
 ## Grading (`bg-core/src/scoring.rs`)
 
+- `on_onset` takes the nearest target that's free or held by a note further from it, so
+  string noise just before a note can't keep the note from its target.
 - `regrade` takes the worst of timing, length and (in Combined mode) harmony.
 - Default thresholds: good 12 ms, ok 30 ms, window 150 ms, length 0.3 / 0.6.
 - Each note's window is clamped to half the distance to its neighbours.
@@ -118,6 +120,10 @@ rests. It's pure, so all notation rules are tested there and painters stay simpl
   grid. A matched note starts at its target. Every beat picks the simplest of
   `SUBDIVISIONS` (quarter, eighth, sixteenth, triplet, sextuplet) that fits its notes
   within `FIT_TOLERANCE`, and extras round to that. A lone note can't make a tuplet.
+- Notes never swap order: an extra is placed between its neighbours in playing order.
+  If its position is taken it moves by the smallest step, or, without a pitch (likely
+  string noise), stays off the score. It's still on the waveform. Pitchless notes don't
+  influence a beat's subdivision.
 - Lengths come from the playing, not the target. A note held for `LEGATO` of the way to
   the next one reaches it, so small gaps aren't rests; otherwise it rounds to eighths,
   or a sixteenth if short. While still sounding, a matched note shows its target's length.

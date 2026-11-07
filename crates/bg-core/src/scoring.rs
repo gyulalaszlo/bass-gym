@@ -250,7 +250,9 @@ impl Matcher {
         }
     }
 
-    /// Registers a note onset; returns its index in `played`.
+    /// Registers a note onset; returns its index in `played`. It takes the nearest target
+    /// that's free or held by a note further from it, so string noise just before a note
+    /// can't keep the note from its target: the noise then counts as an extra note.
     pub fn on_onset(&mut self, onset: f64, peak_db: f32) -> usize {
         let mut best: Option<(usize, f64)> = None;
         for i in self.first_open..self.expected.len() {
@@ -259,9 +261,11 @@ impl Matcher {
                 break;
             }
             let d = (onset - e.time).abs();
-            if self.outcomes[i].played.is_none()
-                && d <= e.window
-                && best.is_none_or(|(_, bd)| d < bd)
+            let held_from = self.outcomes[i]
+                .played
+                .and_then(|p| self.played.get(p))
+                .map(|p| (p.onset - e.time).abs());
+            if held_from.is_none_or(|h| d < h) && d <= e.window && best.is_none_or(|(_, bd)| d < bd)
             {
                 best = Some((i, d));
             }
@@ -276,6 +280,9 @@ impl Matcher {
             matched: best.map(|b| b.0),
         });
         if let Some((i, _)) = best {
+            if let Some(held) = self.outcomes[i].played.and_then(|p| self.played.get_mut(p)) {
+                held.matched = None;
+            }
             let ms = ((onset - self.expected[i].time) * 1000.0) as f32;
             self.outcomes[i] = Outcome {
                 played: Some(idx),
@@ -570,6 +577,30 @@ mod tests {
         let bars: Vec<BarPlan> = (0..2).map(|_| p.next_bar(&()).unwrap()).collect();
         bars.iter().for_each(|b| m.add_bar(b));
         (m, bars)
+    }
+
+    #[test]
+    fn a_closer_note_takes_the_target_from_string_noise() {
+        let (mut m, _) = setup();
+        let noise = m.on_onset(0.414, -40.0); // 86 ms before the target at 0.5.
+        m.on_offset(noise, 0.482, -40.0, None);
+        assert_eq!(m.played[noise].matched, Some(1));
+        let note = m.on_onset(0.482, -20.0); // 18 ms before it.
+        m.on_offset(note, 0.95, -20.0, Some(98.0));
+        assert_eq!(m.played[noise].matched, None);
+        assert_eq!(m.played[note].matched, Some(1));
+        assert_eq!(m.outcomes[1].played, Some(note));
+        assert!((m.outcomes[1].timing_ms.unwrap() + 18.0).abs() < 0.01);
+        assert_eq!(m.outcomes[1].grade, Some(Grade::Ok));
+    }
+
+    #[test]
+    fn a_further_note_leaves_the_target_alone() {
+        let (mut m, _) = setup();
+        let first = m.on_onset(0.505, -20.0);
+        let second = m.on_onset(0.56, -20.0);
+        assert_eq!(m.played[first].matched, Some(1));
+        assert_eq!(m.played[second].matched, None);
     }
 
     #[test]

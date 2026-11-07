@@ -279,6 +279,8 @@ struct Placing {
     frac: f64,
     /// Length in beats, if known.
     beats: Option<f64>,
+    /// Has a pitch. Without one it may be string noise rather than a note.
+    pitched: bool,
 }
 
 /// Works out which beat each note belongs to.
@@ -312,6 +314,7 @@ fn placings(input: &ScoreInput, grid: &Grid) -> Vec<Placing> {
                 beat: tick / grid.tpb,
                 frac: 0.0,
                 beats: Some(held.unwrap_or(e.len) / len),
+                pitched: p.freq.is_some(),
             });
         } else {
             let b = grid
@@ -331,6 +334,7 @@ fn placings(input: &ScoreInput, grid: &Grid) -> Vec<Placing> {
                 beat: beat as u32,
                 frac: pos - beat,
                 beats: held.map(|h| h / len),
+                pitched: p.freq.is_some(),
             });
         }
     }
@@ -344,7 +348,7 @@ fn grid_notes(placings: &[Placing], grid: &mut Grid) -> Vec<GridNote> {
     for (beat, d) in grid.subdivisions.iter_mut().enumerate() {
         let here = || placings.iter().filter(|p| p.beat as usize == beat);
         let loose: Vec<f64> = here()
-            .filter(|p| p.tick.is_none())
+            .filter(|p| p.tick.is_none() && p.pitched)
             .map(|p| p.frac)
             .collect();
         let exact: Vec<u32> = here().filter_map(|p| p.tick).map(|t| t % tpb).collect();
@@ -363,13 +367,31 @@ fn grid_notes(placings: &[Placing], grid: &mut Grid) -> Vec<GridNote> {
         .collect();
     notes.sort_by_key(|n| n.start);
     let total = grid.total_ticks();
-    for p in placings.iter().filter(|p| p.tick.is_none()) {
+    // In playing order, so a note can't end up before one played earlier.
+    let mut previous = None;
+    for (i, p) in placings.iter().enumerate() {
+        if let Some(tick) = p.tick {
+            previous = Some(tick);
+            continue;
+        }
         let d = grid.subdivisions[p.beat as usize];
         let position = (p.frac * d as f64).round();
         let played_late = p.frac * d as f64 > position;
-        let step = (tpb / d) as i64;
-        let ideal = p.beat as i64 * tpb as i64 + position as i64 * step;
-        let start = free_tick(&notes, ideal, step, played_late, total);
+        let ideal = p.beat * tpb + position.max(0.0) as u32 * (tpb / d);
+        let before = placings[i + 1..]
+            .iter()
+            .find_map(|p| p.tick)
+            .unwrap_or(total);
+        let spot = Spot {
+            after: previous,
+            before,
+            ideal: ideal.min(total.saturating_sub(1)),
+            played_late,
+        };
+        let Some(start) = spot.choose(&notes, grid, p.pitched) else {
+            continue;
+        };
+        previous = Some(start);
         let at = notes.partition_point(|n| n.start <= start);
         notes.insert(
             at,
@@ -419,17 +441,42 @@ fn length(grid: &Grid, start: u32, beats: Option<f64>, room: u32, followed: bool
     (end.div_ceil(at) * at - start).min(room).max(1)
 }
 
-/// The tick for an extra note ideally at `ideal`: that one if free, otherwise the next
-/// grid position on the side it was played on, then the other one. With none free it
-/// stays put and overlaps.
-fn free_tick(notes: &[GridNote], ideal: i64, step: i64, played_late: bool, total: u32) -> u32 {
-    let free =
-        |t: i64| (0..total as i64).contains(&t) && !notes.iter().any(|n| n.start as i64 == t);
-    let side = if played_late { step } else { -step };
-    [ideal, ideal + side, ideal - side]
-        .into_iter()
-        .find(|&t| free(t))
-        .unwrap_or(ideal.clamp(0, total as i64 - 1)) as u32
+/// Where a note without a target may go: between its neighbours in playing order.
+struct Spot {
+    after: Option<u32>,
+    before: u32,
+    ideal: u32,
+    played_late: bool,
+}
+
+impl Spot {
+    /// The tick for the note. If `ideal` is taken it moves by the smallest step on the
+    /// side it was played on, then the other. Moving noise would only misplace it, so
+    /// without a pitch it's left out instead. A note with nowhere to go overlaps.
+    fn choose(&self, notes: &[GridNote], grid: &Grid, pitched: bool) -> Option<u32> {
+        let fits = |t: u32| {
+            t < self.before
+                && self.after.is_none_or(|a| t > a)
+                && !notes.iter().any(|n| n.start == t)
+        };
+        if fits(self.ideal) {
+            return Some(self.ideal);
+        }
+        if !pitched {
+            return None;
+        }
+        let later = self.ideal + grid.resolution(self.ideal);
+        let earlier = self
+            .ideal
+            .checked_sub(grid.resolution(self.ideal.saturating_sub(1)));
+        let sides = if self.played_late {
+            [Some(later), earlier]
+        } else {
+            [earlier, Some(later)]
+        };
+        let found = sides.into_iter().flatten().find(|&t| fits(t));
+        Some(found.unwrap_or(self.ideal))
+    }
 }
 
 /// The notes and rests of bar number `b`, including parts of notes tied in from earlier
@@ -974,6 +1021,89 @@ mod tests {
         );
     }
 
+    /// Bars 6 and 7 of a real report at 70 BPM, quarters with a half note: string noise,
+    /// then the note it preceded.
+    fn noise_before_a_note() -> (Vec<BarPlan>, Matcher, usize, usize) {
+        let beat = 60.0 / 70.0;
+        let b: Vec<BarPlan> = bars(2, 1, &[(0, 1), (1, 1), (2, 2)])
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut bar)| {
+                bar.start = 0.5 + i as f64 * beat * 4.0;
+                bar.duration = beat * 4.0;
+                bar.bpm = 70.0;
+                bar.notes = [
+                    (0.0, 1.0),
+                    (1.0, 1.0),
+                    (2.0, if i == 0 { 2.0 } else { 1.0 }),
+                ]
+                .iter()
+                .map(|&(at, len)| crate::plan::PlannedNote {
+                    time: bar.start + at * beat,
+                    len: len * beat,
+                    accent: false,
+                })
+                .collect();
+                bar
+            })
+            .collect();
+        let mut m = matcher(&b);
+        play(&mut m, 0.484, 1.139, 38);
+        play(&mut m, 1.292, 2.091, 41);
+        play(&mut m, 2.188, 3.262, 43);
+        let noise = m.on_onset(3.843, -40.0);
+        m.on_offset(noise, 3.911, -40.0, None);
+        let note = play(&mut m, 3.911, 4.668, 43);
+        play(&mut m, 4.77, 5.484, 50);
+        (b, m, noise, note)
+    }
+
+    #[test]
+    fn string_noise_stays_off_the_score_and_the_note_stays_on_its_beat() {
+        let (b, m, noise, real) = noise_before_a_note();
+        let s = score(&b, &m);
+        let played: Vec<usize> = s
+            .iter()
+            .flat_map(|b| &b.events)
+            .filter_map(|e| match &e.kind {
+                ScoreKind::Note(n) if !n.continuation => Some(n.played),
+                _ => None,
+            })
+            .collect();
+        assert!(!played.contains(&noise));
+        assert!(played.contains(&real));
+        // Beat 1 of the second bar, not a beat before it.
+        let first = s[1].events.first().unwrap();
+        assert!((first.time - s[1].start).abs() < 1e-9);
+        assert_eq!(note(first).played, real);
+    }
+
+    #[test]
+    fn notes_keep_their_playing_order() {
+        let (b, m, ..) = noise_before_a_note();
+        let s = score(&b, &m);
+        let played: Vec<usize> = s
+            .iter()
+            .flat_map(|b| &b.events)
+            .filter_map(|e| match &e.kind {
+                ScoreKind::Note(n) if !n.continuation => Some(n.played),
+                _ => None,
+            })
+            .collect();
+        assert!(played.is_sorted(), "{played:?}");
+    }
+
+    #[test]
+    fn a_pitched_extra_moves_by_the_smallest_step() {
+        let b = bars(1, 1, &[(1, 1)]);
+        let mut m = matcher(&b);
+        play(&mut m, 0.5, 0.9, 40); // On the target at beat 2.
+        // Just after it and outside its reach, rounding onto the same beat.
+        let i = m.on_onset(0.52, -10.0);
+        m.on_offset(i, 0.9, -10.0, Some(midi_to_freq(43.0, A4)));
+        assert_eq!(note_times(&score(&b, &m)[0]), [500, 625]);
+    }
+
     #[test]
     fn a_lone_note_does_not_make_a_tuplet() {
         let b = bars(1, 1, &[]);
@@ -1000,7 +1130,7 @@ mod tests {
         let extra = m.on_onset(0.27, -10.0);
         m.on_offset(extra, 0.4, -10.0, Some(midi_to_freq(40.0, A4)));
         assert_eq!(m.played[extra].matched, None);
-        assert_eq!(note_times(&score(&b, &m)[0]), [250, 500]); // Late, so to the right.
+        assert_eq!(note_times(&score(&b, &m)[0]), [250, 375]); // Late, so to the right.
     }
 
     #[test]

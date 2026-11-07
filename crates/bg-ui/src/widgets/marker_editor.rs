@@ -2,15 +2,15 @@
 //! markers come from: the owner provides a [`PeakSource`], read-only overlays and the
 //! editable [`Marker`]s, so the same editor serves session reports and loop points.
 //!
-//! Gestures: drag vertically or pinch to zoom around the pointer, drag horizontally or
-//! scroll sideways to pan, Ctrl/Cmd + wheel to zoom. Drag an editable marker to move it,
-//! double-click to add one, click one to select it and edit its text.
+//! Gestures: dragging holds on to the point it started on, moving it with the pointer
+//! while vertical movement zooms around it (down zooms in), so a single drag can do both.
+//! Pinch or Ctrl/Cmd + wheel zoom too, and scrolling sideways pans. Drag an editable
+//! marker to move it, double-click to add one, click one to select it and edit its text.
 
 use egui::{Align2, Color32, CornerRadius, Key, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use crate::theme::{self, mono};
 use crate::widgets::button::button;
-use crate::widgets::controls::text_field;
 use crate::widgets::score::dotted_vline;
 use crate::widgets::time_axis::TimeAxis;
 use crate::widgets::waveform::{self, PeakSource, WaveStyle};
@@ -18,8 +18,13 @@ use crate::widgets::waveform::{self, PeakSource, WaveStyle};
 /// Pointer distance that counts as being on a marker.
 const GRAB_DISTANCE: f32 = 6.0;
 const SPAN_LANE: f32 = 18.0;
-const LABEL_LANE: f32 = 64.0;
-const LABEL_SIZE: egui::Vec2 = vec2(190.0, 54.0);
+/// Gap between the waveform and the labels below it.
+const LABEL_GAP: f32 = 6.0;
+const LABEL_WIDTH: f32 = 240.0;
+const LABEL_MIN_HEIGHT: f32 = 40.0;
+const LABEL_PADDING: f32 = 6.0;
+/// Room on a selected label for its delete button.
+const LABEL_BUTTON: f32 = 40.0;
 /// Smallest visible span, in axis units.
 const MIN_SPAN: f64 = 0.005;
 
@@ -73,6 +78,14 @@ impl WaveView {
         self.clamp();
     }
 
+    /// Scales the span by `factor` and puts time `at` at `fraction` of the view's width
+    /// (0 = left edge), so a drag can zoom and move at once.
+    pub fn navigate(&mut self, at: f64, fraction: f64, factor: f64) {
+        self.span = (self.span * factor).clamp(MIN_SPAN, self.max_span());
+        self.start = at - fraction * self.span;
+        self.clamp();
+    }
+
     pub fn pan(&mut self, by: f64) {
         self.start += by;
         self.clamp();
@@ -91,8 +104,10 @@ impl WaveView {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Gesture {
     Marker(u64),
-    Pan,
-    Zoom { at: f64 },
+    /// Dragging the view by the point at time `at`.
+    Navigate {
+        at: f64,
+    },
 }
 
 /// What the editor remembers between frames. Owned by whoever shows it.
@@ -142,29 +157,29 @@ fn marker_near(markers: &[Marker], axis: TimeAxis, x: f32) -> Option<u64> {
         .map(|(id, _)| id)
 }
 
-/// The gesture a drag begun with this delta becomes.
-fn gesture_for(delta: egui::Vec2, at: f64) -> Gesture {
-    if delta.x.abs() >= delta.y.abs() {
-        Gesture::Pan
-    } else {
-        Gesture::Zoom { at }
-    }
+/// Zoom factor of a vertical drag: dragging down zooms in.
+fn drag_zoom(dy: f32) -> f64 {
+    (-dy as f64 * 0.01).exp()
 }
 
-/// Zoom factor of a vertical drag: dragging up zooms in.
-fn drag_zoom(dy: f32) -> f64 {
-    (dy as f64 * 0.01).exp()
+/// The font of marker labels.
+fn label_font() -> egui::FontId {
+    mono(12.0)
 }
 
 impl MarkerEditor<'_> {
+    /// `height` is that of the waveform and everything above it; the labels below take
+    /// what their text needs.
     pub fn show(mut self, ui: &mut egui::Ui, height: f32) {
+        let width = ui.available_width();
+        let view = self.state.view;
+        let lane = self.label_lane(ui, width, view);
         let (rect, resp) =
-            ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
+            ui.allocate_exact_size(vec2(width, height + lane), Sense::click_and_drag());
         let wave = Rect::from_x_y_ranges(
             rect.x_range(),
-            (rect.top() + SPAN_LANE)..=(rect.bottom() - LABEL_LANE),
+            (rect.top() + SPAN_LANE)..=(rect.bottom() - lane),
         );
-        let view = self.state.view;
         let axis = TimeAxis::new(rect.x_range(), view.start, view.end());
 
         self.handle_input(ui, rect, &resp, axis);
@@ -202,7 +217,28 @@ impl MarkerEditor<'_> {
                 Stroke::new(2.0, theme::magenta()),
             );
         }
-        self.labels(ui, rect, axis);
+        self.labels(ui, rect, wave, axis);
+    }
+
+    /// The height of a marker's label, which grows with its text.
+    fn label_height(ui: &egui::Ui, m: &Marker, selected: bool) -> f32 {
+        let wrap = LABEL_WIDTH - 2.0 * LABEL_PADDING - if selected { LABEL_BUTTON } else { 0.0 };
+        let galley = ui
+            .painter()
+            .layout(m.label.clone(), label_font(), m.color, wrap);
+        (galley.size().y + 2.0 * LABEL_PADDING + 4.0).max(LABEL_MIN_HEIGHT)
+    }
+
+    /// Height of the area under the waveform: enough for the tallest label in view.
+    fn label_lane(&self, ui: &egui::Ui, width: f32, view: WaveView) -> f32 {
+        let axis = TimeAxis::new(egui::Rangef::new(0.0, width), view.start, view.end());
+        let tallest = self
+            .markers
+            .iter()
+            .filter(|m| (0.0..=width).contains(&axis.x(m.time)))
+            .map(|m| Self::label_height(ui, m, self.state.selected == Some(m.id)))
+            .fold(LABEL_MIN_HEIGHT, f32::max);
+        tallest + LABEL_GAP + 4.0
     }
 
     fn handle_input(
@@ -223,20 +259,22 @@ impl MarkerEditor<'_> {
         }
         if resp.dragged() {
             let delta = resp.drag_delta();
-            if self.state.gesture.is_none() && delta != vec2(0.0, 0.0) {
-                let at = axis.t(pointer_x.unwrap_or(rect.center().x));
-                self.state.gesture = Some(gesture_for(delta, at));
+            let x = pointer_x.unwrap_or(rect.center().x);
+            if self.state.gesture.is_none() {
+                // Where the drag began, not where the pointer has got to by now.
+                let at = axis.t(x - delta.x);
+                self.state.gesture = Some(Gesture::Navigate { at });
             }
             match self.state.gesture {
                 Some(Gesture::Marker(id)) => {
-                    if let (Some(x), Some(m)) =
-                        (pointer_x, self.markers.iter_mut().find(|m| m.id == id))
-                    {
+                    if let Some(m) = self.markers.iter_mut().find(|m| m.id == id) {
                         m.time = (self.snap)(axis.t(x));
                     }
                 }
-                Some(Gesture::Pan) => self.state.view.pan(-delta.x as f64 / axis.pps()),
-                Some(Gesture::Zoom { at }) => self.state.view.zoom_at(at, drag_zoom(delta.y)),
+                Some(Gesture::Navigate { at }) => {
+                    let fraction = ((x - rect.left()) / rect.width().max(1.0)) as f64;
+                    self.state.view.navigate(at, fraction, drag_zoom(delta.y));
+                }
                 None => {}
             }
         }
@@ -284,9 +322,10 @@ impl MarkerEditor<'_> {
         self.state.selected = None;
     }
 
-    /// The text boxes under the waveform, the selected one editable.
-    fn labels(&mut self, ui: &mut egui::Ui, rect: Rect, axis: TimeAxis) {
-        let top = rect.bottom() - LABEL_LANE + 6.0;
+    /// The text boxes under the waveform, the selected one editable. They grow with their
+    /// text, which wraps.
+    fn labels(&mut self, ui: &mut egui::Ui, rect: Rect, wave: Rect, axis: TimeAxis) {
+        let top = wave.bottom() + LABEL_GAP;
         let selected = self.state.selected;
         let mut remove = None;
         for m in self.markers.iter_mut() {
@@ -294,41 +333,51 @@ impl MarkerEditor<'_> {
             if !rect.x_range().contains(x) {
                 continue;
             }
-            let left = (x - LABEL_SIZE.x / 2.0)
-                .clamp(rect.left(), (rect.right() - LABEL_SIZE.x).max(rect.left()));
-            let bubble = Rect::from_min_size(pos2(left, top), LABEL_SIZE);
-            let p = ui.painter();
-            p.rect(
+            let is_selected = selected == Some(m.id);
+            let left = (x - LABEL_WIDTH / 2.0)
+                .clamp(rect.left(), (rect.right() - LABEL_WIDTH).max(rect.left()));
+            let height = Self::label_height(ui, m, is_selected);
+            let bubble = Rect::from_min_size(pos2(left, top), vec2(LABEL_WIDTH, height));
+            ui.painter().rect(
                 bubble,
                 CornerRadius::same(6),
                 theme::panel(),
                 Stroke::new(1.5, m.color),
                 StrokeKind::Inside,
             );
-            if selected == Some(m.id) {
-                let inner = bubble.shrink(4.0);
-                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-                child.horizontal(|ui| {
-                    ui.add(
-                        text_field(&mut m.label)
-                            .width(inner.width() - 34.0)
-                            .hint("Note"),
+            let text = bubble.shrink(LABEL_PADDING);
+            if is_selected {
+                let edit = text.with_max_x(text.right() - LABEL_BUTTON);
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(edit));
+                child.add(
+                    egui::TextEdit::multiline(&mut m.label)
+                        .frame(egui::Frame::NONE)
+                        .font(label_font())
+                        .text_color(m.color)
+                        .desired_width(edit.width())
+                        .desired_rows(1)
+                        .hint_text("Note"),
+                );
+                if self.add_remove {
+                    let spot = Rect::from_min_size(
+                        pos2(text.right() - LABEL_BUTTON + 4.0, text.top()),
+                        vec2(LABEL_BUTTON - 4.0, 24.0),
                     );
-                    if self.add_remove
-                        && ui
-                            .add(button(crate::icons::TRASH).small())
-                            .on_hover_text("Delete marker")
-                            .clicked()
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(spot));
+                    if child
+                        .add(button(crate::icons::TRASH).small())
+                        .on_hover_text("Delete marker")
+                        .clicked()
                     {
                         remove = Some(m.id);
                     }
-                });
+                }
             } else {
-                let galley = p.layout(m.label.clone(), mono(11.0), m.color, LABEL_SIZE.x - 12.0);
-                p.galley(bubble.left_top() + vec2(6.0, 6.0), galley, m.color);
-                let click =
-                    ui.interact(bubble, ui.id().with(("marker_label", m.id)), Sense::click());
-                if click.clicked() {
+                let p = ui.painter();
+                let galley = p.layout(m.label.clone(), label_font(), m.color, text.width());
+                p.galley(text.left_top(), galley, m.color);
+                let id = ui.id().with(("marker_label", m.id));
+                if ui.interact(bubble, id, Sense::click()).clicked() {
                     self.state.selected = Some(m.id);
                 }
             }
@@ -440,10 +489,28 @@ mod tests {
     }
 
     #[test]
-    fn drag_direction_picks_the_gesture() {
-        assert_eq!(gesture_for(vec2(5.0, 1.0), 3.0), Gesture::Pan);
-        assert_eq!(gesture_for(vec2(1.0, -5.0), 3.0), Gesture::Zoom { at: 3.0 });
-        assert!(drag_zoom(-10.0) < 1.0); // Up zooms in.
-        assert!(drag_zoom(10.0) > 1.0);
+    fn dragging_down_zooms_in() {
+        assert!(drag_zoom(10.0) < 1.0);
+        assert!(drag_zoom(-10.0) > 1.0);
+        assert_eq!(drag_zoom(0.0), 1.0);
+    }
+
+    #[test]
+    fn one_drag_zooms_and_moves_at_once() {
+        let mut v = view();
+        // Holding time 15 (the middle), moved to a quarter of the width, zooming in.
+        v.navigate(15.0, 0.25, 0.5);
+        assert_eq!(v.span, 5.0);
+        assert_eq!(v.start + 0.25 * v.span, 15.0);
+    }
+
+    #[test]
+    fn the_held_point_follows_the_pointer_over_many_steps() {
+        let mut v = view();
+        for fraction in [0.5, 0.45, 0.4, 0.35] {
+            v.navigate(15.0, fraction, drag_zoom(4.0));
+            assert!((v.start + fraction * v.span - 15.0).abs() < 1e-9);
+        }
+        assert!(v.span < 10.0);
     }
 }

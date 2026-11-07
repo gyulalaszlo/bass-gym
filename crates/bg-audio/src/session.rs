@@ -10,6 +10,8 @@ pub enum Slot {
     Click = 0,
     Groove = 1,
     Instrument = 2,
+    /// A recording being played back.
+    Playback = 3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

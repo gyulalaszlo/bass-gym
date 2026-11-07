@@ -7,6 +7,7 @@ mod config;
 mod engine;
 mod output;
 mod recording;
+mod replay;
 mod session;
 mod worker;
 
@@ -15,5 +16,6 @@ pub use clock::Clock;
 pub use config::{AnalysisConfig, AudioConfig, LOWPASS_OFF, QUIET_CUTOFF_RANGE, SoundConfig};
 pub use engine::{AudioEngine, DeviceInfo, DeviceLists, EngineStatus};
 pub use recording::{Gap, LoggedSound, Recorder, Recording, SessionId};
+pub use replay::ReplayHandle;
 pub use session::{SessionIo, SessionLogic, SessionState, Slot};
 pub use worker::{InputMeter, TunerState};

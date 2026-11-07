@@ -14,6 +14,8 @@ pub(crate) enum OutMsg {
 
 pub(crate) enum ControlMsg {
     Voice(Slot, Box<dyn Voice>),
+    /// Removes a slot's voice, releasing what it holds.
+    ClearVoice(Slot),
     Master(f32),
     Monitor {
         enabled: bool,
@@ -150,13 +152,15 @@ pub(crate) struct OutputState {
     pub control: Consumer<ControlMsg>,
     /// Old voices are handed back so they're not deallocated on the audio thread.
     pub garbage: Producer<Garbage>,
-    pub voices: [Option<Box<dyn Voice>>; 3],
+    pub voices: [Option<Box<dyn Voice>>; 4],
     pub master: f32,
     pub frames: u64,
     monitor: Option<Monitor>,
     monitor_on: bool,
     monitor_gain: f32,
     monitor_lowcut: LowCut,
+    /// Quiet practice covers recorded bass as well as the live input.
+    playback_lowcut: LowCut,
     lowpass: Option<f32>,
     /// Two cascaded sections (24 dB/octave), so the cutoff works as a tone control.
     lowpass_filters: [Biquad; 2],
@@ -174,7 +178,7 @@ impl OutputState {
         events: Consumer<OutMsg>,
         control: Consumer<ControlMsg>,
         garbage: Producer<Garbage>,
-        voices: [Option<Box<dyn Voice>>; 3],
+        voices: [Option<Box<dyn Voice>>; 4],
         master: f32,
     ) -> Self {
         Self {
@@ -191,6 +195,7 @@ impl OutputState {
             monitor_on: false,
             monitor_gain: 0.0,
             monitor_lowcut: LowCut::default(),
+            playback_lowcut: LowCut::default(),
             lowpass: None,
             lowpass_filters: Default::default(),
             pending: Vec::with_capacity(MAX_PENDING),
@@ -216,6 +221,7 @@ impl OutputState {
 
     pub fn set_monitor_lowcut(&mut self, cutoff: Option<f32>) {
         self.monitor_lowcut.set(self.sample_rate as f32, cutoff);
+        self.playback_lowcut.set(self.sample_rate as f32, cutoff);
     }
 
     pub fn set_monitor(&mut self, enabled: bool, gain: f32) {
@@ -241,6 +247,11 @@ impl OutputState {
             match msg {
                 ControlMsg::Voice(slot, v) => {
                     if let Some(old) = self.voices[slot as usize].replace(v) {
+                        let _ = self.garbage.push(Garbage::Voice(old));
+                    }
+                }
+                ControlMsg::ClearVoice(slot) => {
+                    if let Some(old) = self.voices[slot as usize].take() {
                         let _ = self.garbage.push(Garbage::Voice(old));
                     }
                 }
@@ -291,7 +302,7 @@ impl OutputState {
             }
             let mix = &mut self.mix[..n];
             mix.fill(0.0);
-            let [click, groove, inst] = &mut self.voices;
+            let [click, groove, inst, playback] = &mut self.voices;
             for v in [click, groove].into_iter().flatten() {
                 v.render(mix);
             }
@@ -308,6 +319,14 @@ impl OutputState {
                     }
                 }
                 mix.iter_mut().zip(buf.iter()).for_each(|(m, x)| *m += x);
+            }
+            if let Some(v) = playback {
+                let buf = &mut self.inst[..n];
+                buf.fill(0.0);
+                v.render(buf);
+                for (m, &x) in mix.iter_mut().zip(buf.iter()) {
+                    *m += self.playback_lowcut.process(x);
+                }
             }
             if let Some(m) = self.monitor.as_mut() {
                 if self.monitor_on {

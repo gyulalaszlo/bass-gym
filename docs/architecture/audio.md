@@ -115,7 +115,7 @@ pub struct SoundEvent { pub kind: SoundKind, pub gain: f32 }
 pub trait Voice: Send { fn trigger(&mut self, ev: &SoundEvent);
     fn render(&mut self, out: &mut [f32]); fn silence(&mut self); }
 // session.rs
-pub enum Slot { Click = 0, Groove = 1, Instrument = 2 }
+pub enum Slot { Click = 0, Groove = 1, Instrument = 2, Playback = 3 }
 ```
 
 - Click uses the built-in `SineClick` / `Woodblock` / `PluckBass` voices (`bg-sound/src/synth.rs`).
@@ -180,6 +180,22 @@ reopen the devices.
   sounds past the stop time and cuts notes short.
 - `end_session` handles all three end paths and publishes before `session_running` goes
   false. `shared.running` can fall earlier, so exercises poll every frame.
+
+## Replay (`replay.rs`)
+
+`engine.start_replay(recording, from, to, bass_gain, handle)` runs a `ReplaySession`
+like any other session, so `session_running` covers it and `stop_session` stops it. It
+never touches `TimingShared`, so exercises don't see it as running.
+
+- The bass plays through `Slot::Playback`: a `SampleVoice` pushed over `ControlMsg` first,
+  triggered by a normal scheduled event. Control messages drain first in `process`, so
+  the voice is in place by then. Call `release_replay` afterwards so it drops its `Arc`.
+- Logged sounds that were delivered are re-scheduled with a transport `shift`, using the
+  current voices. Notes overlapping the region start are re-emitted there, shortened.
+- `ReplayHandle` carries the Click and Chords flags (Groove follows Click) and gives the
+  playhead through `position(now)`.
+- Quiet practice's low cut also applies to playback (`playback_lowcut`).
+- A rebuild ends a replay like any session.
 
 ## Note detection (`bg-dsp/src/notes.rs`)
 

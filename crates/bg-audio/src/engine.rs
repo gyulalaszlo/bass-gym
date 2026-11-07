@@ -7,7 +7,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
-use bg_sound::{SoundRole, SoundSource, Voice};
+use bg_sound::{SampleVoice, SoundRole, SoundSource, Voice};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, Device, ErrorKind, SampleFormat, Stream, StreamConfig};
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -23,6 +23,7 @@ type OutputParts = (
     Producer<OutMsg>,
 );
 use crate::recording::{Recording, SessionId};
+use crate::replay::{ReplayHandle, ReplaySession};
 use crate::session::{SessionLogic, Slot};
 use crate::worker::{
     self, InChunk, InputLink, InputMeter, RecordSpec, TunerState, WorkerCmd, WorkerShared,
@@ -193,6 +194,56 @@ impl AudioEngine {
         // Set eagerly so the UI doesn't see a stale "stopped" state for a frame.
         self.shared.session_running.store(true, Ordering::Release);
         let _ = self.worker_tx.send(WorkerCmd::Start(logic, spec));
+    }
+
+    /// Plays `from..to` of `recording` (transport times of the recording) with the logged
+    /// click and chords, which `handle` can switch and follow. Runs as a session, so
+    /// `session_running` reports it and `stop_session` stops it. Call
+    /// [`release_replay`](Self::release_replay) afterwards. Returns false if output isn't
+    /// available or another session is running.
+    pub fn start_replay(
+        &mut self,
+        recording: &Recording,
+        from: f64,
+        to: f64,
+        bass_gain: f32,
+        handle: ReplayHandle,
+    ) -> bool {
+        if self.session_running() || !self.clock.is_running() {
+            return false;
+        }
+        let rate = self.status.output_rate as f32;
+        let Some(ctl) = self.control.as_mut() else {
+            return false;
+        };
+        let bass_from = from.max(recording.first_time());
+        let bass_to = to.min(recording.end_time());
+        let mut bass = None;
+        if recording.has_audio() && bass_from < bass_to {
+            let voice = SampleVoice::new(
+                recording.audio.clone(),
+                recording.sample_at(bass_from),
+                recording.sample_at(bass_to),
+                rate,
+            );
+            if ctl
+                .push(ControlMsg::Voice(Slot::Playback, Box::new(voice)))
+                .is_err()
+            {
+                return false;
+            }
+            bass = Some(bass_from);
+        }
+        let logic = ReplaySession::new(recording, from, to, bass, bass_gain, handle);
+        self.start(Box::new(logic), None);
+        true
+    }
+
+    /// Lets go of the recording held by the playback voice, once a replay has ended.
+    pub fn release_replay(&mut self) {
+        if let Some(ctl) = self.control.as_mut() {
+            let _ = ctl.push(ControlMsg::ClearVoice(Slot::Playback));
+        }
     }
 
     /// The recording of session `id`, once that session has ended. Handed over only once.
@@ -415,6 +466,7 @@ impl AudioEngine {
                 Slot::Instrument,
                 sr as f32,
             )),
+            None,
         ];
         let mut state = OutputState::new(
             self.clock.clone(),

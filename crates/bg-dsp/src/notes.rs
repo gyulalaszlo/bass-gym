@@ -4,8 +4,10 @@
 //! - the signal peak rising above the highest peak of the preceding ~40 ms (which spans a
 //!   full period of a ringing low note, so its waveform ripple doesn't trigger), and
 //! - a burst in the high band (> 500 Hz): the pluck transient. Its short reference window
-//!   catches re-plucks after mutes shorter than one period of a low note. It's only a
-//!   candidate until the low band confirms a rise (muting a string also makes a click).
+//!   catches re-plucks after mutes shorter than one period of a low note. It must also
+//!   beat the bursts of the last full period, as a low note's waveform can have a sharp
+//!   edge in every period. It's only a candidate until the low band confirms a rise
+//!   (muting a string also makes a click).
 //!
 //! The note ends when its short-term RMS falls a set amount below its peak, or when the
 //! next onset arrives.
@@ -45,6 +47,9 @@ impl Default for NoteDetectorConfig {
     }
 }
 
+/// How far a high band burst must rise above those of the last period of a low note.
+const HF_PERIOD_RISE_DB: f32 = 1.0;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteEvent {
     /// `sample` counts from the first sample ever passed to the detector.
@@ -80,6 +85,8 @@ pub struct NoteDetector {
     hf_buf: Vec<f32>,
     hf_hist: VecDeque<f32>,
     hf_hist_len: usize,
+    /// Hops of `hf_hist` that make up the short reference window.
+    hf_short_len: usize,
     hf_skip: usize,
     candidate: Option<Candidate>,
     confirm_hops: u32,
@@ -113,7 +120,8 @@ impl NoteDetector {
             hop_buf: Vec::with_capacity(hop),
             hf_buf: Vec::with_capacity(hop),
             hf_hist: VecDeque::new(),
-            hf_hist_len: hops(15.0),
+            hf_hist_len: hops(42.0),
+            hf_short_len: hops(15.0),
             hf_skip: hops(3.0),
             candidate: None,
             confirm_hops: hops(15.0) as u32,
@@ -196,14 +204,17 @@ impl NoteDetector {
 
         let hf_peak = self.hf_buf.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         let n = self.hf_hist.len();
-        let hf_ref = self
-            .hf_hist
-            .iter()
-            .take(n.saturating_sub(self.hf_skip))
-            .fold(0.0f32, |m, &v| m.max(v));
+        let older = n.saturating_sub(self.hf_skip);
+        let short_start = n.saturating_sub(self.hf_short_len);
+        let highest = |range: std::ops::Range<usize>| {
+            self.hf_hist.range(range).fold(0.0f32, |m, &v| m.max(v))
+        };
+        let hf_ref = highest(short_start.min(older)..older);
+        let hf_period = highest(0..older);
         let hf_onset = hf_peak > gate * 0.25
             && hf_peak > hf_ref * from_db(self.cfg.onset_rise_db + 6.0)
-            && n >= self.hf_hist_len;
+            && hf_peak > hf_period * from_db(HF_PERIOD_RISE_DB)
+            && n >= self.hf_short_len;
         let lf_onset = current > reference * from_db(self.cfg.onset_rise_db);
         self.hf_hist.push_back(hf_peak);
         if self.hf_hist.len() > self.hf_hist_len {
@@ -418,6 +429,27 @@ mod tests {
         for (on, n) in ons.iter().zip(&notes) {
             assert!((on - n.0).abs() < 0.003, "onset {on} vs {}", n.0);
         }
+    }
+
+    #[test]
+    fn sharp_edges_of_a_ringing_note_are_not_plucks() {
+        // A low note with an edge in every period, like a pulse wave: the edges are far
+        // above the quiet part of the cycle, but no higher than the period before.
+        let sr = 48_000.0;
+        let period = (sr / 41.2) as usize;
+        let mut sig = vec![0.0f32; sr as usize];
+        for (i, s) in sig.iter_mut().enumerate().skip(4800) {
+            let t = (i - 4800) as f32 / sr;
+            let phase = i % period;
+            let edge = if phase < 8 { 1.0 } else { 0.0 };
+            let body = (TAU * 41.2 * t).sin();
+            *s = (-t / 1.5).exp() * 0.4 * (body + edge);
+        }
+        let ons = detect(sr, &sig)
+            .iter()
+            .filter(|e| matches!(e, NoteEvent::On { .. }))
+            .count();
+        assert_eq!(ons, 1);
     }
 
     #[test]

@@ -210,6 +210,13 @@ pub enum NoteEvent {
 - **Time bases:** `NoteEvent` is in input samples since `Analysis` was created.
   `SessionLogic` gets transport seconds, latency compensated. Raw indices aren't passed
   on.
+- **Pluck cue:** a high-band burst must beat the short window and also the bursts of the
+  last 42 ms (`HF_PERIOD_RISE_DB`): low notes can have a sharp edge in every period, so
+  bursts recurring at the same level aren't plucks. Too high a margin delays real notes
+  by a few ms, because they then wait for the low band.
+- **Checking against real audio:** `cargo run -p bg-dsp --example detect_wav --
+  <report>/audio.wav [release_db]` prints what the detector finds. Clips of real playing
+  are in `crates/bg-dsp/tests/fixtures`, tested by `tests/recorded.rs`.
 - **Retroactive events:** `Off` is placed back by the 40 ms RMS window plus
   `end_offset_ms`. `On` from a high-band candidate can land up to ~15 ms before
   confirmation.

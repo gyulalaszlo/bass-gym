@@ -74,6 +74,8 @@ pub struct ScoreView<'a> {
     pub layout: StaffLayout,
     /// Draw the clef and/or time signature at the left end of the staff.
     pub lead: Option<Lead>,
+    /// Name the bars above the staff.
+    pub labels: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -96,7 +98,7 @@ impl ScoreView<'_> {
             d.lead(rect, lead);
         }
         for (i, bar) in self.bars.iter().enumerate() {
-            d.bar(bar, rect, i == 0);
+            d.bar(bar, rect, i == 0, self.labels);
             let next = self.bars.get(i + 1);
             d.events(bar, next, rect);
         }
@@ -153,7 +155,7 @@ impl Draw<'_> {
         }
     }
 
-    fn bar(&self, bar: &ScoreBar, rect: Rect, first: bool) {
+    fn bar(&self, bar: &ScoreBar, rect: Rect, first: bool, labels: bool) {
         let lines = self.y(TOP_LINE)..=self.bottom;
         let stroke = Stroke::new(1.0, theme::text());
         let (left, right) = (self.axis.x(bar.start), self.axis.x(bar.end));
@@ -161,6 +163,9 @@ impl Draw<'_> {
             self.p.vline(left, lines.clone(), stroke);
         }
         self.p.vline(right, lines, stroke);
+        if !labels {
+            return;
+        }
         let label = if bar.show_bpm {
             format!("BAR {} / {:.0} BPM", bar.index + 1, bar.bpm)
         } else {

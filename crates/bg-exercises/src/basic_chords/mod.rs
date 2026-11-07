@@ -17,7 +17,7 @@ use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
 use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
-use bg_ui::widgets::beatgrid::Beatgrid;
+use bg_ui::widgets::beatgrid::{Beatgrid, LiveScore};
 use bg_ui::widgets::button::{button, selectable_value};
 use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
 use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
@@ -416,7 +416,12 @@ impl ExerciseType for BasicChords {
         );
         performance_strip(ui, PERFORMANCE_HEIGHT, &[&meter]);
         ui.add_space(4.0);
-        self.grid(ui, now, &mut prefs.grid_zoom);
+        self.grid(
+            ui,
+            now,
+            &mut prefs,
+            ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
+        );
         if prefs.grid_zoom != zoom_before {
             ctx.settings.set(ViewPrefs::ID, &prefs);
         }
@@ -465,7 +470,7 @@ impl ExerciseType for BasicChords {
         let recording = fake_session::run(&mut logic, &self.timing, self.a4);
         self.capture.set(Arc::new(recording));
         self.has_results = true;
-        self.show_results = true;
+        self.show_results = fake_session::opens_results();
         self.results_tab = ResultsTab::Review;
         self.run_seed = Some(seed);
     }
@@ -760,14 +765,34 @@ impl BasicChords {
             });
     }
 
-    fn grid(&self, ui: &mut egui::Ui, now: f64, zoom: &mut usize) {
+    fn grid(&self, ui: &mut egui::Ui, now: f64, prefs: &mut ViewPrefs, a4: f32) {
         let steps = self.data.session.groove.steps_per_beat;
+        let show_score = prefs.show_score;
+        let zoom = &mut prefs.grid_zoom;
+        let live = |chords| {
+            show_score.then_some(LiveScore {
+                chords,
+                scale: Some(self.data.scale),
+                a4,
+            })
+        };
         if self.has_results {
-            let labels: Vec<(f64, f64, String)> = lock_chords(&self.chords)
-                .spans
-                .iter()
-                .map(|s| (s.start, s.end, self.chord_label(&s.chord)))
-                .collect();
+            // One lock at a time: chords first, then timing.
+            let (labels, chords): (Vec<(f64, f64, String)>, Vec<ScoreChord>) =
+                lock_chords(&self.chords)
+                    .spans
+                    .iter()
+                    .map(|s| {
+                        let label = self.chord_label(&s.chord);
+                        let chord = ScoreChord {
+                            start: s.start,
+                            end: s.end,
+                            tones: s.chord.tones(),
+                            label: label.clone(),
+                        };
+                        ((s.start, s.end, label), chord)
+                    })
+                    .unzip();
             let t = lock(&self.timing);
             Beatgrid {
                 now,
@@ -777,6 +802,7 @@ impl BasicChords {
                 bars_behind: 1.0,
                 bars_ahead: 2.0,
                 chords: &labels,
+                score: live(&chords),
             }
             .show_zoomable(ui, 180.0, zoom);
         } else {
@@ -806,6 +832,7 @@ impl BasicChords {
                 bars_behind: 1.0,
                 bars_ahead: 2.0,
                 chords: &labels,
+                score: live(&[]),
             }
             .show_zoomable(ui, 180.0, zoom);
         }

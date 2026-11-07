@@ -838,6 +838,9 @@ impl PreferencePage for DisplayPage {
                             .color(theme::dim()),
                     );
                     ui.end_row();
+                    ui.label("Played notes");
+                    checkbox(ui, &mut v.show_score, "Show as a score above the grid");
+                    ui.end_row();
                     ui.label("Performance indicator range");
                     let unit = if v.indicator_bars == 1 { "bar" } else { "bars" };
                     ui.add(

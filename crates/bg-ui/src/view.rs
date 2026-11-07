@@ -17,6 +17,8 @@ pub struct ViewPrefs {
     pub grid_zoom: usize,
     /// The performance indicator's range covers the last this many bars.
     pub indicator_bars: u32,
+    /// Show played notes as a score above the beat grid.
+    pub show_score: bool,
 }
 
 impl Default for ViewPrefs {
@@ -24,6 +26,7 @@ impl Default for ViewPrefs {
         Self {
             grid_zoom: ZOOM_DEFAULT,
             indicator_bars: 2,
+            show_score: true,
         }
     }
 }

@@ -1,12 +1,15 @@
 //! Scrolling beat grid: upcoming notes approach the "now" line from the right; played
 //! notes are drawn over their targets in their grade colour as they pass.
 
+use bg_core::harmony::Scale;
+use bg_core::score::{self, ScoreChord, ScoreInput};
 use bg_core::{BarPlan, Matcher};
 use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, vec2};
 
 use crate::theme::{self, mono};
 use crate::view::ZOOM_STEPS;
 use crate::widgets::button::button;
+use crate::widgets::score::{ScoreView, StaffLayout};
 use crate::widgets::time_axis::TimeAxis;
 
 /// Width of the zoom button column left of the grid.
@@ -23,10 +26,35 @@ pub struct Beatgrid<'a> {
     pub bars_ahead: f64,
     /// Optional chord band: (start, end, label) spans drawn along the top.
     pub chords: &'a [(f64, f64, String)],
+    /// Show the played notes as a score above the grid.
+    pub score: Option<LiveScore<'a>>,
 }
 
+/// What the live score needs beyond the grid's own data.
+#[derive(Clone, Copy)]
+pub struct LiveScore<'a> {
+    pub chords: &'a [ScoreChord],
+    pub scale: Option<Scale>,
+    /// Reference tuning, in Hz.
+    pub a4: f32,
+}
+
+/// A fixed range, so the grid doesn't jump as notes come and go. It covers a five-string's
+/// low B and the 12th fret of the G string.
+const LIVE_STAFF: StaffLayout = StaffLayout {
+    spacing: 6.5,
+    lo: -5,
+    hi: 14,
+};
+
 impl Beatgrid<'_> {
+    /// Extra height the score takes above the grid.
+    fn score_height(&self) -> f32 {
+        self.score.map_or(0.0, |_| LIVE_STAFF.height())
+    }
+
     pub fn show(&self, ui: &mut egui::Ui, height: f32) {
+        let height = height + self.score_height();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         self.paint(ui, rect, 1.0);
     }
@@ -34,6 +62,7 @@ impl Beatgrid<'_> {
     /// The grid with small zoom buttons on its left; `zoom` is an index into
     /// [`ZOOM_STEPS`] (larger = zoomed in, so notes move slower).
     pub fn show_zoomable(&self, ui: &mut egui::Ui, height: f32, zoom: &mut usize) {
+        let height = height + self.score_height();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let column = Rect::from_x_y_ranges(rect.left()..=rect.left() + ZOOM_COLUMN, rect.y_range());
         let grid = rect.with_min_x(column.right() + 2.0);
@@ -76,7 +105,50 @@ impl Beatgrid<'_> {
         self.paint(ui, grid, ZOOM_STEPS[*zoom]);
     }
 
+    /// The played notes up to now, on the same time axis as the grid.
+    fn paint_score(
+        &self,
+        ui: &egui::Ui,
+        live: LiveScore,
+        rect: Rect,
+        axis: TimeAxis,
+        t0: f64,
+        t1: f64,
+    ) {
+        let p = ui.painter_at(rect);
+        p.rect_filled(rect, 0.0, theme::bg());
+        // Whole bars in view, plus the one before for notes tied into them.
+        let first = self
+            .bars
+            .partition_point(|b| b.end() < t0)
+            .saturating_sub(1);
+        let last = self.bars.partition_point(|b| b.start <= t1);
+        let bars = score::build(&ScoreInput {
+            bars: &self.bars[first..last.max(first)],
+            matcher: self.matcher,
+            chords: live.chords,
+            scale: live.scale,
+            a4: live.a4,
+            until: self.now,
+        });
+        ScoreView {
+            bars: &bars,
+            axis,
+            layout: LIVE_STAFF,
+            lead: None,
+            labels: false,
+        }
+        .paint(&p, rect);
+        p.vline(
+            axis.x(self.now),
+            rect.y_range(),
+            Stroke::new(2.5, theme::magenta()),
+        );
+    }
+
     fn paint(&self, ui: &mut egui::Ui, rect: Rect, zoom: f64) {
+        let full = rect;
+        let rect = rect.with_min_y(rect.top() + self.score_height());
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 0.0, theme::bg());
         p.rect_stroke(
@@ -98,6 +170,10 @@ impl Beatgrid<'_> {
         let (t0, t1) = (self.now - behind, self.now + ahead);
         let axis = TimeAxis::new(rect.x_range(), t0, t1);
         let x_now = axis.x(self.now);
+        if let Some(live) = self.score {
+            let staff = full.with_max_y(rect.top());
+            self.paint_score(ui, live, staff, axis, t0, t1);
+        }
         let x_of = |t: f64| axis.x(t);
 
         let band = if self.chords.is_empty() { 0.0 } else { 24.0 };

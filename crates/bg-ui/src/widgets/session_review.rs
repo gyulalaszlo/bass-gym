@@ -548,6 +548,7 @@ impl SessionReview {
                     clef: n == 0,
                     sig: first.sig,
                 }),
+                labels: true,
             }
             .paint(&p, staff);
             self.paint_wave(&p, wave, axis, first.start, last.end, rect);

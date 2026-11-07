@@ -7,7 +7,7 @@ use bg_core::SessionConfig;
 use bg_core::preset::{PresetError, PresetSchema};
 use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
-use bg_ui::widgets::beatgrid::Beatgrid;
+use bg_ui::widgets::beatgrid::{Beatgrid, LiveScore};
 use bg_ui::widgets::performance::performance_strip;
 use bg_ui::widgets::results::{ResultsTab, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
@@ -189,6 +189,11 @@ impl ExerciseType for BasicTiming {
         performance_strip(ui, PERFORMANCE_HEIGHT, &[&meter]);
         ui.add_space(4.0);
 
+        let score = prefs.show_score.then(|| LiveScore {
+            chords: &[],
+            scale: None,
+            a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
+        });
         if self.has_results {
             let s = lock(&self.shared);
             Beatgrid {
@@ -199,6 +204,7 @@ impl ExerciseType for BasicTiming {
                 bars_behind: view.bars_behind,
                 bars_ahead: view.bars_ahead,
                 chords: &[],
+                score,
             }
             .show_zoomable(ui, 150.0, &mut prefs.grid_zoom);
         } else {
@@ -212,6 +218,7 @@ impl ExerciseType for BasicTiming {
                 bars_behind: view.bars_behind,
                 bars_ahead: view.bars_ahead,
                 chords: &[],
+                score,
             }
             .show_zoomable(ui, 150.0, &mut prefs.grid_zoom);
         }
@@ -259,7 +266,7 @@ impl ExerciseType for BasicTiming {
         let recording = fake_session::run(&mut logic, &self.shared, a4);
         self.capture.set(Arc::new(recording));
         self.has_results = true;
-        self.show_results = true;
+        self.show_results = fake_session::opens_results();
         self.results_tab = ResultsTab::Review;
     }
 }

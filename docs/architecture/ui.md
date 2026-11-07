@@ -70,7 +70,7 @@ normal, cyan selectable / units, amber caution, red fault, magenta targets.
 pub struct Beatgrid<'a> {
     pub now: f64, pub bars: &'a [BarPlan], pub matcher: &'a Matcher,
     pub steps_per_beat: u32, pub bars_behind: f64, pub bars_ahead: f64,
-    pub chords: &'a [(f64, f64, String)],
+    pub chords: &'a [(f64, f64, String)], pub score: Option<LiveScore<'a>>,
 }
 ```
 
@@ -88,6 +88,11 @@ let x_now  = rect.left() + rect.width() * (behind / (behind + ahead)) as f32;
 let pps    = rect.width() as f64 / (behind + ahead);
 let x_of   = |t: f64| x_now + ((t - self.now) * pps) as f32;
 ```
+
+`score: Some(LiveScore)` adds a staff above the grid on the same axis, built each frame
+from the bars in view with `until = now`. `LIVE_STAFF` has a fixed range so the grid
+doesn't jump. A sounding note appears once its pitch arrives. `ViewPrefs.show_score`
+switches it, in the Display preferences.
 
 `bar_len` is the duration of the current bar. Nothing scrolls: everything repaints from
 `now` with `x_now` fixed, and the exercise calls `request_repaint()` while running.

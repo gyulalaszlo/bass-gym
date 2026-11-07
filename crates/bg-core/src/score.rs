@@ -230,6 +230,10 @@ fn grid_notes(input: &ScoreInput, bars: &[&BarPlan], first_step: &[u32]) -> Vec<
     let mut notes: Vec<GridNote> = Vec::new();
     let mut extras = Vec::new();
     for (i, p) in m.played.iter().enumerate().take(to).skip(from) {
+        // In a live view a note waits for its pitch, which comes shortly after the onset.
+        if input.until.is_finite() && p.freq.is_none() && p.offset.is_none() {
+            continue;
+        }
         match p.matched.and_then(|e| m.expected.get(e)) {
             Some(e) => {
                 let Some(b) = bars.iter().position(|b| b.index == e.bar) else {
@@ -750,6 +754,30 @@ mod tests {
         });
         assert_eq!(s[0].events.len(), 1);
         assert!(s[1].events.is_empty());
+    }
+
+    #[test]
+    fn a_sounding_note_appears_live_once_its_pitch_is_known() {
+        let b = bars(1, 1, &[(0, 1)]);
+        let mut m = matcher(&b);
+        let i = m.on_onset(0.0, -10.0);
+        let live = |m: &Matcher| {
+            build(&ScoreInput {
+                bars: &b,
+                matcher: m,
+                chords: &[],
+                scale: None,
+                a4: A4,
+                until: 0.1,
+            })
+        };
+        assert!(!matches!(live(&m)[0].events[0].kind, ScoreKind::Note(_)));
+        m.played[i].freq = Some(82.41);
+        assert!(matches!(live(&m)[0].events[0].kind, ScoreKind::Note(_)));
+        // A finished note without a pitch still shows, with a neutral head.
+        m.played[i].freq = None;
+        m.played[i].offset = Some(0.4);
+        assert_eq!(note(&live(&m)[0].events[0]).pitch, None);
     }
 
     #[test]

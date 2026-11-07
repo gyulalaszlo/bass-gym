@@ -17,6 +17,11 @@ const STEP: f64 = 0.01;
 const ERRORS: [f64; 5] = [0.004, -0.02, 0.015, -0.006, 0.042];
 const PITCHES: [i32; 6] = [28, 31, 35, 33, 40, 26];
 
+/// `BASS_GYM_FAKE_SESSION=grid` leaves the results closed, to show the beat grid.
+pub fn opens_results() -> bool {
+    std::env::var("BASS_GYM_FAKE_SESSION").as_deref() != Ok("grid")
+}
+
 /// `base` shortened to a few bars, with a count-in.
 pub fn config(base: &SessionConfig) -> SessionConfig {
     SessionConfig {

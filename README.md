@@ -17,7 +17,8 @@ Settings, presets, session state and the window geometry (`window.ron`) are stor
 | `bg-dsp` | MPM pitch tracker (tuner, ±1 ¢ from B0), one-shot per-note pitch detection, note onset/offset detector |
 | `bg-sound` | `Voice` / `SoundSource` registry; built-in synth voices and SoundFont (SF2) instruments via `rustysynth` |
 | `bg-audio` | cpal streams, shared transport clock, sample-accurate output scheduler, analysis worker, `SessionLogic` trait, latency calibration |
-| `bg-ui` | ECAM-style themes, `ExerciseType` / `PreferencePage` plug-in traits, settings store, shared widgets (tuner, beat grid, piano keyboard, tempo + groove panel, results) |
+| `bg-report` | Bug reports: a region of a recorded session as WAV, JSON and MIDI, in a folder and a zip |
+| `bg-ui` | ECAM-style themes, `ExerciseType` / `PreferencePage` plug-in traits, settings store, shared widgets (tuner, beat grid, piano keyboard, tempo + groove panel, results, score, waveform marker editor) |
 | `bg-exercises` | exercise types: Basic timing, Basic chords; `TimingSession` + `Accompaniment` for backing tracks |
 | `bass-gym` | app shell: sidebar, preset bar, preferences window |
 | `sf2pack` | tool: packs multi-sampled FLAC recordings into SoundFonts |

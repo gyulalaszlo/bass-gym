@@ -488,6 +488,7 @@ dependencies = [
  "bg-core",
  "bg-dsp",
  "bg-exercises",
+ "bg-report",
  "bg-sound",
  "bg-ui",
  "chrono",

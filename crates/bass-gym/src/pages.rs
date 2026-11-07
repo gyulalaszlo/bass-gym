@@ -57,6 +57,79 @@ fn status_row(
 #[derive(Default)]
 pub struct AudioPage {
     devices: Option<DeviceLists>,
+    reports: ReportsSection,
+}
+
+/// How often to look at what's in the reports folder.
+const REPORTS_REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Shows the saved reports and clears them, after asking.
+#[derive(Default)]
+struct ReportsSection {
+    summary: bg_report::ReportsSummary,
+    checked: Option<std::time::Instant>,
+    confirming: bool,
+    error: Option<String>,
+}
+
+impl ReportsSection {
+    fn dir() -> Option<std::path::PathBuf> {
+        directories::ProjectDirs::from("", "", "bass-gym")
+            .map(|d| d.data_dir().join(bg_report::REPORTS_FOLDER))
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let Some(dir) = Self::dir() else {
+            return;
+        };
+        if self.checked.is_none_or(|t| t.elapsed() > REPORTS_REFRESH) {
+            self.summary = bg_report::summary(&dir);
+            self.checked = Some(std::time::Instant::now());
+        }
+        let bg_report::ReportsSummary { count, bytes } = self.summary;
+        let plural = if count == 1 { "" } else { "s" };
+        ui.label(
+            RichText::new(format!(
+                "{count} saved report{plural}, {:.1} MB",
+                bytes as f64 / 1_000_000.0
+            ))
+            .small()
+            .color(theme::dim()),
+        );
+        ui.horizontal(|ui| {
+            if self.confirming {
+                ui.label(
+                    RichText::new(format!(
+                        "Delete {count} report{plural}? This can't be undone."
+                    ))
+                    .color(theme::amber()),
+                );
+                if ui.add(button("Delete").small()).clicked() {
+                    self.error = bg_report::clear(&dir).err().map(|e| format!("{e:#}"));
+                    self.confirming = false;
+                    self.checked = None;
+                }
+                if ui.add(button("Cancel").small()).clicked() {
+                    self.confirming = false;
+                }
+            } else {
+                if ui
+                    .add(button(format!("{} Open folder", icons::FOLDER_OPEN)).small())
+                    .clicked()
+                {
+                    let _ = std::fs::create_dir_all(&dir);
+                    open_folder(&dir);
+                }
+                let clear = ui.add_enabled(count > 0, button("Clear report folder").small());
+                if clear.clicked() {
+                    self.confirming = true;
+                }
+            }
+        });
+        if let Some(e) = &self.error {
+            ui.label(RichText::new(e).small().color(theme::red()));
+        }
+    }
 }
 
 impl PreferencePage for AudioPage {
@@ -257,6 +330,8 @@ impl PreferencePage for AudioPage {
                     .color(theme::dim()),
                 );
             }
+            ui.add_space(4.0);
+            self.reports.ui(ui);
         });
         if ctx.settings.get::<RecordingPrefs>(RecordingPrefs::ID) != recording {
             ctx.settings.set(RecordingPrefs::ID, &recording);
@@ -829,13 +904,6 @@ impl PreferencePage for DisplayPage {
                         &mut v.grid_zoom,
                         0..ZOOM_STEPS.len(),
                         |i| format!("×{}", ZOOM_STEPS[*i]),
-                    );
-                    ui.end_row();
-                    ui.label("");
-                    ui.label(
-                        RichText::new("Also with the magnifier buttons left of the grid")
-                            .small()
-                            .color(theme::dim()),
                     );
                     ui.end_row();
                     ui.label("Played notes");

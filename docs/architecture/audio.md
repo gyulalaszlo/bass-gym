@@ -232,6 +232,8 @@ pub enum NoteEvent {
 (zip). Bars are padded by `PADDING`. Every time is seconds from the WAV start, found with
 `Region::rel` through the recording's time map. MIDI uses one fixed tempo so event times
 stay exact; real tempos are in the JSON. Bump `FORMAT_VERSION` if the JSON layout changes.
+`bg_report::clear` backs the Clear report folder button; it only deletes items named like
+reports (`is_report`).
 
 `sf2pack` has private RIFF chunk writing and uses `claxon` for FLAC. There's no MP3
 decoder.

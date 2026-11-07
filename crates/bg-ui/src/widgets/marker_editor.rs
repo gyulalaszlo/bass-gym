@@ -118,6 +118,9 @@ pub struct EditorState {
     /// Show levels on a log scale.
     pub log: bool,
     gesture: Option<Gesture>,
+    /// Frames left to ask for keyboard focus on the selected label. More than one, as the
+    /// click that opened it can take the focus away again on the same frame.
+    focus_label: u8,
 }
 
 impl EditorState {
@@ -127,11 +130,19 @@ impl EditorState {
             selected: None,
             log: false,
             gesture: None,
+            focus_label: 0,
         }
     }
 }
 
+/// Something drawn above the waveform on the same time axis, such as a score.
+pub struct Header<'a> {
+    pub height: f32,
+    pub paint: &'a dyn Fn(&egui::Painter, Rect, TimeAxis),
+}
+
 pub struct MarkerEditor<'a> {
+    pub header: Option<Header<'a>>,
     pub source: &'a dyn PeakSource,
     /// Drawn but not editable.
     pub overlays: &'a [Marker],
@@ -168,17 +179,18 @@ fn label_font() -> egui::FontId {
 }
 
 impl MarkerEditor<'_> {
-    /// `height` is that of the waveform and everything above it; the labels below take
-    /// what their text needs.
+    /// `height` is that of the waveform and its span bars; the header above and the
+    /// labels below add to it.
     pub fn show(mut self, ui: &mut egui::Ui, height: f32) {
         let width = ui.available_width();
         let view = self.state.view;
         let lane = self.label_lane(ui, width, view);
+        let header = self.header.as_ref().map_or(0.0, |h| h.height);
         let (rect, resp) =
-            ui.allocate_exact_size(vec2(width, height + lane), Sense::click_and_drag());
+            ui.allocate_exact_size(vec2(width, header + height + lane), Sense::click_and_drag());
         let wave = Rect::from_x_y_ranges(
             rect.x_range(),
-            (rect.top() + SPAN_LANE)..=(rect.bottom() - lane),
+            (rect.top() + header + SPAN_LANE)..=(rect.bottom() - lane),
         );
         let axis = TimeAxis::new(rect.x_range(), view.start, view.end());
 
@@ -204,6 +216,9 @@ impl MarkerEditor<'_> {
                 color: theme::text().gamma_multiply(0.65),
             },
         );
+        if let Some(h) = &self.header {
+            (h.paint)(&p, rect.with_max_y(rect.top() + h.height), axis);
+        }
         for m in self.overlays {
             paint_marker(&p, axis, m, rect, wave);
         }
@@ -249,8 +264,11 @@ impl MarkerEditor<'_> {
         axis: TimeAxis,
     ) {
         let pointer_x = resp.interact_pointer_pos().map(|p| p.x);
+        // A drag is only reported once the pointer has moved, so what it grabbed is what
+        // was under the press, not under the pointer now.
+        let pressed_x = ui.input(|i| i.pointer.press_origin()).map(|p| p.x);
         if resp.drag_started() {
-            self.state.gesture = pointer_x
+            self.state.gesture = pressed_x
                 .and_then(|x| marker_near(self.markers, axis, x))
                 .map(Gesture::Marker);
             if let Some(Gesture::Marker(id)) = self.state.gesture {
@@ -261,8 +279,7 @@ impl MarkerEditor<'_> {
             let delta = resp.drag_delta();
             let x = pointer_x.unwrap_or(rect.center().x);
             if self.state.gesture.is_none() {
-                // Where the drag began, not where the pointer has got to by now.
-                let at = axis.t(x - delta.x);
+                let at = axis.t(pressed_x.unwrap_or(x));
                 self.state.gesture = Some(Gesture::Navigate { at });
             }
             match self.state.gesture {
@@ -291,6 +308,7 @@ impl MarkerEditor<'_> {
         {
             let m = (self.new_marker)((self.snap)(axis.t(x)));
             self.state.selected = Some(m.id);
+            self.state.focus_label = 2;
             self.markers.push(m);
         }
 
@@ -349,7 +367,7 @@ impl MarkerEditor<'_> {
             if is_selected {
                 let edit = text.with_max_x(text.right() - LABEL_BUTTON);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(edit));
-                child.add(
+                let field = child.add(
                     egui::TextEdit::multiline(&mut m.label)
                         .frame(egui::Frame::NONE)
                         .font(label_font())
@@ -358,6 +376,10 @@ impl MarkerEditor<'_> {
                         .desired_rows(1)
                         .hint_text("Note"),
                 );
+                if self.state.focus_label > 0 {
+                    self.state.focus_label -= 1;
+                    field.request_focus();
+                }
                 if self.add_remove {
                     let spot = Rect::from_min_size(
                         pos2(text.right() - LABEL_BUTTON + 4.0, text.top()),
@@ -379,6 +401,7 @@ impl MarkerEditor<'_> {
                 let id = ui.id().with(("marker_label", m.id));
                 if ui.interact(bubble, id, Sense::click()).clicked() {
                     self.state.selected = Some(m.id);
+                    self.state.focus_label = 2;
                 }
             }
         }
@@ -427,6 +450,165 @@ pub fn paint_marker(p: &egui::Painter, axis: TimeAxis, m: &Marker, rect: Rect, w
 mod tests {
     use super::*;
     use egui::Rangef;
+
+    struct Flat;
+
+    impl PeakSource for Flat {
+        fn range(&self) -> (f64, f64) {
+            (0.0, 100.0)
+        }
+
+        fn peak(&self, _from: f64, _to: f64) -> Option<(f32, f32)> {
+            Some((-0.5, 0.5))
+        }
+    }
+
+    /// Runs the editor in a real egui context, fed with input events.
+    struct Rig {
+        ctx: egui::Context,
+        state: EditorState,
+        markers: Vec<Marker>,
+        time: f64,
+    }
+
+    impl Rig {
+        const AT: egui::Pos2 = pos2(300.0, 120.0);
+
+        fn new() -> Self {
+            Self {
+                ctx: egui::Context::default(),
+                state: EditorState::new(view()),
+                markers: Vec::new(),
+                time: 0.0,
+            }
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 1.0 / 60.0;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 500.0))),
+                time: Some(self.time),
+                events,
+                ..Default::default()
+            };
+            let (state, markers) = (&mut self.state, &mut self.markers);
+            let mut next = 0;
+            let output = self.ctx.run_ui(input, |ui| {
+                let mut new_marker = |time| {
+                    next += 1;
+                    marker(next, time)
+                };
+                MarkerEditor {
+                    header: None,
+                    source: &Flat,
+                    overlays: &[],
+                    markers: &mut *markers,
+                    state: &mut *state,
+                    snap: &|t| t,
+                    add_remove: true,
+                    new_marker: &mut new_marker,
+                    playhead: None,
+                }
+                .show(ui, 200.0);
+            });
+            output.drop_without_applying_deltas();
+        }
+
+        fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }
+        }
+
+        fn click(&mut self, pos: egui::Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(pos)]);
+            self.frame(vec![Self::button(pos, true)]);
+            self.frame(vec![Self::button(pos, false)]);
+        }
+
+        fn double_click(&mut self, pos: egui::Pos2) {
+            self.click(pos);
+            self.click(pos);
+        }
+
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(from)]);
+            self.frame(vec![Self::button(from, true)]);
+            for i in 1..=10 {
+                let at = from + (to - from) * (i as f32 / 10.0);
+                self.frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            self.frame(vec![Self::button(to, false)]);
+        }
+
+        fn type_text(&mut self, text: &str) {
+            self.frame(vec![egui::Event::Text(text.to_owned())]);
+        }
+    }
+
+    #[test]
+    fn typing_goes_straight_into_a_new_marker() {
+        let mut rig = Rig::new();
+        rig.double_click(Rig::AT);
+        assert_eq!(rig.markers.len(), 1);
+        rig.frame(Vec::new());
+        rig.type_text("late");
+        rig.type_text(" note");
+        assert_eq!(rig.markers[0].label, "late note");
+    }
+
+    #[test]
+    fn backspace_while_typing_edits_the_text_not_the_marker() {
+        let mut rig = Rig::new();
+        rig.double_click(Rig::AT);
+        rig.frame(Vec::new());
+        rig.type_text("ab");
+        rig.frame(vec![egui::Event::Key {
+            key: Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert_eq!(rig.markers.len(), 1);
+        assert_eq!(rig.markers[0].label, "a");
+    }
+
+    #[test]
+    fn dragging_down_zooms_in_and_up_zooms_out() {
+        let mut rig = Rig::new();
+        rig.drag(Rig::AT, Rig::AT + vec2(0.0, 60.0));
+        let zoomed_in = rig.state.view.span;
+        assert!(zoomed_in < 10.0);
+        rig.drag(Rig::AT, Rig::AT - vec2(0.0, 60.0));
+        assert!(rig.state.view.span > zoomed_in);
+    }
+
+    #[test]
+    fn one_drag_moves_and_zooms_together() {
+        let mut rig = Rig::new();
+        let held = TimeAxis::new(egui::Rangef::new(0.0, 800.0), 10.0, 20.0).t(Rig::AT.x);
+        let to = Rig::AT + vec2(100.0, 60.0);
+        rig.drag(Rig::AT, to);
+        let v = rig.state.view;
+        assert!(v.span < 10.0);
+        let now = TimeAxis::new(egui::Rangef::new(0.0, 800.0), v.start, v.end()).t(to.x);
+        assert!((now - held).abs() < 0.2, "{now} vs {held}");
+    }
+
+    #[test]
+    fn dragging_a_marker_moves_it_not_the_view() {
+        let mut rig = Rig::new();
+        rig.markers.push(marker(1, 15.0));
+        rig.frame(Vec::new());
+        let before = rig.state.view;
+        rig.drag(pos2(400.0, 120.0), pos2(480.0, 120.0));
+        assert_eq!(rig.state.view, before);
+        assert!((rig.markers[0].time - 16.0).abs() < 0.05);
+    }
 
     fn view() -> WaveView {
         WaveView::new(10.0, 20.0, (0.0, 100.0))

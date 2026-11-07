@@ -67,8 +67,8 @@ untouched: the fake session changes the exercise's session settings.
 - `//!` module docs, short comments, British spelling ("colour").
 - Additive config changes need only `#[serde(default)]`. Preset restructures need a
   `current_version` bump plus `migrate_step`.
-- Keep logic in pure functions outside painters, because that's what can be tested. No
-  test creates an `egui::Context`.
+- Keep logic in pure functions outside painters, because that's what's easiest to test.
+  Interaction can be tested too: see `Rig` in `marker_editor.rs`.
 - Tests: `#[cfg(test)]` modules, plus offline end-to-end tests in
   `crates/bg-exercises/tests/` (`pipeline.rs`, `basic_chords.rs`). These synthesise a
   `pluck`, run it through `NoteDetector` and `TimingSession` using `SessionIo::offline`,

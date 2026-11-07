@@ -405,8 +405,7 @@ impl ExerciseType for BasicChords {
         ui.add_space(6.0);
         self.progression_strip(ui, now);
         ui.add_space(6.0);
-        let mut prefs: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
-        let zoom_before = prefs.grid_zoom;
+        let prefs: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
         let meter = timing_meter(
             &self.timing,
             self.has_results,
@@ -419,12 +418,9 @@ impl ExerciseType for BasicChords {
         self.grid(
             ui,
             now,
-            &mut prefs,
+            &prefs,
             ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
         );
-        if prefs.grid_zoom != zoom_before {
-            ctx.settings.set(ViewPrefs::ID, &prefs);
-        }
         if running {
             ui.ctx().request_repaint();
         }
@@ -765,10 +761,10 @@ impl BasicChords {
             });
     }
 
-    fn grid(&self, ui: &mut egui::Ui, now: f64, prefs: &mut ViewPrefs, a4: f32) {
+    fn grid(&self, ui: &mut egui::Ui, now: f64, prefs: &ViewPrefs, a4: f32) {
         let steps = self.data.session.groove.steps_per_beat;
         let (show_score, size) = (prefs.show_score, prefs.score_size);
-        let zoom = &mut prefs.grid_zoom;
+        let zoom = prefs.zoom_factor();
         let live = |chords| {
             show_score.then_some(LiveScore {
                 chords,
@@ -805,7 +801,7 @@ impl BasicChords {
                 chords: &labels,
                 score: live(&chords),
             }
-            .show_zoomable(ui, 180.0, zoom);
+            .show(ui, 180.0, zoom);
         } else {
             let (bars, matcher) = preview(&self.data.session);
             let progression = self.shown_progression();
@@ -835,7 +831,7 @@ impl BasicChords {
                 chords: &labels,
                 score: live(&[]),
             }
-            .show_zoomable(ui, 180.0, zoom);
+            .show(ui, 180.0, zoom);
         }
     }
 

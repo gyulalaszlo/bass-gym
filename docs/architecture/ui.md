@@ -74,11 +74,10 @@ pub struct Beatgrid<'a> {
 }
 ```
 
-- `show_zoomable` adds a `ZOOM_COLUMN` (26 pt, plus 2 pt gap) button column and is what
-  all call sites use. `show` has no callers. Heights are 150 in Basic timing and 180 in
-  Basic chords.
+- `show(ui, height, zoom)`. Heights are 150 in Basic timing and 180 in Basic chords.
 - Zoom: `view.rs::ZOOM_STEPS = [0.5, 0.75, 1.0, 1.5, 2.0]`, default index 2, stored in
-  `ViewPrefs.grid_zoom`. The step divides the visible span.
+  `ViewPrefs.grid_zoom` and set in the Display preferences. The step divides the visible
+  span.
 - The mapping is linear in seconds, so a tempo change alters bar widths on screen:
 
 ```rust
@@ -129,6 +128,9 @@ Culling relies on time-sorted vectors.
 - Editor drags work like Ableton: `WaveView::navigate` keeps the point where the drag
   began under the pointer while vertical movement zooms (down zooms in). Labels wrap and
   grow, and the area under the waveform grows with the tallest one in view.
+- `Header` draws something above the waveform on the same axis; the review uses it for
+  the score. New markers and clicked labels take keyboard focus (`focus_label` asks for
+  two frames, as the click can take focus away on its own frame).
 - `ScoreView` paints chord marks first, then staff, then notes, so marks stay a hint.
 
 ## Results dialog (`bg-ui/src/widgets/results.rs`)
@@ -182,4 +184,5 @@ set -> `ctx.engine.set_x()` pattern that `LatencyPage` uses.
 ## Visual checks
 
 There are no snapshot tests. Use the `BASS_GYM_*` variables in
-[README.md](README.md) to take a screenshot.
+[README.md](README.md) to take a screenshot. For interaction, `marker_editor.rs`'s `Rig`
+test helper runs a widget in a real `egui::Context` fed with input events.

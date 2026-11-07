@@ -170,8 +170,7 @@ impl ExerciseType for BasicTiming {
         // Beat grid: the live / last session, or a preview of the configured groove.
         let steps = self.data.session.groove.steps_per_beat;
         let view = self.data.view.clone();
-        let mut prefs: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
-        let zoom_before = prefs.grid_zoom;
+        let prefs: ViewPrefs = ctx.settings.get(ViewPrefs::ID);
 
         // Live performance, large, above the grid.
         let now = if running {
@@ -207,7 +206,7 @@ impl ExerciseType for BasicTiming {
                 chords: &[],
                 score,
             }
-            .show_zoomable(ui, 150.0, &mut prefs.grid_zoom);
+            .show(ui, 150.0, prefs.zoom_factor());
         } else {
             let (bars, matcher) = preview(&self.data.session);
             let now = bars.first().map_or(0.0, |b| b.start);
@@ -221,10 +220,7 @@ impl ExerciseType for BasicTiming {
                 chords: &[],
                 score,
             }
-            .show_zoomable(ui, 150.0, &mut prefs.grid_zoom);
-        }
-        if prefs.grid_zoom != zoom_before {
-            ctx.settings.set(ViewPrefs::ID, &prefs);
+            .show(ui, 150.0, prefs.zoom_factor());
         }
         if running {
             ui.ctx().request_repaint();

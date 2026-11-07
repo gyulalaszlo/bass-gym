@@ -23,7 +23,7 @@ use crate::theme::{self, mono};
 use crate::widgets::button::button;
 use crate::widgets::controls::{checkbox, number_field, text_field};
 use crate::widgets::marker_editor::{
-    EditorState, Line, Marker, MarkerEditor, WaveView, paint_marker,
+    EditorState, Header, Line, Marker, MarkerEditor, WaveView, paint_marker,
 };
 use crate::widgets::score::{Lead, ScoreView, StaffLayout, lead_width};
 use crate::widgets::time_axis::TimeAxis;
@@ -76,7 +76,7 @@ pub fn report_settings(ctx: &ExerciseCtx, exercise: serde_json::Value) -> serde_
 enum ExportState {
     Idle,
     Running(Receiver<Result<Exported, String>>),
-    Done(PathBuf),
+    Done { folder: PathBuf, copied: bool },
     Failed(String),
 }
 
@@ -334,7 +334,7 @@ impl SessionReview {
         let Some(input) = self.report_input() else {
             return;
         };
-        let reports = data_dir.join("reports");
+        let reports = data_dir.join(bg_report::REPORTS_FOLDER);
         let (tx, rx) = channel();
         std::thread::spawn(move || {
             let result = bg_report::export(&input, &reports).map_err(|e| format!("{e:#}"));
@@ -346,7 +346,12 @@ impl SessionReview {
     fn poll_export(&mut self) {
         if let ExportState::Running(rx) = &self.export {
             match rx.try_recv() {
-                Ok(Ok(out)) => self.export = ExportState::Done(out.folder),
+                Ok(Ok(out)) => {
+                    self.export = ExportState::Done {
+                        folder: out.folder,
+                        copied: false,
+                    }
+                }
                 Ok(Err(e)) => self.export = ExportState::Failed(e),
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
@@ -382,7 +387,7 @@ impl SessionReview {
                 self.start_export(dir);
             }
         });
-        match &self.export {
+        match &mut self.export {
             ExportState::Idle => {}
             ExportState::Running(_) => {
                 ui.ctx().request_repaint();
@@ -395,19 +400,27 @@ impl SessionReview {
                         .color(theme::red()),
                 );
             }
-            ExportState::Done(folder) => {
-                let folder = folder.clone();
+            ExportState::Done { folder, copied } => {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(format!("Saved to {} (and as .zip)", folder.display()))
                             .small()
                             .color(theme::green()),
                     );
+                    let label = if *copied {
+                        format!("{} Copied", icons::CHECK)
+                    } else {
+                        format!("{} Copy path", icons::COPY)
+                    };
+                    if ui.add(button(label).small()).clicked() {
+                        ui.ctx().copy_text(folder.display().to_string());
+                        *copied = true;
+                    }
                     if ui
                         .add(button(format!("{} Open folder", icons::FOLDER_OPEN)).small())
                         .clicked()
                     {
-                        open_folder(&folder);
+                        open_folder(folder);
                     }
                 });
             }
@@ -710,7 +723,30 @@ impl SessionReview {
                 line: Line::Solid,
             }
         };
+        let score = &self.score;
+        // Bars are named by the editor's own markers.
+        let layout = StaffLayout {
+            labels: false,
+            ..self.layout
+        };
+        let paint_score = |p: &egui::Painter, rect: Rect, axis: TimeAxis| {
+            let (from, to) = (axis.t(rect.left()), axis.t(rect.right()));
+            // With the bar before, for notes tied into the view.
+            let first = score.partition_point(|b| b.end < from).saturating_sub(1);
+            let last = score.partition_point(|b| b.start <= to).max(first);
+            ScoreView {
+                bars: &score[first..last],
+                axis,
+                layout,
+                lead: None,
+            }
+            .paint(p, rect);
+        };
         MarkerEditor {
+            header: Some(Header {
+                height: layout.height(),
+                paint: &paint_score,
+            }),
             source: &RecordingPeaks(&self.input.recording),
             overlays: &self.overlays,
             markers: &mut self.markers,

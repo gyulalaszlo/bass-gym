@@ -24,6 +24,8 @@ use serde_json::Value;
 const AUDIO_FILE: &str = "audio.wav";
 const JSON_FILE: &str = "report.json";
 const MIDI_FILE: &str = "click_chords.mid";
+/// Name of the folder reports go in, within the app's data folder.
+pub const REPORTS_FOLDER: &str = "reports";
 /// Bumped when the JSON layout changes.
 const FORMAT_VERSION: u32 = 1;
 /// Audio and events kept either side of the selected bars, in seconds.
@@ -441,6 +443,71 @@ fn zip_folder(folder: &Path, zip_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether a folder or zip is one of ours: `2026-11-07_145046_bars-31-32`, optionally with
+/// a counter and `.zip`.
+fn is_report(name: &str) -> bool {
+    let (date, rest) = name.split_at_checked(10).unwrap_or(("", ""));
+    let digits = date.chars().filter(char::is_ascii_digit).count();
+    digits == 8
+        && date.matches('-').count() == 2
+        && rest.starts_with('_')
+        && rest.contains("_bars-")
+}
+
+fn size_of(path: &Path) -> u64 {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !meta.is_dir() {
+        return meta.len();
+    }
+    fs::read_dir(path).map_or(0, |entries| {
+        entries.flatten().map(|e| size_of(&e.path())).sum()
+    })
+}
+
+/// The reports in a folder, and what they take up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReportsSummary {
+    pub count: usize,
+    pub bytes: u64,
+}
+
+fn report_paths(reports_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(reports_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_name().to_str().is_some_and(is_report))
+        .map(|e| e.path())
+        .collect()
+}
+
+pub fn summary(reports_dir: &Path) -> ReportsSummary {
+    let paths = report_paths(reports_dir);
+    let mut names: Vec<_> = paths.iter().filter_map(|p| p.file_stem()).collect();
+    names.sort();
+    names.dedup();
+    ReportsSummary {
+        count: names.len(),
+        bytes: paths.iter().map(|p| size_of(p)).sum(),
+    }
+}
+
+/// Deletes every report in `reports_dir`, leaving anything else there alone.
+pub fn clear(reports_dir: &Path) -> Result<()> {
+    for path in report_paths(reports_dir) {
+        let removed = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        removed.with_context(|| format!("deleting {}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// Writes a report into a new folder in `reports_dir`, with a zip of it alongside.
 pub fn export(input: &ReportInput, reports_dir: &Path) -> Result<Exported> {
     fs::create_dir_all(reports_dir)
@@ -638,6 +705,43 @@ mod tests {
         assert_eq!(r["audio"]["file"], Value::Null);
         close(r["played"][0]["start"].as_f64().unwrap(), 0.51);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_report_names_count_as_reports() {
+        assert!(is_report("2026-11-07_145046_bars-31-32"));
+        assert!(is_report("2026-11-07_145046_bars-31-32-2"));
+        assert!(is_report("2026-11-07_145046_bars-3-3.zip"));
+        assert!(!is_report(".DS_Store"));
+        assert!(!is_report("my notes"));
+        assert!(!is_report("bars-3-3"));
+        assert!(!is_report("2026-11-07_notes.txt"));
+    }
+
+    #[test]
+    fn clearing_removes_reports_and_nothing_else() {
+        let dir = scratch("clear");
+        export(&input(), &dir).unwrap();
+        export(&input(), &dir).unwrap();
+        fs::write(dir.join("keep me.txt"), "mine").unwrap();
+        fs::create_dir(dir.join("my folder")).unwrap();
+
+        let before = summary(&dir);
+        assert_eq!(before.count, 2);
+        assert!(before.bytes > 2 * 24_000); // Two copies of 3000 float samples, zipped too.
+
+        clear(&dir).unwrap();
+        assert_eq!(summary(&dir), ReportsSummary::default());
+        assert!(dir.join("keep me.txt").exists());
+        assert!(dir.join("my folder").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_folder_is_an_empty_one() {
+        let dir = scratch("missing");
+        assert_eq!(summary(&dir), ReportsSummary::default());
+        clear(&dir).unwrap();
     }
 
     #[test]

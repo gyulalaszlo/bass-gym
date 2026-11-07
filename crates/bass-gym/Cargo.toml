@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 bg-core.workspace = true
+bg-report.workspace = true
 bg-audio.workspace = true
 bg-dsp.workspace = true
 bg-sound.workspace = true

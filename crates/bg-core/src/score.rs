@@ -515,7 +515,7 @@ fn beam(events: &mut [ScoreEvent], spb: u32) {
 /// Bars per row for a row `width` wide, keeping the densest bar readable.
 pub fn bars_per_row(bars: &[ScoreBar], width: f32) -> usize {
     let densest = bars.iter().map(|b| b.events.len()).max().unwrap_or(0);
-    let bar_width = (densest as f32 * 28.0 + 24.0).max(120.0);
+    let bar_width = (densest as f32 * 40.0 + 40.0).max(220.0);
     ((width / bar_width) as usize).max(1)
 }
 
@@ -927,7 +927,7 @@ mod tests {
         assert!(rows(0, 2).is_empty());
         let b = bars(1, 1, &[]);
         let s = score(&b, &matcher(&b));
-        assert_eq!(bars_per_row(&s, 1000.0), 8);
+        assert_eq!(bars_per_row(&s, 1000.0), 4);
         assert_eq!(bars_per_row(&s, 10.0), 1);
     }
 

@@ -63,6 +63,12 @@ impl SessionCapture {
         self.recording.as_ref()
     }
 
+    /// Takes a recording made some other way (a debugging session).
+    pub fn set(&mut self, recording: Arc<Recording>) {
+        self.pending = None;
+        self.recording = Some(recording);
+    }
+
     /// Releases the recording, freeing its memory.
     pub fn clear(&mut self) {
         *self = Self::default();

@@ -126,15 +126,31 @@ Culling relies on time-sorted vectors.
 - `results_dialog(ctx, open, title, add)` is an `egui::Modal` with a title, a vertical
   ScrollArea and a Close button. Width clamps to 320-960 pt.
 - It closes on Close, Space, Esc or a click outside. The Space check runs after `add`,
-  so content can consume Space first.
+  so content can consume Space first, as `SessionReview` does for play / stop.
 - `modal_open` keeps the toolbar's Space-to-start from firing while it's open.
 - `results(ui, stats, th, tables)` draws summary groups, `accuracy_timeline`, three
   histograms, the grade and tempo tables, and an exercise-specific `tables` closure.
 - It's called from `basic_timing.rs` and `basic_chords/mod.rs`. Basic chords' closure
-  adds "Per chord" and borrows all of `self`.
+  adds "Per chord" and borrows all of `self`, so the review is taken out of `self` first.
+- Passing a `ResultsTab` shows the tabs. Score + Audio widens the dialog to 1400 pt.
+- While a text field or popup is active, Esc and clicks outside don't close the dialog.
 - `results_button` reopens it. Any config edit or preset load clears `has_results`,
   after which results can't be reached.
 - `matcher.stats()` is recomputed every frame while open.
+
+## Session review (`bg-ui/src/widgets/session_review.rs`)
+
+The Score + Audio tab. `SessionReview` is owned by the exercise, so selection, markers
+and playback survive closing the dialog. It's built in `update_review` once
+`!session_running` and a recording has arrived, from a `ReviewInput` snapshot, and
+released with `has_results`.
+
+- Rows of whole bars: one shared `TimeAxis` per row for score and waveform. A short last
+  row keeps the scale of full rows. Rows are culled with `is_rect_visible`.
+- Click the score to select a bar (Shift extends); click the waveform to open
+  `MarkerEditor` around that time.
+- `tick` must run every frame: it stops a replay when the dialog closes and releases the
+  playback voice.
 
 ## Settings and persistence
 

@@ -1,19 +1,24 @@
 //! Basic Timing: play the selected groove on time against the click.
 
 use anyhow::Result;
+use std::sync::Arc;
+
 use bg_core::SessionConfig;
 use bg_core::preset::{PresetError, PresetSchema};
 use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::performance::performance_strip;
-use bg_ui::widgets::results::{results, results_dialog};
+use bg_ui::widgets::results::{ResultsTab, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
+use bg_ui::widgets::session_review::{ReviewInput, SessionReview};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
+use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{ExerciseCtx, ExerciseType, egui, icons, theme};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::fake_session;
 use crate::timing_session::{
     PERFORMANCE_HEIGHT, SharedTiming, TimingSession, last_time, lock, preview, timing_meter,
 };
@@ -53,6 +58,8 @@ pub struct BasicTiming {
     /// Running on the previous frame (to open the results when the session ends).
     was_running: bool,
     capture: SessionCapture,
+    review: Option<SessionReview>,
+    results_tab: ResultsTab,
 }
 
 impl PresetSchema for BasicTiming {
@@ -110,7 +117,9 @@ impl ExerciseType for BasicTiming {
         self.capture.poll(ctx.engine);
         if !self.has_results {
             self.capture.clear();
+            self.review = None;
         }
+        self.update_review(ctx);
         if tb.transport(running) {
             if running {
                 ctx.engine.stop_session();
@@ -126,6 +135,8 @@ impl ExerciseType for BasicTiming {
                     .max_bytes();
                 let id = ctx.engine.start_recorded(Box::new(logic), max_bytes);
                 self.capture.begin(id);
+                self.review = None;
+                self.results_tab = ResultsTab::Stats;
                 self.has_results = true;
                 self.show_results = false;
             }
@@ -220,11 +231,56 @@ impl ExerciseType for BasicTiming {
         let stats = self
             .show_results
             .then(|| lock(&self.shared).matcher.stats());
-        results_dialog(ui.ctx(), &mut self.show_results, "Results", |ui| {
-            if let Some(stats) = &stats {
-                results(ui, stats, ctx.scoring, |_| {});
-            }
-        });
+        let scoring = ctx.scoring;
+        let engine = &mut *ctx.engine;
+        let review = &mut self.review;
+        let tab = review.is_some().then_some(&mut self.results_tab);
+        results_dialog(
+            ui.ctx(),
+            &mut self.show_results,
+            "Results",
+            tab,
+            |ui, tab| match (tab, review.as_mut(), &stats) {
+                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine),
+                (_, _, Some(stats)) => results(ui, stats, scoring, |_| {}),
+                _ => {}
+            },
+        );
+        if let Some(r) = self.review.as_mut() {
+            r.tick(ctx.engine, self.show_results);
+        }
+    }
+
+    fn debug_fake_session(&mut self, ctx: &mut ExerciseCtx) {
+        let cfg = fake_session::config(&self.data.session);
+        let mut logic = TimingSession::new(cfg, ctx.scoring.clone(), self.shared.clone());
+        let a4 = ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4;
+        let recording = fake_session::run(&mut logic, &self.shared, a4);
+        self.capture.set(Arc::new(recording));
+        self.has_results = true;
+        self.show_results = true;
+        self.results_tab = ResultsTab::Review;
+    }
+}
+
+impl BasicTiming {
+    /// Sets up the review once the session has fully ended.
+    fn update_review(&mut self, ctx: &mut ExerciseCtx) {
+        if self.review.is_some() || ctx.engine.session_running() {
+            return;
+        }
+        let Some(recording) = self.capture.recording() else {
+            return;
+        };
+        let shared = lock(&self.shared);
+        self.review = Some(SessionReview::new(ReviewInput {
+            bars: shared.bars.clone(),
+            matcher: shared.matcher.clone(),
+            chords: Vec::new(),
+            scale: None,
+            a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
+            recording: recording.clone(),
+        }));
     }
 }
 

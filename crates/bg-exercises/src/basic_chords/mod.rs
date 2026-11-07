@@ -5,10 +5,14 @@
 pub mod accompaniment;
 pub mod prefs;
 
+use crate::fake_session;
 use anyhow::Result;
+use std::sync::Arc;
+
 use bg_core::harmony::{self, Chord, Mode, Scale, comp};
 use bg_core::music::note_name;
 use bg_core::preset::{PresetError, PresetSchema};
+use bg_core::score::ScoreChord;
 use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
 use bg_ui::recording::{RecordingPrefs, SessionCapture};
@@ -18,8 +22,9 @@ use bg_ui::widgets::button::{button, selectable_value};
 use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
 use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
 use bg_ui::widgets::performance::performance_strip;
-use bg_ui::widgets::results::{block, results, results_dialog};
+use bg_ui::widgets::results::{ResultsTab, block, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
+use bg_ui::widgets::session_review::{ReviewInput, SessionReview};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{ExerciseCtx, ExerciseType, PreferencePage, egui, icons, theme};
@@ -233,6 +238,8 @@ pub struct BasicChords {
     /// Tuning reference, for naming played pitches.
     a4: f32,
     capture: SessionCapture,
+    review: Option<SessionReview>,
+    results_tab: ResultsTab,
 }
 
 impl PresetSchema for BasicChords {
@@ -342,7 +349,9 @@ impl ExerciseType for BasicChords {
         self.capture.poll(ctx.engine);
         if !self.has_results {
             self.capture.clear();
+            self.review = None;
         }
+        self.update_review(ctx);
         if tb.transport(running) {
             if running {
                 ctx.engine.stop_session();
@@ -422,19 +431,95 @@ impl ExerciseType for BasicChords {
 
         let mut open = self.show_results && self.has_results;
         let stats = open.then(|| lock(&self.timing).matcher.stats());
-        results_dialog(ui.ctx(), &mut open, "Results", |ui| {
-            if let Some(stats) = &stats {
-                results(ui, stats, ctx.scoring, |ui| {
+        // Out of `self` while the dialog runs: the tables below borrow all of it.
+        let mut review = self.review.take();
+        let mut results_tab = self.results_tab;
+        let tab = review.is_some().then_some(&mut results_tab);
+        let scoring = ctx.scoring;
+        let engine = &mut *ctx.engine;
+        results_dialog(ui.ctx(), &mut open, "Results", tab, |ui, tab| {
+            match (tab, review.as_mut(), &stats) {
+                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine),
+                (_, _, Some(stats)) => results(ui, stats, scoring, |ui| {
                     block(ui, "Per chord", |ui| self.per_chord_table(ui))
-                });
+                }),
+                _ => {}
             }
         });
+        if let Some(r) = review.as_mut() {
+            r.tick(ctx.engine, open);
+        }
+        self.review = review;
+        self.results_tab = results_tab;
         self.show_results = open;
+    }
+
+    fn debug_fake_session(&mut self, ctx: &mut ExerciseCtx) {
+        self.a4 = ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4;
+        self.data.session = fake_session::config(&self.data.session);
+        let Some((logic, seed)) = self.session(ctx) else {
+            return;
+        };
+        let mut logic = logic;
+        let recording = fake_session::run(&mut logic, &self.timing, self.a4);
+        self.capture.set(Arc::new(recording));
+        self.has_results = true;
+        self.show_results = true;
+        self.results_tab = ResultsTab::Review;
+        self.run_seed = Some(seed);
     }
 }
 
 impl BasicChords {
+    /// Sets up the review once the session has fully ended.
+    fn update_review(&mut self, ctx: &mut ExerciseCtx) {
+        if self.review.is_some() || ctx.engine.session_running() {
+            return;
+        }
+        let Some(recording) = self.capture.recording().cloned() else {
+            return;
+        };
+        // One lock at a time: chords first, then timing.
+        let chords: Vec<ScoreChord> = lock_chords(&self.chords)
+            .spans
+            .iter()
+            .map(|s| ScoreChord {
+                start: s.start,
+                end: s.end,
+                tones: s.chord.tones(),
+                label: self.chord_label(&s.chord),
+            })
+            .collect();
+        let shared = lock(&self.timing);
+        self.review = Some(SessionReview::new(ReviewInput {
+            bars: shared.bars.clone(),
+            matcher: shared.matcher.clone(),
+            chords,
+            scale: Some(self.data.scale),
+            a4: self.a4,
+            recording,
+        }));
+    }
+
     fn start(&mut self, ctx: &mut ExerciseCtx) {
+        let Some((logic, seed)) = self.session(ctx) else {
+            return;
+        };
+        let max_bytes = ctx
+            .settings
+            .get::<RecordingPrefs>(RecordingPrefs::ID)
+            .max_bytes();
+        let id = ctx.engine.start_recorded(Box::new(logic), max_bytes);
+        self.capture.begin(id);
+        self.review = None;
+        self.results_tab = ResultsTab::Stats;
+        self.has_results = true;
+        self.show_results = false;
+        self.run_seed = Some(seed);
+    }
+
+    /// Builds a session from the settings, with the seed it uses.
+    fn session(&mut self, ctx: &mut ExerciseCtx) -> Option<(TimingSession, u64)> {
         let seed = if self.data.new_seed_each_start {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -446,7 +531,7 @@ impl BasicChords {
             Ok(p) => p,
             Err(e) => {
                 self.error = Some(format!("Can't start: {e}"));
-                return;
+                return None;
             }
         };
         self.error = None;
@@ -480,15 +565,7 @@ impl BasicChords {
             Box::new(acc),
             mode,
         );
-        let max_bytes = ctx
-            .settings
-            .get::<RecordingPrefs>(RecordingPrefs::ID)
-            .max_bytes();
-        let id = ctx.engine.start_recorded(Box::new(logic), max_bytes);
-        self.capture.begin(id);
-        self.has_results = true;
-        self.show_results = false;
-        self.run_seed = Some(seed);
+        Some((logic, seed))
     }
 
     /// The progression to show: the running / last one, or a preview of the settings.

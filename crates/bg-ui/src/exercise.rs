@@ -48,6 +48,10 @@ pub trait ExerciseType: PresetSchema {
     /// It should at least hold the start / stop button ([`Toolbar::transport`]).
     fn toolbar(&mut self, tb: &mut Toolbar, ctx: &mut ExerciseCtx);
 
+    /// Debugging aid: runs a made-up session offline and opens its review, so that it
+    /// can be looked at without playing.
+    fn debug_fake_session(&mut self, _ctx: &mut ExerciseCtx) {}
+
     /// Messages shown just below the toolbar (errors, warnings); none by default.
     fn notices(&mut self, _ui: &mut egui::Ui, _ctx: &mut ExerciseCtx) {}
 

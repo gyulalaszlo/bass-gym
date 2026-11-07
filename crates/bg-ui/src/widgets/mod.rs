@@ -9,6 +9,7 @@ pub mod performance;
 pub mod results;
 pub mod score;
 pub mod session_panel;
+pub mod session_review;
 pub mod time_axis;
 pub mod toolbar;
 pub mod tuner;

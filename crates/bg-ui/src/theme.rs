@@ -338,7 +338,7 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
     );
     fonts.families.insert(
         FontFamily::Name(MUSIC_FONT.into()),
-        vec![MUSIC_FONT.to_owned()],
+        vec![MUSIC_FONT.to_owned(), "Hack".to_owned()],
     );
     ctx.set_fonts(fonts);
 

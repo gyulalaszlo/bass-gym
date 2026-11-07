@@ -55,6 +55,10 @@ Handled in `bass-gym/src/app.rs` and `main.rs`:
 | `BASS_GYM_SIZE=<w>x<h>` | Fixed window size |
 | `BASS_GYM_EXERCISE=<id>` | Exercise shown (`basic_timing`, `diatonic_chords`) |
 | `BASS_GYM_PREFS=<page id>` | Opens a preferences page (drawn in the main window in screenshot mode) |
+| `BASS_GYM_FAKE_SESSION=1` | Runs `bg-exercises/src/fake_session.rs` and opens the Score + Audio tab; `=editor` opens the marker editor too |
+
+For screenshots, set `HOME` to a scratch folder so the real settings and presets stay
+untouched: the fake session changes the exercise's session settings.
 
 ## Conventions
 

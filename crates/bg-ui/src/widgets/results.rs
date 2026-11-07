@@ -5,7 +5,7 @@ use bg_core::{BarStats, Grade, ScoringThresholds, SessionStats};
 use egui::{Align2, Color32, Pos2, Rect, RichText, Sense, Shape, Stroke, vec2};
 
 use crate::theme::{self, mono};
-use crate::widgets::button::button;
+use crate::widgets::button::{button, selectable_value};
 use crate::widgets::histogram::Histogram;
 
 /// The pass in which a dialog was last shown, so global shortcuts like Space (start /
@@ -22,21 +22,35 @@ pub fn modal_open(ctx: &egui::Context) -> bool {
     shown.is_some_and(|p| p + 1 >= ctx.cumulative_pass_nr())
 }
 
-/// The results of a finished session as a modal dialog. `add` draws the contents (e.g.
-/// [`results`] and exercise-specific tables). Closes on Close, Space, Esc or a click
-/// outside.
+/// A tab of the results dialog.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ResultsTab {
+    #[default]
+    Stats,
+    Review,
+}
+
+/// The results of a finished session as a modal dialog. `add` draws the contents of the
+/// open tab (e.g. [`results`] and exercise-specific tables). Passing `tab` shows the tabs,
+/// when there's a recording to review. Closes on Close, Space, Esc or a click outside.
 pub fn results_dialog(
     ctx: &egui::Context,
     open: &mut bool,
     title: &str,
-    add: impl FnOnce(&mut egui::Ui),
+    mut tab: Option<&mut ResultsTab>,
+    add: impl FnOnce(&mut egui::Ui, ResultsTab),
 ) {
     if !*open {
         return;
     }
+    // Esc leaves a text field or a popup, and a click outside dismisses a popup. Neither
+    // should also close the dialog (and leave a report half written).
+    let busy = ctx.egui_wants_keyboard_input() || egui::Popup::is_any_open(ctx);
+    let reviewing = tab.as_deref() == Some(&ResultsTab::Review);
     let screen = ctx.content_rect();
     let margin = 20;
-    let width = (screen.width() - 64.0 - 2.0 * margin as f32).clamp(320.0, 960.0);
+    let max_width = if reviewing { 1400.0 } else { 960.0 };
+    let width = (screen.width() - 64.0 - 2.0 * margin as f32).clamp(320.0, max_width);
     let max_h = (screen.height() - 96.0).max(200.0);
     let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(margin);
     let resp = egui::Modal::new(egui::Id::new("results_dialog"))
@@ -45,10 +59,19 @@ pub fn results_dialog(
             ui.set_width(width);
             theme::title_label(ui, title);
             ui.add_space(6.0);
+            if let Some(tab) = tab.as_deref_mut() {
+                ui.horizontal(|ui| {
+                    selectable_value(ui, tab, ResultsTab::Stats, "Statistics");
+                    selectable_value(ui, tab, ResultsTab::Review, "Score + Audio");
+                });
+                ui.add_space(8.0);
+            }
+            let shown = tab.as_deref().copied().unwrap_or_default();
             egui::ScrollArea::vertical()
-                .max_height(max_h - 80.0)
+                .id_salt(shown)
+                .max_height(max_h - 110.0)
                 .auto_shrink([false, true])
-                .show(ui, add);
+                .show(ui, |ui| add(ui, shown));
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add(button("Close").min_size([96.0, 30.0])).clicked()
@@ -58,7 +81,7 @@ pub fn results_dialog(
     // Space closes too (and is used up), so a second Space starts the next session.
     let space = !ctx.egui_wants_keyboard_input()
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
-    let close = resp.inner || space || resp.should_close();
+    let close = resp.inner || space || (!busy && resp.should_close());
     if close {
         *open = false;
     } else {
@@ -204,7 +227,7 @@ pub fn results(
                 spread.map_or(theme::dim(), |s| th_color(th, s)),
             );
         });
-        group(ui, "Note length", |ui| {
+        group(ui, "Notes", |ui| {
             tile(
                 ui,
                 "Length",
@@ -431,13 +454,16 @@ fn accuracy_timeline(ui: &mut egui::Ui, bars: &[BarStats], height: f32) {
             y_of(r),
             Stroke::new(1.0, c.gamma_multiply(0.4)),
         );
-        p.text(
-            Pos2::new(plot.left() - 4.0, y_of(r)),
-            Align2::RIGHT_CENTER,
-            format!("{:.0}%", r * 100.0),
-            axis_font.clone(),
-            theme::dim(),
-        );
+        // 100% should just be a line, no label (too close to 90%)
+        if r < 1.0 {
+            p.text(
+                Pos2::new(plot.left() - 4.0, y_of(r)),
+                Align2::RIGHT_CENTER,
+                format!("{:.0}%", r * 100.0),
+                axis_font.clone(),
+                theme::dim(),
+            );
+        }
     }
     p.hline(
         plot.x_range(),
@@ -473,8 +499,8 @@ fn accuracy_timeline(ui: &mut egui::Ui, bars: &[BarStats], height: f32) {
         // Stacked from the bottom: good, then ok (together the hit rate), then poor,
         // fainter, as it is not a hit. Missed notes leave the rest empty.
         let mut y = plot.bottom();
-        // for (g, alpha) in [(Grade::Good, 0.8), (Grade::Ok, 0.8), (Grade::Poor, 0.35)] {
-        for (g, alpha) in [(Grade::Good, 0.8), (Grade::Ok, 0.8)] {
+        for (g, alpha) in [(Grade::Good, 0.8), (Grade::Ok, 0.8), (Grade::Poor, 0.35)] {
+            // for (g, alpha) in [(Grade::Good, 0.8), (Grade::Ok, 0.8)] {
             let n = b.counts[g as usize];
             if n == 0 {
                 continue;

@@ -36,7 +36,7 @@ The packer cuts the silence before each attack (so notes sound on time), trims t
 
 At startup the app registers every `.sf2` in, in this order: the user's folder (`<config dir>/soundfonts`), `soundfonts/` next to the executable, `../Resources/soundfonts` (macOS app bundle) and `assets/soundfonts` in the source tree. When packaging, copy `assets/soundfonts` next to the executable (or into the bundle's `Resources`). Fonts load on first use; the first preset of each file is played.
 
-Debugging aid: `BASS_GYM_SCREENSHOT=<file.ppm>` saves the window after 2 s and quits; `BASS_GYM_SIZE=<w>x<h>`, `BASS_GYM_EXERCISE=<id>` and `BASS_GYM_PREFS=<page id>` set up what is shown (in screenshot mode the preferences are drawn inside the main window).
+Debugging aid: `BASS_GYM_SCREENSHOT=<file.ppm>` saves the window after 2 s and quits; `BASS_GYM_SIZE=<w>x<h>`, `BASS_GYM_EXERCISE=<id>` and `BASS_GYM_PREFS=<page id>` set up what is shown (in screenshot mode the preferences are drawn inside the main window). `BASS_GYM_FAKE_SESSION=1` runs a made-up session and opens its Score + Audio tab (`=editor` goes on to the marker editor).
 
 ## Extending
 

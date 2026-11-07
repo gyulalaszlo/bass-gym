@@ -65,7 +65,7 @@ impl StaffLayout {
 
 /// Where the staff lines begin, left of the axis, to fit the clef and time signature.
 pub fn lead_width(spacing: f32, clef: bool) -> f32 {
-    (if clef { 3.2 } else { 0.5 } + 2.0) * spacing
+    (if clef { 3.8 } else { 0.5 } + 2.2) * spacing
 }
 
 pub struct ScoreView<'a> {
@@ -140,7 +140,7 @@ impl Draw<'_> {
         let mut x = rect.left() + 0.4 * self.sp;
         if lead.clef {
             self.glyph(F_CLEF, x, self.y(6), color);
-            x += 3.0 * self.sp;
+            x += 3.6 * self.sp;
         }
         for (n, pos) in [(lead.sig.num, 6), (lead.sig.den, 2)] {
             let mut digit_x = x;

@@ -339,7 +339,9 @@ impl MarkerEditor<'_> {
     }
 }
 
-fn paint_marker(p: &egui::Painter, axis: TimeAxis, m: &Marker, rect: Rect, wave: Rect) {
+/// Paints a marker over `wave`. Dotted lines reach up to the top of `rect`, so they can
+/// run through whatever sits above the waveform.
+pub fn paint_marker(p: &egui::Painter, axis: TimeAxis, m: &Marker, rect: Rect, wave: Rect) {
     let x = axis.x(m.time);
     match m.line {
         Line::Solid => {

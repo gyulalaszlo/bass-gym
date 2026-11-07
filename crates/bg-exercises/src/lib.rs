@@ -3,6 +3,7 @@
 
 pub mod basic_chords;
 pub mod basic_timing;
+mod fake_session;
 pub mod timing_session;
 
 use bg_ui::ExerciseType;

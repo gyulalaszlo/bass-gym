@@ -133,6 +133,15 @@ impl BassGymApp {
             screenshot: std::env::var_os("BASS_GYM_SCREENSHOT")
                 .map(|p| (PathBuf::from(p), std::time::Instant::now(), false)),
         };
+        if std::env::var_os("BASS_GYM_FAKE_SESSION").is_some()
+            && let Some(slot) = app.slots.get_mut(app.selected)
+        {
+            slot.et.debug_fake_session(&mut ExerciseCtx {
+                engine: &mut app.engine,
+                settings: &mut app.settings,
+                scoring: &app.scoring,
+            });
+        }
         if let Some(page) = std::env::var("BASS_GYM_PREFS")
             .ok()
             .and_then(|id| app.pages.iter().position(|p| p.id() == id))

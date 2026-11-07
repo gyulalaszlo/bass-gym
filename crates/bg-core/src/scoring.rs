@@ -304,6 +304,16 @@ impl Matcher {
         }
     }
 
+    /// Forgets the expected notes from index `keep` on (planned but never reached). Notes
+    /// played early for one of them become extra notes.
+    pub fn truncate_expected(&mut self, keep: usize) {
+        self.expected.truncate(keep);
+        self.outcomes.truncate(keep);
+        for p in &mut self.played {
+            p.matched = p.matched.filter(|&i| i < keep);
+        }
+    }
+
     /// Advances time, marking expected notes whose window passed unplayed as missed.
     pub fn update(&mut self, now: f64) {
         self.now = now;
@@ -560,6 +570,18 @@ mod tests {
         let bars: Vec<BarPlan> = (0..2).map(|_| p.next_bar(&()).unwrap()).collect();
         bars.iter().for_each(|b| m.add_bar(b));
         (m, bars)
+    }
+
+    #[test]
+    fn truncating_unmatches_notes_played_early() {
+        let (mut m, _) = setup();
+        let on_time = m.on_onset(0.0, -10.0);
+        let early = m.on_onset(0.45, -10.0); // Matches the target at 0.5.
+        assert_eq!(m.played[early].matched, Some(1));
+        m.truncate_expected(1);
+        assert_eq!(m.played[on_time].matched, Some(0));
+        assert_eq!(m.played[early].matched, None);
+        assert_eq!((m.expected.len(), m.outcomes.len()), (1, 1));
     }
 
     #[test]

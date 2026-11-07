@@ -6,7 +6,8 @@
 // bg-core/src/plan.rs
 pub struct BarPlan {
     pub index: i64,  // negative = count-in
-    pub start: f64, pub duration: f64, pub bpm: f32, pub beats: u32, pub muted: bool,
+    pub start: f64, pub duration: f64, pub bpm: f32, pub beats: u32,
+    pub sig: TimeSignature, pub steps_per_beat: u32, pub muted: bool,
     pub clicks: Vec<PlannedClick>, pub notes: Vec<PlannedNote>,
 }
 // PlannedNote is { time, len, accent }, in seconds.
@@ -83,8 +84,8 @@ Transport time resets when the output stream is rebuilt.
   decided when the bar is planned (up to ~2 bars ahead). There are no continuous ramps.
 - `Trigger::Success` depends on performance, and `new_seed_each_start` changes the seed.
   To replay a session, use logged data, not a re-run of `Planner`.
-- `bpm` refers to the signature's beat unit. `TimeSignature` and `steps_per_beat` exist
-  only in `SessionConfig` (`bg-core/src/session.rs`).
+- `bpm` refers to the signature's beat unit. Each `BarPlan` carries its `sig` and
+  `steps_per_beat` (from `SessionConfig.time_sig` and `.groove`).
 - The UI shows bar `index + 1`.
 
 ## Grading (`bg-core/src/scoring.rs`)
@@ -99,7 +100,8 @@ Transport time resets when the output stream is rebuilt.
 
 - **There are no expected pitches.** `Expected` is rhythm only, so a wrong note can only
   mean a clash with the current chord, which exists only in Basic chords.
-- `Played.freq` is the only pitch data. Convert with `music.rs::freq_to_midi(freq, a4)`.
+- `Played.freq` is the only pitch data. It's stored as soon as early pitch detection
+  reports, with or without an accompaniment. Convert with `music.rs::freq_to_midi(freq, a4)`.
   `a4` comes from `TunerPrefs`. `freq` can stay `None`.
 - `harmony` is the checker's score: 1 chord tone, 0.5 passing, 0 clash. `harmony_grade`
   maps it to Good, Ok or Poor.
@@ -124,10 +126,9 @@ the config changes (`has_results = false`).
 
 ## Pitfalls
 
-- `TimingSession::stop` truncates `expected` / `outcomes` but can leave `played[].matched`
-  pointing past the end. Use `.get(i)`.
-- The worker takes the timing lock then the chords lock, so UI code must not hold them
-  the other way round. Take chord data first and release it.
+- `Matcher::truncate_expected` clears `played[].matched` values past the cut, but still
+  prefer `.get(i)` on matcher indices.
+- The worker takes the timing lock and the chords lock separately (`TimingSession::judge`
+  releases one before the other). Never hold both: take chord data first and release it.
 - `shared.running = false` happens inside `stop`, before the accompaniment trims chords.
   Wait for `!engine.session_running()` before reading final session data.
-- `Clock::now` is 0 once stopped, so `stop` during a rebuild can see `io.now == 0`.

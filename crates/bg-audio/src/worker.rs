@@ -138,6 +138,7 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
     let mut session: Option<Box<dyn SessionLogic>> = None;
     let mut buf: Vec<f32> = Vec::with_capacity(8192);
     let mut events: Vec<NoteEvent> = Vec::new();
+    let mut last_now = 0.0;
 
     loop {
         loop {
@@ -176,15 +177,15 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                 }
                 Ok(WorkerCmd::Start(mut logic)) => {
                     if let Some(mut old) = session.take() {
-                        old.stop(&mut io(&clock, &cfg, &mut out));
+                        old.stop(&mut io(&clock, &cfg, &mut out, &mut last_now));
                     }
-                    logic.start(&mut io(&clock, &cfg, &mut out));
+                    logic.start(&mut io(&clock, &cfg, &mut out, &mut last_now));
                     session = Some(logic);
                     shared.session_running.store(true, Ordering::Release);
                 }
                 Ok(WorkerCmd::Stop) => {
                     if let Some(mut logic) = session.take() {
-                        logic.stop(&mut io(&clock, &cfg, &mut out));
+                        logic.stop(&mut io(&clock, &cfg, &mut out, &mut last_now));
                     }
                     shared.session_running.store(false, Ordering::Release);
                 }
@@ -304,7 +305,7 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
         }
 
         if let Some(logic) = session.as_mut() {
-            let mut io = io(&clock, &cfg, &mut out);
+            let mut io = io(&clock, &cfg, &mut out, &mut last_now);
             if logic.tick(&mut io) == SessionState::Finished {
                 logic.stop(&mut io);
                 session = None;
@@ -320,9 +321,10 @@ fn io<'a>(
     clock: &Clock,
     cfg: &AnalysisConfig,
     out: &'a mut Option<Producer<OutMsg>>,
+    last_now: &mut f64,
 ) -> SessionIo<'a> {
     SessionIo {
-        now: clock.now(),
+        now: transport_now(clock, last_now),
         latency: cfg.total_latency(),
         out: if clock.is_running() {
             out.as_mut()
@@ -330,6 +332,17 @@ fn io<'a>(
             None
         },
     }
+}
+
+/// The current transport time, or the last one seen once output has stopped (the clock
+/// then reads 0, which would make a session ending in a device rebuild look like it
+/// never started). Reads the time first: if the clock stops in between, it isn't kept.
+fn transport_now(clock: &Clock, last_now: &mut f64) -> f64 {
+    let now = clock.now();
+    if clock.is_running() {
+        *last_now = now;
+    }
+    *last_now
 }
 
 fn publish_tuner(shared: &WorkerShared, recent: &mut Vec<f32>, r: Option<PitchReading>) {
@@ -364,4 +377,26 @@ fn median(v: &mut [f32]) -> Option<f32> {
     }
     v.sort_by(f32::total_cmp);
     Some(v[v.len() / 2])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::ClockSnapshot;
+
+    #[test]
+    fn transport_time_survives_the_clock_stopping() {
+        let clock = Clock::default();
+        let mut last = 0.0;
+        clock.publish(ClockSnapshot {
+            frames: 96_000,
+            sample_rate: 48_000,
+            ..Default::default()
+        });
+        let running = transport_now(&clock, &mut last);
+        assert!(running >= 2.0);
+        clock.set_stopped();
+        assert_eq!(clock.now(), 0.0);
+        assert_eq!(transport_now(&clock, &mut last), running);
+    }
 }

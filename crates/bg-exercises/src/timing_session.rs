@@ -89,18 +89,21 @@ impl TimingSession {
         }
     }
 
-    /// Judges the pitch of played note `i` (at its target's time when matched).
+    /// Stores the pitch of played note `i` and, with an accompaniment, judges it (at its
+    /// target's time when matched). The timing lock is released while judging: the
+    /// accompaniment takes the chord lock, and the UI may hold that one first.
     fn judge(&self, i: usize, freq: f32) {
-        let Some((acc, _)) = &self.accompaniment else {
-            return;
-        };
         let mut shared = lock(&self.shared);
         let m = &shared.matcher;
         let Some(p) = m.played.get(i) else { return };
-        let time = p.matched.map_or(p.onset, |e| m.expected[e].time);
-        let score = acc.judge(time, freq);
+        let target = p.matched.and_then(|e| m.expected.get(e));
+        let time = target.map_or(p.onset, |e| e.time);
         shared.matcher.played[i].freq = Some(freq);
-        shared.matcher.on_pitch(i, score);
+        drop(shared);
+        if let Some((acc, _)) = &self.accompaniment {
+            let score = acc.judge(time, freq);
+            lock(&self.shared).matcher.on_pitch(i, score);
+        }
     }
 }
 
@@ -207,8 +210,7 @@ impl SessionLogic for TimingSession {
         // Drop notes that were planned but never reached.
         let now = io.now;
         let keep = shared.matcher.expected.partition_point(|e| e.time <= now);
-        shared.matcher.expected.truncate(keep);
-        shared.matcher.outcomes.truncate(keep);
+        shared.matcher.truncate_expected(keep);
         shared.bars.retain(|b| b.start <= now);
         shared.running = false;
         drop(shared);

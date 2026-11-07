@@ -212,3 +212,19 @@ fn stops_when_player_stops() {
     }
     assert!((t - 6.3).abs() < 0.05, "stopped at {t}");
 }
+
+#[test]
+fn early_pitch_is_stored_without_an_accompaniment() {
+    let cfg = SessionConfig {
+        tempo: 120.0,
+        count_in_bars: 0,
+        ..Default::default()
+    };
+    let shared = SharedTiming::default();
+    let mut session = TimingSession::new(cfg, ScoringThresholds::default(), shared.clone());
+    session.start(&mut SessionIo::offline(0.0, 0.0));
+    session.tick(&mut SessionIo::offline(0.0, 0.0));
+    session.note_on(0.3, -10.0);
+    session.note_pitch(0.3, 41.2);
+    assert_eq!(lock(&shared).matcher.played[0].freq, Some(41.2));
+}

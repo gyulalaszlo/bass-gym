@@ -1,6 +1,7 @@
 //! Bar-by-bar session planning: turns a [`SessionConfig`] into concrete, timed bars,
 //! applying count-in, tempo ramps, click gaps and auto-stop.
 
+use crate::music::TimeSignature;
 use crate::session::{ClickGap, SessionConfig, Span, StopCondition, Trigger};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +32,9 @@ pub struct BarPlan {
     pub duration: f64,
     pub bpm: f32,
     pub beats: u32,
+    pub sig: TimeSignature,
+    /// Groove grid resolution, for placing notes on steps.
+    pub steps_per_beat: u32,
     /// Clicks are silenced in this bar by the click-gap cycle.
     pub muted: bool,
     /// Clicks to play (already filtered by `muted` and the click config).
@@ -188,6 +192,8 @@ impl Planner {
             duration,
             bpm: self.bpm,
             beats: sig.num,
+            sig,
+            steps_per_beat: self.cfg.groove.steps_per_beat.max(1),
             muted,
             clicks,
             notes,
@@ -343,6 +349,8 @@ mod tests {
         assert_eq!(bars[1].notes.len(), 4);
         assert!((bars[1].notes[1].time - 3.5).abs() < 1e-9);
         assert_eq!(bars[1].clicks[0].kind, ClickKind::Accent);
+        assert_eq!(bars[1].sig, TimeSignature::default());
+        assert!(bars[1].steps_per_beat >= 1);
         assert_eq!(bars[1].clicks[1].kind, ClickKind::Beat);
     }
 

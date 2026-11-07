@@ -90,7 +90,8 @@ raw, unfiltered mono audio.
 
 Transport time is `output frame index / sample rate`, running since the stream opened,
 not since the session. `Clock::now()` is the time currently heard. It returns 0 once
-the clock is stopped.
+the clock is stopped, so the worker's `transport_now` keeps the last running value for
+`SessionIo.now`.
 
 Latency has three layers:
 1. **Output:** `now()` subtracts `playback - callback`.

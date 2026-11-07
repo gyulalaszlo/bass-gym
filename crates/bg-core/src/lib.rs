@@ -6,6 +6,7 @@ pub mod harmony;
 pub mod music;
 pub mod plan;
 pub mod preset;
+pub mod score;
 pub mod scoring;
 pub mod session;
 

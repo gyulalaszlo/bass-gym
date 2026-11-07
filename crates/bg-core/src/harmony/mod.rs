@@ -91,6 +91,14 @@ impl Scale {
         format!("{} {}", note_name(self.root as i32), self.mode.label())
     }
 
+    /// Whether this scale's key signature is written with flats (judged by its parent
+    /// major key), for spelling notes.
+    pub fn prefers_flats(&self) -> bool {
+        let above_parent: u8 = MAJOR_STEPS[..self.mode.rotation()].iter().sum();
+        let parent = (self.root % 12 + 12 - above_parent) % 12;
+        matches!(parent, 1 | 3 | 5 | 6 | 8 | 10)
+    }
+
     /// Diatonic triad or seventh chord on `degree` (0-based).
     pub fn chord(&self, degree: usize, sevenths: bool) -> Chord {
         self.realize(ChordSpec {

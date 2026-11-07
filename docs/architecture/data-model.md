@@ -109,6 +109,25 @@ Transport time resets when the output stream is rebuilt.
   matched, otherwise at the onset (as `accompaniment.rs::judge` does).
 - `music.rs::note_name` is sharps only. `PPQ = 960`.
 
+## Score (`bg-core/src/score.rs`)
+
+`score::build(&ScoreInput)` turns bars and played notes into `ScoreBar`s of notes and
+rests. It's pure, so all notation rules are tested there and painters stay simple.
+
+- Noteheads sit on the step grid, not at the played time. A matched note takes its
+  target's position and length; an extra rounds to the nearest free step.
+- One voice: a note ends where the next starts. Ties split notes at barlines and where
+  no single value fits. On tuplet grids (`steps_per_beat` not a power of two) whole
+  beats are written plainly and only parts of a beat as tuplets.
+- Bass is written an octave up. `StaffPitch.pos` counts lines and spaces from the bottom
+  line (written G2): open E is -2, open G 7.
+- No key signature: every altered note has an accidental, spelled by
+  `Scale::prefers_flats`, sharps when there's no scale.
+- `clash` means the note's harmony score grades Poor. Without chords nothing clashes.
+- `chord_marks` stack the chord within an octave from the nearest root at or below the
+  note. `ScoreChord` is the neutral chord form, since bg-core can't name `ChordSpan`.
+- `until` stops rests at the current time for the live view.
+
 ## What survives a session
 
 Everything lives in memory and is replaced by `SessionLogic::start`. It's hidden when

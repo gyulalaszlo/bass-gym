@@ -12,6 +12,7 @@ bg-core = { path = "crates/bg-core" }
 bg-dsp = { path = "crates/bg-dsp" }
 bg-sound = { path = "crates/bg-sound" }
 bg-audio = { path = "crates/bg-audio" }
+bg-report = { path = "crates/bg-report" }
 bg-ui = { path = "crates/bg-ui" }
 bg-exercises = { path = "crates/bg-exercises" }
 

@@ -24,7 +24,7 @@ use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
 use bg_ui::widgets::performance::performance_strip;
 use bg_ui::widgets::results::{ResultsTab, block, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
-use bg_ui::widgets::session_review::{ReviewInput, SessionReview};
+use bg_ui::widgets::session_review::{ReviewInput, SessionReview, report_settings};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{ExerciseCtx, ExerciseType, PreferencePage, egui, icons, theme};
@@ -437,9 +437,10 @@ impl ExerciseType for BasicChords {
         let tab = review.is_some().then_some(&mut results_tab);
         let scoring = ctx.scoring;
         let engine = &mut *ctx.engine;
+        let data_dir = ctx.data_dir;
         results_dialog(ui.ctx(), &mut open, "Results", tab, |ui, tab| {
             match (tab, review.as_mut(), &stats) {
-                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine),
+                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir),
                 (_, _, Some(stats)) => results(ui, stats, scoring, |ui| {
                     block(ui, "Per chord", |ui| self.per_chord_table(ui))
                 }),
@@ -490,6 +491,7 @@ impl BasicChords {
                 label: self.chord_label(&s.chord),
             })
             .collect();
+        let settings = report_settings(ctx, self.save_preset());
         let shared = lock(&self.timing);
         self.review = Some(SessionReview::new(ReviewInput {
             bars: shared.bars.clone(),
@@ -498,6 +500,8 @@ impl BasicChords {
             scale: Some(self.data.scale),
             a4: self.a4,
             recording,
+            exercise: self.id().to_owned(),
+            settings,
         }));
     }
 

@@ -2,6 +2,7 @@
 //! preference-page plug-in interfaces, settings storage and reusable widgets.
 
 pub mod exercise;
+pub mod folder;
 pub mod prefs;
 pub mod recording;
 pub mod settings;

@@ -220,6 +220,11 @@ pub enum NoteEvent {
 
 ## File formats
 
-As of `a51c39f`, no code writes WAV or MIDI, and there's no zip or file dialog crate.
+`crates/bg-report` writes reports: `audio.wav` (hound, float), `report.json` and
+`click_chords.mid` (midly), into `<data dir>/reports/<stamp>_bars-a-b/` plus a `.zip`
+(zip). Bars are padded by `PADDING`. Every time is seconds from the WAV start, found with
+`Region::rel` through the recording's time map. MIDI uses one fixed tempo so event times
+stay exact; real tempos are in the JSON. Bump `FORMAT_VERSION` if the JSON layout changes.
+
 `sf2pack` has private RIFF chunk writing and uses `claxon` for FLAC. There's no MP3
-decoder. `pages.rs::open_folder` is the only folder helper.
+decoder.

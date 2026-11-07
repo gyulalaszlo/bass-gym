@@ -7,6 +7,11 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+/// Settings tables of the audio engine.
+pub const AUDIO: &str = "audio";
+pub const SOUNDS: &str = "sounds";
+pub const ANALYSIS: &str = "analysis";
+
 pub struct SettingsStore {
     path: Option<PathBuf>,
     table: toml::Table,

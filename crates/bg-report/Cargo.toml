@@ -1,0 +1,17 @@
+[package]
+name = "bg-report"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bg-core.workspace = true
+bg-audio.workspace = true
+bg-sound.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+hound = "3.5"
+midly = { version = "0.5", default-features = false, features = ["alloc", "std"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }

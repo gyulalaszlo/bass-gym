@@ -18,6 +18,7 @@ pub struct ExerciseCtx<'a> {
     pub engine: &'a mut AudioEngine,
     pub settings: &'a mut SettingsStore,
     pub scoring: &'a ScoringThresholds,
+    pub data_dir: Option<&'a Path>,
 }
 ```
 
@@ -149,6 +150,8 @@ released with `has_results`.
   row keeps the scale of full rows. Rows are culled with `is_rect_visible`.
 - Click the score to select a bar (Shift extends); click the waveform to open
   `MarkerEditor` around that time.
+- Export runs `bg_report::export` on a thread and polls the result. `ReviewInput.settings`
+  comes from `report_settings`, taken when the session ended.
 - `tick` must run every frame: it stops a replay when the dialog closes and releases the
   playback voice.
 

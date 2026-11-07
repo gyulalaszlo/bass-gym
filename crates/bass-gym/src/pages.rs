@@ -8,6 +8,7 @@ use bg_audio::{
 };
 use bg_core::ScoringThresholds;
 use bg_sound::SoundRole;
+use bg_ui::folder::open_folder;
 use bg_ui::recording::{MAX_MB_RANGE, RecordingPrefs};
 use bg_ui::theme::{PRESETS, Palette, Rgb, ThemePrefs};
 use bg_ui::view::{ViewPrefs, ZOOM_STEPS};
@@ -17,9 +18,7 @@ use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{PreferencePage, PrefsCtx, egui, icons, theme};
 use egui::{RichText, Slider};
 
-pub const AUDIO: &str = "audio";
-pub const SOUNDS: &str = "sounds";
-pub const ANALYSIS: &str = "analysis";
+pub use bg_ui::settings::{ANALYSIS, AUDIO, SOUNDS};
 pub const SCORING: &str = "scoring";
 
 pub fn builtin() -> Vec<Box<dyn PreferencePage>> {
@@ -343,19 +342,6 @@ fn lowpass_slider(ui: &mut egui::Ui, sounds: &mut SoundConfig) {
         sounds
             .instrument_lowpass
             .insert(sounds.instrument.clone(), 400.0 * 2f32.powf(pos));
-    }
-}
-
-fn open_folder(dir: &std::path::Path) {
-    let cmd = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(target_os = "windows") {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    if let Err(e) = std::process::Command::new(cmd).arg(dir).spawn() {
-        log::warn!("couldn't open {}: {e}", dir.display());
     }
 }
 

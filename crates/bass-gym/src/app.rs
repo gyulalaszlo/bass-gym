@@ -45,6 +45,7 @@ pub struct BassGymApp {
     settings: SettingsStore,
     store: PresetStore,
     state_path: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
     slots: Vec<ExerciseSlot>,
     selected: usize,
     preset_bar: PresetBar,
@@ -117,6 +118,7 @@ impl BassGymApp {
             settings,
             store,
             state_path,
+            data_dir: dirs.as_ref().map(|d| d.data_dir().to_path_buf()),
             slots,
             selected,
             preset_bar: PresetBar::default(),
@@ -140,6 +142,7 @@ impl BassGymApp {
                 engine: &mut app.engine,
                 settings: &mut app.settings,
                 scoring: &app.scoring,
+                data_dir: app.data_dir.as_deref(),
             });
         }
         if let Some(page) = std::env::var("BASS_GYM_PREFS")
@@ -471,6 +474,7 @@ impl eframe::App for BassGymApp {
                         engine: &mut self.engine,
                         settings: &mut self.settings,
                         scoring: &self.scoring,
+                        data_dir: self.data_dir.as_deref(),
                     };
                     // The Exercise Control Toolbar stays put; only the exercise area scrolls.
                     show_toolbar(ui, |tb| slot.et.toolbar(tb, &mut ectx));

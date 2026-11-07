@@ -1,5 +1,7 @@
 //! The exercise-type plug-in interface.
 
+use std::path::Path;
+
 use anyhow::Result;
 use bg_audio::AudioEngine;
 use bg_core::ScoringThresholds;
@@ -15,6 +17,8 @@ pub struct ExerciseCtx<'a> {
     pub engine: &'a mut AudioEngine,
     pub settings: &'a mut SettingsStore,
     pub scoring: &'a ScoringThresholds,
+    /// Where reports and other user data go, if there's such a place.
+    pub data_dir: Option<&'a Path>,
 }
 
 /// An exercise type: its UI, logic and preset data.

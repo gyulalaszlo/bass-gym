@@ -2,20 +2,26 @@
 //! waveform, with playback and a marker editor. State lives here, on the exercise, so it
 //! outlasts the dialog; it's released with the session's results.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use bg_audio::{AudioEngine, Recording, ReplayHandle};
+use bg_audio::{AnalysisConfig, AudioConfig, AudioEngine, Recording, ReplayHandle, SoundConfig};
 use bg_core::harmony::Scale;
 use bg_core::score::{self, ScoreBar, ScoreChord, ScoreInput};
 use bg_core::{BarPlan, Matcher};
+use bg_report::{Annotation, Exported, ReportInput};
 use egui::{
     Align2, Color32, Key, Modifiers, Rangef, Rect, RichText, Sense, Stroke, StrokeKind, vec2,
 };
 
+use crate::exercise::ExerciseCtx;
+use crate::folder::open_folder;
 use crate::icons;
+use crate::settings::{ANALYSIS, AUDIO, SOUNDS};
 use crate::theme::{self, mono};
 use crate::widgets::button::button;
-use crate::widgets::controls::{checkbox, number_field};
+use crate::widgets::controls::{checkbox, number_field, text_field};
 use crate::widgets::marker_editor::{
     EditorState, Line, Marker, MarkerEditor, WaveView, paint_marker,
 };
@@ -42,6 +48,36 @@ pub struct ReviewInput {
     pub scale: Option<Scale>,
     pub a4: f32,
     pub recording: Arc<Recording>,
+    /// The exercise's id.
+    pub exercise: String,
+    /// Settings to put in reports; see [`report_settings`].
+    pub settings: serde_json::Value,
+}
+
+/// The settings a report should record: the exercise's own, and those of the app.
+pub fn report_settings(ctx: &ExerciseCtx, exercise: serde_json::Value) -> serde_json::Value {
+    let status = ctx.engine.status();
+    serde_json::json!({
+        "exercise": exercise,
+        "scoring": ctx.scoring,
+        "analysis": ctx.settings.get::<AnalysisConfig>(ANALYSIS),
+        "audio": ctx.settings.get::<AudioConfig>(AUDIO),
+        "sounds": ctx.settings.get::<SoundConfig>(SOUNDS),
+        "devices": {
+            "input": status.input,
+            "output": status.output,
+            "input_rate": status.input_rate,
+            "output_rate": status.output_rate,
+        },
+    })
+}
+
+/// How the latest export went.
+enum ExportState {
+    Idle,
+    Running(Receiver<Result<Exported, String>>),
+    Done(PathBuf),
+    Failed(String),
 }
 
 /// A recording as a [`PeakSource`] on the transport timeline.
@@ -145,6 +181,9 @@ pub struct SessionReview {
     pub markers: Vec<Marker>,
     next_marker: u64,
     editor: Option<EditorState>,
+    report_title: String,
+    report_notes: String,
+    export: ExportState,
 }
 
 impl SessionReview {
@@ -180,6 +219,9 @@ impl SessionReview {
             markers: Vec::new(),
             next_marker: 1 << 32,
             editor: None,
+            report_title: String::new(),
+            report_notes: String::new(),
+            export: ExportState::Idle,
             input,
         };
         review.debug_open_editor();
@@ -252,7 +294,121 @@ impl SessionReview {
         self.replay.as_ref()?.position(engine.clock().now())
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, engine: &mut AudioEngine) {
+    /// What a report of the selected bars is made from.
+    fn report_input(&self) -> Option<ReportInput> {
+        let (from, to) = self.selected_range()?;
+        let i = &self.input;
+        Some(ReportInput {
+            title: self.report_title.clone(),
+            notes: self.report_notes.clone(),
+            exercise: i.exercise.clone(),
+            settings: i.settings.clone(),
+            a4: i.a4,
+            recording: i.recording.clone(),
+            bars: i.bars.clone(),
+            matcher: i.matcher.clone(),
+            chords: i.chords.clone(),
+            annotations: self
+                .markers
+                .iter()
+                .map(|m| Annotation {
+                    time: m.time,
+                    text: m.label.clone(),
+                })
+                .collect(),
+            first_bar: self.from_bar,
+            last_bar: self.to_bar,
+            from,
+            to,
+        })
+    }
+
+    /// Writes the report on a thread of its own: a long session can take a while to zip.
+    fn start_export(&mut self, data_dir: &Path) {
+        let Some(input) = self.report_input() else {
+            return;
+        };
+        let reports = data_dir.join("reports");
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let result = bg_report::export(&input, &reports).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(result);
+        });
+        self.export = ExportState::Running(rx);
+    }
+
+    fn poll_export(&mut self) {
+        if let ExportState::Running(rx) = &self.export {
+            match rx.try_recv() {
+                Ok(Ok(out)) => self.export = ExportState::Done(out.folder),
+                Ok(Err(e)) => self.export = ExportState::Failed(e),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.export = ExportState::Failed("the export stopped unexpectedly".into());
+                }
+            }
+        }
+    }
+
+    fn report_row(&mut self, ui: &mut egui::Ui, data_dir: Option<&Path>) {
+        self.poll_export();
+        let running = matches!(self.export, ExportState::Running(_));
+        ui.horizontal(|ui| {
+            let export_width = 190.0;
+            ui.add(
+                text_field(&mut self.report_title)
+                    .width(220.0)
+                    .hint("Report title"),
+            );
+            let notes = ui.available_width() - export_width - 12.0;
+            ui.add(
+                text_field(&mut self.report_notes)
+                    .width(notes.max(120.0))
+                    .hint("What went wrong?"),
+            );
+            let export = ui.add_enabled(
+                data_dir.is_some() && !running,
+                button("Export selected bars").min_size([export_width, 30.0]),
+            );
+            if export.clicked()
+                && let Some(dir) = data_dir
+            {
+                self.start_export(dir);
+            }
+        });
+        match &self.export {
+            ExportState::Idle => {}
+            ExportState::Running(_) => {
+                ui.ctx().request_repaint();
+                ui.label(RichText::new("Exporting...").small().color(theme::dim()));
+            }
+            ExportState::Failed(e) => {
+                ui.label(
+                    RichText::new(format!("Export failed: {e}"))
+                        .small()
+                        .color(theme::red()),
+                );
+            }
+            ExportState::Done(folder) => {
+                let folder = folder.clone();
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("Saved to {} (and as .zip)", folder.display()))
+                            .small()
+                            .color(theme::green()),
+                    );
+                    if ui
+                        .add(button(format!("{} Open folder", icons::FOLDER_OPEN)).small())
+                        .clicked()
+                    {
+                        open_folder(&folder);
+                    }
+                });
+            }
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, engine: &mut AudioEngine, data_dir: Option<&Path>) {
         if !ui.ctx().egui_wants_keyboard_input()
             && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Space))
         {
@@ -262,6 +418,8 @@ impl SessionReview {
             ui.ctx().request_repaint();
         }
         self.controls(ui, engine);
+        ui.add_space(6.0);
+        self.report_row(ui, data_dir);
         ui.add_space(10.0);
         let playhead = self.playhead(engine);
         if self.editor.is_some() {

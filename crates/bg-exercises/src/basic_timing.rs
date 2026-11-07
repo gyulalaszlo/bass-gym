@@ -11,7 +11,7 @@ use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::performance::performance_strip;
 use bg_ui::widgets::results::{ResultsTab, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
-use bg_ui::widgets::session_review::{ReviewInput, SessionReview};
+use bg_ui::widgets::session_review::{ReviewInput, SessionReview, report_settings};
 use bg_ui::widgets::toolbar::{Gap, Toolbar};
 use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{ExerciseCtx, ExerciseType, egui, icons, theme};
@@ -233,6 +233,7 @@ impl ExerciseType for BasicTiming {
             .then(|| lock(&self.shared).matcher.stats());
         let scoring = ctx.scoring;
         let engine = &mut *ctx.engine;
+        let data_dir = ctx.data_dir;
         let review = &mut self.review;
         let tab = review.is_some().then_some(&mut self.results_tab);
         results_dialog(
@@ -241,7 +242,7 @@ impl ExerciseType for BasicTiming {
             "Results",
             tab,
             |ui, tab| match (tab, review.as_mut(), &stats) {
-                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine),
+                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir),
                 (_, _, Some(stats)) => results(ui, stats, scoring, |_| {}),
                 _ => {}
             },
@@ -272,6 +273,7 @@ impl BasicTiming {
         let Some(recording) = self.capture.recording() else {
             return;
         };
+        let settings = report_settings(ctx, self.save_preset());
         let shared = lock(&self.shared);
         self.review = Some(SessionReview::new(ReviewInput {
             bars: shared.bars.clone(),
@@ -280,6 +282,8 @@ impl BasicTiming {
             scale: None,
             a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
             recording: recording.clone(),
+            exercise: self.id().to_owned(),
+            settings,
         }));
     }
 }

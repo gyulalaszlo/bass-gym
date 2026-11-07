@@ -2,6 +2,7 @@
 //! [`SoundSource`]: built-in synthesized voices, plus SoundFont instruments found on disk
 //! ([`register_soundfonts`]).
 
+mod sample;
 mod soundfont;
 mod synth;
 
@@ -10,6 +11,7 @@ use std::sync::RwLock;
 
 use bg_core::plan::ClickKind;
 
+pub use sample::{SampleBuffer, SampleVoice, SampleWriter};
 pub use soundfont::{SoundFontSource, SoundFontVoice, find_soundfonts};
 pub use synth::{FmPiano, PluckBass, SineClick, Woodblock};
 

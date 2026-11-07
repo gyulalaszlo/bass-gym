@@ -3,6 +3,7 @@
 use anyhow::Result;
 use bg_core::SessionConfig;
 use bg_core::preset::{PresetError, PresetSchema};
+use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::performance::performance_strip;
@@ -51,6 +52,7 @@ pub struct BasicTiming {
     show_results: bool,
     /// Running on the previous frame (to open the results when the session ends).
     was_running: bool,
+    capture: SessionCapture,
 }
 
 impl PresetSchema for BasicTiming {
@@ -105,6 +107,10 @@ impl ExerciseType for BasicTiming {
             self.show_results = true;
         }
         self.was_running = running;
+        self.capture.poll(ctx.engine);
+        if !self.has_results {
+            self.capture.clear();
+        }
         if tb.transport(running) {
             if running {
                 ctx.engine.stop_session();
@@ -114,7 +120,12 @@ impl ExerciseType for BasicTiming {
                     ctx.scoring.clone(),
                     self.shared.clone(),
                 );
-                ctx.engine.start_session(Box::new(logic));
+                let max_bytes = ctx
+                    .settings
+                    .get::<RecordingPrefs>(RecordingPrefs::ID)
+                    .max_bytes();
+                let id = ctx.engine.start_recorded(Box::new(logic), max_bytes);
+                self.capture.begin(id);
                 self.has_results = true;
                 self.show_results = false;
             }

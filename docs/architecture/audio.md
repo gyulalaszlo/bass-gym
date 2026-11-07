@@ -31,7 +31,7 @@ pub(crate) enum ControlMsg { Voice(Slot, Box<dyn Voice>), Master(f32),
     Monitor { enabled: bool, gain: f32 }, MonitorLowcut(Option<f32>),
     InstrumentLowpass(Option<f32>), MonitorSource(Consumer<f32>, u32) }
 pub(crate) enum WorkerCmd { SetInput(Option<InputLink>), SetOutput(Option<Producer<OutMsg>>),
-    SetAnalysis(AnalysisConfig), Start(Box<dyn SessionLogic>), Stop, Shutdown }
+    SetAnalysis(AnalysisConfig), Start(Box<dyn SessionLogic>, Option<RecordSpec>), Stop, Shutdown }
 ```
 
 `ControlMsg` can only be sent from the UI thread (the producer sits on `AudioEngine`),
@@ -42,14 +42,14 @@ not from `SessionIo`.
 - cpal 0.18 input stream, formats F32 / I16 / I32.
 - Each frame becomes one mono f32: the selected channel, or a mean of all channels.
   `input_channel` defaults to `Some(0)`.
-- Each callback pushes one `InChunk` plus its samples to the worker, and the samples to
-  the monitor ring.
-- If the worker ring lacks room, the whole callback is dropped with no marker.
+- Each callback pushes its samples to the worker and monitor rings, then one `InChunk`.
+- If the worker ring lacks room, the whole callback is dropped and counted in the next
+  chunk's `dropped`.
 
 ```rust
 struct InputSink { samples: Producer<f32>, chunks: Producer<InChunk>,
     monitor: Producer<f32>, clock: Clock, channels: usize, channel: Option<usize> }
-pub(crate) struct InChunk { pub frames: u32, pub time: Option<f64> }
+pub(crate) struct InChunk { pub frames: u32, pub time: Option<f64>, pub dropped: u32 }
 ```
 
 ## Worker loop (`worker.rs`)
@@ -156,6 +156,30 @@ pub trait SessionLogic: Send {
 drops `Analysis` and its `consumed` count. A new `OutputState` restarts `frames` at 0,
 so a device failure or audio setting change kills the session and resets transport
 time. Any change to `AudioConfig` triggers this.
+
+## Recording (`recording.rs`, `bg-sound/src/sample.rs`)
+
+`engine.start_recorded(logic, max_bytes) -> SessionId` records a session;
+`start_session` doesn't, so calibration isn't recorded. `take_recording(id)` hands the
+result over once, and `bg-ui/src/recording.rs::SessionCapture` wraps this for exercises.
+The cap is `RecordingPrefs`, a separate settings table, because `AudioConfig` changes
+reopen the devices.
+
+- `Recorder` lives in the worker loop, outside `Analysis`, and is fed raw mono input at
+  the history tap. `Env` bundles what `SessionIo` needs.
+- `SampleWriter` keeps ~1 s blocks and drops the oldest past the cap, with min/max peaks
+  built while writing. Memory grows with the session. `SampleBuffer` is the finished,
+  immutable audio; indices are absolute, so they stay valid after overwriting.
+- `Recording::time_of` / `sample_at` use anchors of `sample -> offset + n/sr - latency`,
+  stored every 0.25 s and whenever the mapping moves by over 1 ms, so markers match note
+  times by construction. Recorder indices differ from `Analysis.consumed` once silence
+  has been inserted: always map through transport time.
+- Lost input is reported on the next `InChunk.dropped`. The recorder fills it with
+  silence and adds a `Gap`, and the worker snaps its offset.
+- `SessionIo::play` logs `LoggedSound`s into the recorder. `Recorder::finish` drops
+  sounds past the stop time and cuts notes short.
+- `end_session` handles all three end paths and publishes before `session_running` goes
+  false. `shared.running` can fall earlier, so exercises poll every frame.
 
 ## Note detection (`bg-dsp/src/notes.rs`)
 

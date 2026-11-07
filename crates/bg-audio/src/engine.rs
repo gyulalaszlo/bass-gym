@@ -22,8 +22,11 @@ type OutputParts = (
     Consumer<Garbage>,
     Producer<OutMsg>,
 );
+use crate::recording::{Recording, SessionId};
 use crate::session::{SessionLogic, Slot};
-use crate::worker::{self, InChunk, InputLink, InputMeter, TunerState, WorkerCmd, WorkerShared};
+use crate::worker::{
+    self, InChunk, InputLink, InputMeter, RecordSpec, TunerState, WorkerCmd, WorkerShared,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceInfo {
@@ -102,6 +105,7 @@ pub struct AudioEngine {
     /// both are the same device (CoreAudio glitches when one device runs two configs).
     out_device: Option<(Device, StreamConfig)>,
     status: EngineStatus,
+    next_session: u64,
 }
 
 impl AudioEngine {
@@ -136,6 +140,7 @@ impl AudioEngine {
             last_rebuild: Instant::now(),
             out_device: None,
             status: EngineStatus::default(),
+            next_session: 0,
         };
         engine.rebuild();
         engine
@@ -171,9 +176,33 @@ impl AudioEngine {
     }
 
     pub fn start_session(&self, logic: Box<dyn SessionLogic>) {
+        self.start(logic, None);
+    }
+
+    /// Starts a session that records its input (keeping at most `max_bytes` of the latest
+    /// audio) and scheduled sounds. Once it has ended, [`take_recording`](Self::take_recording)
+    /// returns the result.
+    pub fn start_recorded(&mut self, logic: Box<dyn SessionLogic>, max_bytes: usize) -> SessionId {
+        self.next_session += 1;
+        let id = SessionId(self.next_session);
+        self.start(logic, Some(RecordSpec { id, max_bytes }));
+        id
+    }
+
+    fn start(&self, logic: Box<dyn SessionLogic>, spec: Option<RecordSpec>) {
         // Set eagerly so the UI doesn't see a stale "stopped" state for a frame.
         self.shared.session_running.store(true, Ordering::Release);
-        let _ = self.worker_tx.send(WorkerCmd::Start(logic));
+        let _ = self.worker_tx.send(WorkerCmd::Start(logic, spec));
+    }
+
+    /// The recording of session `id`, once that session has ended. Handed over only once.
+    pub fn take_recording(&self, id: SessionId) -> Option<Arc<Recording>> {
+        let mut slot = self.shared.recording.lock().ok()?;
+        if slot.as_ref().is_some_and(|(s, _)| *s == id) {
+            slot.take().map(|(_, r)| r)
+        } else {
+            None
+        }
     }
 
     pub fn stop_session(&self) {
@@ -484,6 +513,7 @@ impl AudioEngine {
             clock: self.clock.clone(),
             channels,
             channel,
+            dropped: 0,
         };
         let on_err = error_handler("input", self.health.clone());
         let stream = match format {
@@ -562,6 +592,8 @@ struct InputSink {
     clock: Clock,
     channels: usize,
     channel: Option<usize>,
+    /// Frames dropped since the last chunk went through.
+    dropped: u32,
 }
 
 impl InputSink {
@@ -573,15 +605,13 @@ impl InputSink {
         use cpal::Sample;
         let frames = data.len() / self.channels.max(1);
         if self.samples.slots() < frames || self.chunks.slots() == 0 {
-            return; // Worker stalled; drop rather than block.
+            // Worker stalled; drop rather than block.
+            self.dropped = self.dropped.saturating_add(frames as u32);
+            return;
         }
         let time = self
             .clock
             .map_host_ns(info.timestamp().capture.as_nanos() as u64);
-        let _ = self.chunks.push(InChunk {
-            frames: frames as u32,
-            time,
-        });
         for frame in data.chunks(self.channels.max(1)) {
             let s = match self.channel {
                 Some(c) => f32::from_sample(frame[c]),
@@ -592,6 +622,12 @@ impl InputSink {
             let _ = self.samples.push(s);
             let _ = self.monitor.push(s);
         }
+        // After its samples, so the worker never sees a chunk it can't read in full.
+        let _ = self.chunks.push(InChunk {
+            frames: frames as u32,
+            time,
+            dropped: std::mem::take(&mut self.dropped),
+        });
     }
 }
 

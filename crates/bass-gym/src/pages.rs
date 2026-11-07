@@ -8,6 +8,7 @@ use bg_audio::{
 };
 use bg_core::ScoringThresholds;
 use bg_sound::SoundRole;
+use bg_ui::recording::{MAX_MB_RANGE, RecordingPrefs};
 use bg_ui::theme::{PRESETS, Palette, Rgb, ThemePrefs};
 use bg_ui::view::{ViewPrefs, ZOOM_STEPS};
 use bg_ui::widgets::button::{button, selectable, selectable_value};
@@ -234,6 +235,33 @@ impl PreferencePage for AudioPage {
                     ui.end_row();
                 });
         });
+
+        ui.add_space(6.0);
+        let mut recording = ctx.settings.get::<RecordingPrefs>(RecordingPrefs::ID);
+        theme::section(ui, "Session recording", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Keep up to");
+                ui.add(
+                    number_field(&mut recording.max_mb)
+                        .range(MAX_MB_RANGE)
+                        .suffix("MB"),
+                );
+            });
+            let rate = ctx.engine.status().input_rate;
+            if rate != 0 {
+                ui.label(
+                    RichText::new(format!(
+                        "About {:.0} minutes of audio. Past that, the oldest audio is overwritten.",
+                        recording.minutes(rate)
+                    ))
+                    .small()
+                    .color(theme::dim()),
+                );
+            }
+        });
+        if ctx.settings.get::<RecordingPrefs>(RecordingPrefs::ID) != recording {
+            ctx.settings.set(RecordingPrefs::ID, &recording);
+        }
 
         if let Some(dir) = crate::soundfonts::user_dir() {
             ui.horizontal_wrapped(|ui| {

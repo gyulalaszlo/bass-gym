@@ -11,6 +11,7 @@ use bg_core::music::note_name;
 use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
+use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
 use bg_ui::widgets::beatgrid::Beatgrid;
 use bg_ui::widgets::button::{button, selectable_value};
@@ -231,6 +232,7 @@ pub struct BasicChords {
     error: Option<String>,
     /// Tuning reference, for naming played pitches.
     a4: f32,
+    capture: SessionCapture,
 }
 
 impl PresetSchema for BasicChords {
@@ -337,6 +339,10 @@ impl ExerciseType for BasicChords {
             self.show_results = true;
         }
         self.was_running = running;
+        self.capture.poll(ctx.engine);
+        if !self.has_results {
+            self.capture.clear();
+        }
         if tb.transport(running) {
             if running {
                 ctx.engine.stop_session();
@@ -474,7 +480,12 @@ impl BasicChords {
             Box::new(acc),
             mode,
         );
-        ctx.engine.start_session(Box::new(logic));
+        let max_bytes = ctx
+            .settings
+            .get::<RecordingPrefs>(RecordingPrefs::ID)
+            .max_bytes();
+        let id = ctx.engine.start_recorded(Box::new(logic), max_bytes);
+        self.capture.begin(id);
         self.has_results = true;
         self.show_results = false;
         self.run_seed = Some(seed);

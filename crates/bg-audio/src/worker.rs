@@ -12,6 +12,7 @@ use rtrb::{Consumer, Producer};
 use crate::clock::Clock;
 use crate::config::AnalysisConfig;
 use crate::output::OutMsg;
+use crate::recording::{Recorder, Recording, SessionId};
 use crate::session::{SessionIo, SessionLogic, SessionState};
 
 /// When to try detecting the pitch of a sounding note (ms after its onset): three
@@ -59,6 +60,8 @@ pub(crate) struct InChunk {
     pub frames: u32,
     /// Transport time of the chunk's first frame, if the host provided timestamps.
     pub time: Option<f64>,
+    /// Frames lost just before this chunk because the worker fell behind.
+    pub dropped: u32,
 }
 
 pub(crate) struct InputLink {
@@ -71,9 +74,17 @@ pub(crate) enum WorkerCmd {
     SetInput(Option<InputLink>),
     SetOutput(Option<Producer<OutMsg>>),
     SetAnalysis(AnalysisConfig),
-    Start(Box<dyn SessionLogic>),
+    Start(Box<dyn SessionLogic>, Option<RecordSpec>),
     Stop,
     Shutdown,
+}
+
+pub(crate) type FinishedRecording = (SessionId, Arc<Recording>);
+
+/// Asks for a session to be recorded.
+pub(crate) struct RecordSpec {
+    pub id: SessionId,
+    pub max_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -107,6 +118,8 @@ pub(crate) struct WorkerShared {
     pub tuner: Arc<Mutex<TunerState>>,
     pub meter: Arc<Mutex<InputMeter>>,
     pub session_running: Arc<AtomicBool>,
+    /// The latest finished recording, until fetched.
+    pub recording: Arc<Mutex<Option<FinishedRecording>>>,
 }
 
 struct Analysis {
@@ -139,6 +152,7 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
     let mut buf: Vec<f32> = Vec::with_capacity(8192);
     let mut events: Vec<NoteEvent> = Vec::new();
     let mut last_now = 0.0;
+    let mut recorder: Option<(SessionId, Recorder)> = None;
 
     loop {
         loop {
@@ -175,18 +189,29 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                     }
                     cfg = c;
                 }
-                Ok(WorkerCmd::Start(mut logic)) => {
-                    if let Some(mut old) = session.take() {
-                        old.stop(&mut io(&clock, &cfg, &mut out, &mut last_now));
-                    }
-                    logic.start(&mut io(&clock, &cfg, &mut out, &mut last_now));
+                Ok(WorkerCmd::Start(mut logic, spec)) => {
+                    let mut env = Env {
+                        clock: &clock,
+                        cfg: &cfg,
+                        out: &mut out,
+                        last_now: &mut last_now,
+                        recorder: &mut recorder,
+                    };
+                    end_session(&mut session, &mut env, &shared);
+                    *env.recorder = spec.map(|s| (s.id, Recorder::new(s.max_bytes)));
+                    logic.start(&mut env.io());
                     session = Some(logic);
                     shared.session_running.store(true, Ordering::Release);
                 }
                 Ok(WorkerCmd::Stop) => {
-                    if let Some(mut logic) = session.take() {
-                        logic.stop(&mut io(&clock, &cfg, &mut out, &mut last_now));
-                    }
+                    let mut env = Env {
+                        clock: &clock,
+                        cfg: &cfg,
+                        out: &mut out,
+                        last_now: &mut last_now,
+                        recorder: &mut recorder,
+                    };
+                    end_session(&mut session, &mut env, &shared);
                     shared.session_running.store(false, Ordering::Release);
                 }
                 Ok(WorkerCmd::Shutdown) | Err(TryRecvError::Disconnected) => return,
@@ -206,7 +231,10 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                     .map(|t| t - a.consumed as f64 / sr);
                 if let Some(est) = est {
                     a.offset = Some(match a.offset {
-                        Some(o) if (est - o).abs() < 0.05 => o + 0.02 * (est - o),
+                        // Lost frames shift the estimate for good, so follow it at once.
+                        Some(o) if (est - o).abs() < 0.05 && chunk.dropped == 0 => {
+                            o + 0.02 * (est - o)
+                        }
                         _ => est,
                     });
                 }
@@ -216,6 +244,10 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                         Ok(s) => buf.push(s),
                         Err(_) => break,
                     }
+                }
+                if let Some((_, r)) = recorder.as_mut() {
+                    let time = a.offset.map(|o| o + a.consumed as f64 / sr - latency);
+                    r.feed(&buf, a.link.sample_rate, chunk.dropped, time);
                 }
                 a.consumed += buf.len() as u64;
                 a.history.extend(&buf);
@@ -304,33 +336,62 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
             }
         }
 
-        if let Some(logic) = session.as_mut() {
-            let mut io = io(&clock, &cfg, &mut out, &mut last_now);
-            if logic.tick(&mut io) == SessionState::Finished {
-                logic.stop(&mut io);
-                session = None;
-                shared.session_running.store(false, Ordering::Release);
-            }
+        let mut env = Env {
+            clock: &clock,
+            cfg: &cfg,
+            out: &mut out,
+            last_now: &mut last_now,
+            recorder: &mut recorder,
+        };
+        if let Some(logic) = session.as_mut()
+            && logic.tick(&mut env.io()) == SessionState::Finished
+        {
+            end_session(&mut session, &mut env, &shared);
+            shared.session_running.store(false, Ordering::Release);
         }
 
         std::thread::sleep(Duration::from_millis(2));
     }
 }
 
-fn io<'a>(
-    clock: &Clock,
-    cfg: &AnalysisConfig,
+/// What building a [`SessionIo`] needs from the worker loop.
+struct Env<'a> {
+    clock: &'a Clock,
+    cfg: &'a AnalysisConfig,
     out: &'a mut Option<Producer<OutMsg>>,
-    last_now: &mut f64,
-) -> SessionIo<'a> {
-    SessionIo {
-        now: transport_now(clock, last_now),
-        latency: cfg.total_latency(),
-        out: if clock.is_running() {
-            out.as_mut()
-        } else {
-            None
-        },
+    last_now: &'a mut f64,
+    recorder: &'a mut Option<(SessionId, Recorder)>,
+}
+
+impl Env<'_> {
+    fn io(&mut self) -> SessionIo<'_> {
+        SessionIo {
+            now: transport_now(self.clock, self.last_now),
+            latency: self.cfg.total_latency(),
+            out: if self.clock.is_running() {
+                self.out.as_mut()
+            } else {
+                None
+            },
+            log: self.recorder.as_mut().map(|(_, r)| r.sounds_mut()),
+        }
+    }
+}
+
+/// Stops the running session, if any, and publishes its recording. Every way a session
+/// ends comes through here, before `session_running` goes false, so the UI finds the
+/// recording as soon as it sees the session has ended.
+fn end_session(session: &mut Option<Box<dyn SessionLogic>>, env: &mut Env, shared: &WorkerShared) {
+    let Some(mut logic) = session.take() else {
+        return;
+    };
+    let mut io = env.io();
+    logic.stop(&mut io);
+    let (now, latency) = (io.now, io.latency);
+    if let Some((id, r)) = env.recorder.take()
+        && let Ok(mut slot) = shared.recording.lock()
+    {
+        *slot = Some((id, Arc::new(r.finish(now, latency))));
     }
 }
 

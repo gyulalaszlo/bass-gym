@@ -2,6 +2,7 @@ use bg_sound::SoundEvent;
 use rtrb::Producer;
 
 use crate::output::OutMsg;
+use crate::recording::LoggedSound;
 
 /// Output voice a sound is played on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +25,8 @@ pub struct SessionIo<'a> {
     /// Round-trip latency already subtracted from note times.
     pub latency: f64,
     pub(crate) out: Option<&'a mut Producer<OutMsg>>,
+    /// Where scheduled sounds are logged, when the session is recorded.
+    pub(crate) log: Option<&'a mut Vec<LoggedSound>>,
 }
 
 impl SessionIo<'_> {
@@ -33,14 +36,35 @@ impl SessionIo<'_> {
             now,
             latency,
             out: None,
+            log: None,
+        }
+    }
+
+    /// Like [`offline`](Self::offline), logging scheduled sounds into `log`.
+    pub fn offline_logged(now: f64, latency: f64, log: &mut Vec<LoggedSound>) -> SessionIo<'_> {
+        SessionIo {
+            now,
+            latency,
+            out: None,
+            log: Some(log),
         }
     }
 
     /// Schedules a sound at transport time `at`. Returns false if output isn't available.
     pub fn play(&mut self, at: f64, slot: Slot, ev: SoundEvent) -> bool {
-        self.out
+        let delivered = self
+            .out
             .as_mut()
-            .is_some_and(|p| p.push(OutMsg::Play { at, slot, ev }).is_ok())
+            .is_some_and(|p| p.push(OutMsg::Play { at, slot, ev }).is_ok());
+        if let Some(log) = self.log.as_mut() {
+            log.push(LoggedSound {
+                at,
+                slot,
+                ev,
+                delivered,
+            });
+        }
+        delivered
     }
 
     /// Cancels all pending sounds and silences the voices.

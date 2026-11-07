@@ -3,7 +3,7 @@
 
 use std::f32::consts::TAU;
 
-use bg_audio::{SessionIo, SessionLogic, SessionState};
+use bg_audio::{Recorder, SessionIo, SessionLogic, SessionState, Slot};
 use bg_core::scoring::{mean, std_dev};
 use bg_core::session::{AutoStop, Span, StopCondition, Trigger};
 use bg_core::{Grade, Planner, ScoringThresholds, SessionConfig};
@@ -227,4 +227,54 @@ fn early_pitch_is_stored_without_an_accompaniment() {
     session.note_on(0.3, -10.0);
     session.note_pitch(0.3, 41.2);
     assert_eq!(lock(&shared).matcher.played[0].freq, Some(41.2));
+}
+
+#[test]
+fn recorded_audio_lines_up_with_detected_notes() {
+    // A pluck at a known place, fed in chunks the way the worker does, with latency
+    // subtracted and a transport offset. The onset's time must map back to its sample.
+    let (offset, latency) = (12.5, 0.02);
+    let mut audio = vec![0.0f32; SR as usize * 2];
+    pluck(&mut audio, 0.75, 0.5, 41.2);
+
+    let mut detector = NoteDetector::new(SR, NoteDetectorConfig::default());
+    let mut recorder = Recorder::new(usize::MAX);
+    let mut events = Vec::new();
+    let mut fed = 0;
+    for chunk in audio.chunks(512) {
+        let time = offset + fed as f64 / SR as f64 - latency;
+        recorder.feed(chunk, SR, 0, Some(time));
+        detector.process(chunk, &mut events);
+        fed += chunk.len();
+    }
+    let recording = recorder.finish(offset + 2.0, latency);
+
+    let sample = events
+        .iter()
+        .find_map(|e| match *e {
+            NoteEvent::On { sample, .. } => Some(sample),
+            _ => None,
+        })
+        .expect("the pluck is detected");
+    let note_time = offset + sample as f64 / SR as f64 - latency;
+    assert_eq!(recording.sample_at(note_time), sample);
+    assert!((recording.time_of(sample) - note_time).abs() < 1e-9);
+    let heard = sample as f64 / SR as f64;
+    assert!((heard - 0.75).abs() < 0.03, "onset at {heard}");
+}
+
+#[test]
+fn a_recorded_session_logs_its_click() {
+    let cfg = SessionConfig {
+        tempo: 120.0,
+        count_in_bars: 0,
+        ..Default::default()
+    };
+    let shared = SharedTiming::default();
+    let mut session = TimingSession::new(cfg, ScoringThresholds::default(), shared);
+    let mut log = Vec::new();
+    session.start(&mut SessionIo::offline_logged(0.0, 0.0, &mut log));
+    session.tick(&mut SessionIo::offline_logged(0.0, 0.0, &mut log));
+    assert!(log.iter().any(|s| s.slot == Slot::Click));
+    assert!(log.iter().all(|s| !s.delivered)); // Nothing to play it on.
 }

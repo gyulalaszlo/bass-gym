@@ -3,6 +3,7 @@
 
 pub mod exercise;
 pub mod prefs;
+pub mod recording;
 pub mod settings;
 pub mod theme;
 pub mod view;

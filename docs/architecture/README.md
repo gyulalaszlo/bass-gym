@@ -8,9 +8,9 @@ doc disagrees with the code, the code wins: fix the doc in the same commit.
 
 | Doc | Covers | Last verified at |
 |---|---|---|
-| [audio.md](audio.md) | Threads, rings, capture, mix, clock, latency, session lifecycle, scheduling, note detection | `a51c39f` |
-| [ui.md](ui.md) | App shell, widget conventions, theme, beatgrid, results dialog, settings, presets | `a51c39f` |
-| [data-model.md](data-model.md) | Plans, scoring, chords, what survives a session, time bases | `a51c39f` |
+| [audio.md](audio.md) | Threads, rings, capture, mix, clock, latency, session lifecycle, scheduling, note detection | `e0091e1` |
+| [ui.md](ui.md) | App shell, widget conventions, theme, beatgrid, results dialog, settings, presets | `e0091e1` |
+| [data-model.md](data-model.md) | Plans, scoring, chords, what survives a session, time bases | `e0091e1` |
 
 Update the "last verified" commit when you re-check a doc against the code, not on
 every edit.

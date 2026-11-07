@@ -454,7 +454,7 @@ fn accuracy_timeline(ui: &mut egui::Ui, bars: &[BarStats], height: f32) {
             y_of(r),
             Stroke::new(1.0, c.gamma_multiply(0.4)),
         );
-        // 100% should just be a line, no label (too close to 90%)
+        // No label at 100%: it would sit too close to the one at 90%.
         if r < 1.0 {
             p.text(
                 Pos2::new(plot.left() - 4.0, y_of(r)),
@@ -500,7 +500,6 @@ fn accuracy_timeline(ui: &mut egui::Ui, bars: &[BarStats], height: f32) {
         // fainter, as it is not a hit. Missed notes leave the rest empty.
         let mut y = plot.bottom();
         for (g, alpha) in [(Grade::Good, 0.8), (Grade::Ok, 0.8), (Grade::Poor, 0.35)] {
-            // for (g, alpha) in [(Grade::Good, 0.8), (Grade::Ok, 0.8)] {
             let n = b.counts[g as usize];
             if n == 0 {
                 continue;

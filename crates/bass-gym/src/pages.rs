@@ -11,7 +11,7 @@ use bg_sound::SoundRole;
 use bg_ui::folder::open_folder;
 use bg_ui::recording::{MAX_MB_RANGE, RecordingPrefs};
 use bg_ui::theme::{PRESETS, Palette, Rgb, ThemePrefs};
-use bg_ui::view::{ViewPrefs, ZOOM_STEPS};
+use bg_ui::view::{SCORE_SIZE_RANGE, ViewPrefs, ZOOM_STEPS};
 use bg_ui::widgets::button::{button, selectable, selectable_value};
 use bg_ui::widgets::controls::{checkbox, dropdown, dropdown_value, number_field, slider_field};
 use bg_ui::widgets::tuner::TunerPrefs;
@@ -840,6 +840,12 @@ impl PreferencePage for DisplayPage {
                     ui.end_row();
                     ui.label("Played notes");
                     checkbox(ui, &mut v.show_score, "Show as a score above the grid");
+                    ui.end_row();
+                    ui.label("Score size");
+                    ui.add_enabled(
+                        v.show_score,
+                        slider_field(&mut v.score_size, SCORE_SIZE_RANGE).suffix("pt"),
+                    );
                     ui.end_row();
                     ui.label("Performance indicator range");
                     let unit = if v.indicator_bars == 1 { "bar" } else { "bars" };

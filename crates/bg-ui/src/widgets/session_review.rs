@@ -34,7 +34,7 @@ const WAVE_HEIGHT: f32 = 60.0;
 /// Room for the note bars above the waveform.
 const NOTE_LANE: f32 = 10.0;
 const ROW_GAP: f32 = 18.0;
-const EDITOR_HEIGHT: f32 = 320.0;
+const EDITOR_HEIGHT: f32 = 260.0;
 /// Seconds shown either side of a click when opening the marker editor.
 const EDITOR_SPAN: f64 = 1.0;
 const BASS_GAIN: f32 = 1.0;
@@ -209,6 +209,7 @@ impl SessionReview {
                 spacing: STAFF_SPACING,
                 lo,
                 hi,
+                labels: true,
             },
             from_bar,
             to_bar,
@@ -238,11 +239,16 @@ impl SessionReview {
         };
         let t = note.onset + 0.2;
         self.open_editor(t);
+        if let Some(editor) = self.editor.as_mut() {
+            editor.selected = Some(self.next_marker);
+        }
         self.markers.push(Marker {
             id: self.next_marker,
             time: t,
             end: None,
-            label: "note end should be detected here".into(),
+            label: "note end should be detected here, and this is a long note to show \
+                    how the label grows with what is typed into it"
+                .into(),
             color: theme::cyan(),
             line: Line::Solid,
         });
@@ -548,7 +554,6 @@ impl SessionReview {
                     clef: n == 0,
                     sig: first.sig,
                 }),
-                labels: true,
             }
             .paint(&p, staff);
             self.paint_wave(&p, wave, axis, first.start, last.end, rect);
@@ -683,7 +688,7 @@ impl SessionReview {
             }
             ui.label(
                 RichText::new(
-                    "Drag up / down to zoom, sideways to move. Double-click to add a marker.",
+                    "Drag down to zoom in, up to zoom out, sideways to move. Double-click to add a marker.",
                 )
                 .small()
                 .color(theme::dim()),

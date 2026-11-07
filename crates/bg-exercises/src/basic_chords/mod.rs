@@ -767,13 +767,14 @@ impl BasicChords {
 
     fn grid(&self, ui: &mut egui::Ui, now: f64, prefs: &mut ViewPrefs, a4: f32) {
         let steps = self.data.session.groove.steps_per_beat;
-        let show_score = prefs.show_score;
+        let (show_score, size) = (prefs.show_score, prefs.score_size);
         let zoom = &mut prefs.grid_zoom;
         let live = |chords| {
             show_score.then_some(LiveScore {
                 chords,
                 scale: Some(self.data.scale),
                 a4,
+                size,
             })
         };
         if self.has_results {

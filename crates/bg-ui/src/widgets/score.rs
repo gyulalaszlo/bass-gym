@@ -42,11 +42,17 @@ pub struct StaffLayout {
     pub spacing: f32,
     pub lo: i32,
     pub hi: i32,
+    /// Leave room to name the bars above the staff.
+    pub labels: bool,
 }
 
 impl StaffLayout {
     pub fn height(&self) -> f32 {
-        LABEL_HEIGHT + self.above() + 4.0 * self.spacing + self.below()
+        self.label_height() + self.above() + 4.0 * self.spacing + self.below()
+    }
+
+    fn label_height(&self) -> f32 {
+        if self.labels { LABEL_HEIGHT } else { 0.0 }
     }
 
     fn above(&self) -> f32 {
@@ -59,7 +65,7 @@ impl StaffLayout {
 
     /// Screen y of the bottom staff line within `rect`.
     fn bottom_line(&self, rect: Rect) -> f32 {
-        rect.top() + LABEL_HEIGHT + self.above() + 4.0 * self.spacing
+        rect.top() + self.label_height() + self.above() + 4.0 * self.spacing
     }
 }
 
@@ -74,8 +80,6 @@ pub struct ScoreView<'a> {
     pub layout: StaffLayout,
     /// Draw the clef and/or time signature at the left end of the staff.
     pub lead: Option<Lead>,
-    /// Name the bars above the staff.
-    pub labels: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -93,12 +97,14 @@ impl ScoreView<'_> {
             bottom: self.layout.bottom_line(rect),
             axis: self.axis,
         };
+        // Chord tones are a hint, so they go behind everything else.
+        self.bars.iter().for_each(|b| d.chord_marks(b));
         d.staff(rect);
         if let Some(lead) = self.lead {
             d.lead(rect, lead);
         }
         for (i, bar) in self.bars.iter().enumerate() {
-            d.bar(bar, rect, i == 0, self.labels);
+            d.bar(bar, rect, i == 0, self.layout.labels);
             let next = self.bars.get(i + 1);
             d.events(bar, next, rect);
         }
@@ -128,6 +134,26 @@ impl Draw<'_> {
             .and_then(|r| r.row.glyphs.first().map(|g| r.pos.y + g.pos.y))
             .unwrap_or(0.0);
         self.p.galley(pos2(x, y - baseline), galley, color);
+    }
+
+    fn chord_marks(&self, bar: &ScoreBar) {
+        let w = self.head_width();
+        for e in &bar.events {
+            let ScoreKind::Note(n) = &e.kind else {
+                continue;
+            };
+            let x = self.head_x(e);
+            let color = if n.clash {
+                theme::red()
+            } else {
+                theme::green()
+            };
+            let stroke = Stroke::new((0.3 * self.sp).max(2.0), color.gamma_multiply(0.4));
+            for &m in &n.chord_marks {
+                self.p
+                    .hline((x - 0.5 * w)..=(x + 1.5 * w), self.y(m), stroke);
+            }
+        }
     }
 
     fn staff(&self, rect: Rect) {
@@ -233,17 +259,6 @@ impl Draw<'_> {
         let pos = Self::pos(n);
         let color = Self::color(n);
         let w = self.head_width();
-
-        let mark = if n.clash {
-            theme::red()
-        } else {
-            theme::green()
-        };
-        let stroke = Stroke::new(2.0, mark.gamma_multiply(0.7));
-        for &m in &n.chord_marks {
-            self.p
-                .hline((x - 0.5 * w)..=(x + 1.5 * w), self.y(m), stroke);
-        }
 
         for ledger in (2..=-pos)
             .step_by(2)
@@ -406,10 +421,10 @@ impl Draw<'_> {
                 i += 1;
                 continue;
             };
-            let beat = events[i].step / n;
+            let beat = events[i].beat;
             let run = events[i..]
                 .iter()
-                .take_while(|e| e.tuplet == Some(n) && e.step / n == beat)
+                .take_while(|e| e.tuplet == Some(n) && e.beat == beat)
                 .count();
             let (a, b) = (self.head_x(&events[i]), self.head_x(&events[i + run - 1]));
             self.p.text(
@@ -445,6 +460,7 @@ mod tests {
             spacing: 8.0,
             lo: 0,
             hi: TOP_LINE,
+            labels: true,
         };
         let low = StaffLayout { lo: -6, ..plain };
         let high = StaffLayout { hi: 14, ..plain };
@@ -453,11 +469,27 @@ mod tests {
     }
 
     #[test]
+    fn labels_take_room_only_when_shown() {
+        let with = StaffLayout {
+            spacing: 8.0,
+            lo: 0,
+            hi: TOP_LINE,
+            labels: true,
+        };
+        let without = StaffLayout {
+            labels: false,
+            ..with
+        };
+        assert_eq!(with.height() - without.height(), LABEL_HEIGHT);
+    }
+
+    #[test]
     fn lines_keep_their_place_within_the_rect() {
         let l = StaffLayout {
             spacing: 8.0,
             lo: -4,
             hi: TOP_LINE,
+            labels: true,
         };
         let rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, l.height()));
         let bottom = l.bottom_line(rect);

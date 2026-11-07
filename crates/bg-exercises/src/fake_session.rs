@@ -1,6 +1,6 @@
 //! A made-up session for looking at the review without playing: a synthesized player
-//! with timing errors, wrong notes, a missed note and an extra one, run offline through
-//! the real session logic. Set `BASS_GYM_FAKE_SESSION` to use it.
+//! with timing errors, wrong notes, a missed note and stretches of eighths, run offline
+//! through the real session logic. Set `BASS_GYM_FAKE_SESSION` to use it.
 
 use std::f32::consts::TAU;
 
@@ -59,7 +59,6 @@ pub fn run(logic: &mut dyn SessionLogic, shared: &SharedTiming, a4: f32) -> Reco
     logic.start(&mut SessionIo::offline_logged(now, 0.0, &mut sounds));
     let mut next = 0;
     let mut sounding: Option<(f64, f32)> = None;
-    let mut extra_done = false;
     while logic.tick(&mut SessionIo::offline_logged(now, 0.0, &mut sounds)) == SessionState::Running
         && now < 120.0
     {
@@ -79,22 +78,26 @@ pub fn run(logic: &mut dyn SessionLogic, shared: &SharedTiming, a4: f32) -> Reco
             if now >= at {
                 let n = next;
                 next += 1;
+                // Some bars get eighths, whatever the groove asks for.
+                let eighths = (4..8).contains(&(n % 12));
                 if n % 11 != 7 {
                     let freq = midi_to_freq(PITCHES[n % PITCHES.len()] as f32, a4);
-                    let held = len * if n % 4 == 3 { 0.5 } else { 0.9 };
+                    let held = len * if eighths { 0.42 } else { 0.9 };
                     logic.note_on(at, -12.0);
                     logic.note_pitch(at, freq);
                     pluck(&mut audio, at, held + 0.03, freq);
-                    sounding = Some((at + held, freq));
-                }
-                if n == 9 && !extra_done {
-                    extra_done = true;
-                    if let Some((end, freq)) = sounding.take() {
-                        logic.note_off(end, -12.0, Some(freq));
+                    if eighths {
+                        logic.note_off(at + held, -12.0, Some(freq));
+                    } else {
+                        sounding = Some((at + held, freq));
                     }
-                    let (at, held, freq) = (at + len * 0.5, len * 0.3, midi_to_freq(29.0, a4));
+                }
+                if eighths {
+                    let freq = midi_to_freq(PITCHES[(n + 2) % PITCHES.len()] as f32, a4);
+                    let (at, held) = (time + len * 0.5 + 0.008, len * 0.42);
                     logic.note_on(at, -12.0);
-                    pluck(&mut audio, at, held, freq);
+                    logic.note_pitch(at, freq);
+                    pluck(&mut audio, at, held + 0.03, freq);
                     logic.note_off(at + held, -12.0, Some(freq));
                 }
             }

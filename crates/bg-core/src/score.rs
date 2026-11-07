@@ -2,9 +2,11 @@
 //! notes, rests and ties for display. Pure layout data, shared by the results view and
 //! the live score above the beat grid.
 //!
-//! Notes sit on the groove's step grid, not at their played time: a matched note takes
-//! its target's position and length, an extra note rounds to the nearest step. Bass is
-//! written an octave above sounding pitch.
+//! Notes sit on a musical grid, not at their played time. A matched note starts at its
+//! target; other notes round to the simplest subdivision of their beat that fits what
+//! was played there, whatever the exercise's own grid. Lengths come from the playing:
+//! a note held for most of the way to the next one reaches it, so a slight gap isn't
+//! written as a rest. Bass is written an octave above sounding pitch.
 
 use std::ops::Range;
 
@@ -19,6 +21,14 @@ const BOTTOM_LINE: i32 = 2 * 7 + 4;
 pub const MIDDLE_LINE: i32 = 4;
 /// Staff position of the top line.
 pub const TOP_LINE: i32 = 8;
+
+/// Subdivisions of a beat, simplest first. Triplets come after sixteenths, so a loosely
+/// played sixteenth doesn't read as a triplet.
+const SUBDIVISIONS: [u32; 5] = [1, 2, 4, 3, 6];
+/// How far from a subdivision a note may be and still fit it, as a part of the beat.
+const FIT_TOLERANCE: f64 = 0.07;
+/// A note held for this part of the way to the next one is taken as reaching it.
+const LEGATO: f64 = 0.6;
 
 const SHARP_LETTERS: [(i32, bool); 12] = [
     (0, false),
@@ -136,8 +146,8 @@ pub enum ScoreKind {
 pub struct ScoreEvent {
     /// Transport time of the grid position this sits on.
     pub time: f64,
-    /// Step within the bar.
-    pub step: u32,
+    /// Beat within the bar.
+    pub beat: u32,
     pub value: NoteValue,
     /// Notes per beat of the tuplet this belongs to, if any.
     pub tuplet: Option<u32>,
@@ -168,183 +178,314 @@ pub struct ScoreInput<'a> {
     pub until: f64,
 }
 
-/// A played note on the grid, in steps counted from the first bar.
+/// A played note on the grid, in ticks counted from the first bar.
 struct GridNote {
     start: u32,
     len: u32,
     played: usize,
 }
 
-/// Builds the score. Count-in bars are left out. `bars` may be any contiguous part of
-/// the session; notes outside it are skipped.
-pub fn build(input: &ScoreInput) -> Vec<ScoreBar> {
-    let bars: Vec<&BarPlan> = input.bars.iter().filter(|b| !b.is_count_in()).collect();
-    let mut first_step = Vec::with_capacity(bars.len() + 1);
-    let mut total = 0;
-    for b in &bars {
-        first_step.push(total);
-        total += bar_steps(b);
+/// The grid of the bars being laid out. Beats are counted from the first bar, and each
+/// holds `tpb` ticks, enough for every subdivision in use.
+struct Grid<'a> {
+    bars: Vec<&'a BarPlan>,
+    /// First beat of each bar, then the total.
+    first_beat: Vec<u32>,
+    tpb: u32,
+    /// Finest straight division of a beat.
+    straight: u32,
+    /// The subdivision each beat is written in.
+    subdivisions: Vec<u32>,
+}
+
+impl Grid<'_> {
+    fn total_beats(&self) -> u32 {
+        self.first_beat.last().copied().unwrap_or(0)
     }
-    first_step.push(total);
 
-    let notes = grid_notes(input, &bars, &first_step);
-    let flats = input.scale.is_some_and(|s| s.prefers_flats());
-    let mut out: Vec<ScoreBar> = Vec::with_capacity(bars.len());
-    let mut last_bpm = None;
-    for (i, bar) in bars.iter().enumerate() {
-        let mut events = bar_events(bar, first_step[i], &notes, input, flats);
-        beam(&mut events, bar.steps_per_beat.max(1));
-        out.push(ScoreBar {
-            index: bar.index,
-            start: bar.start,
-            end: bar.end(),
-            bpm: bar.bpm,
-            show_bpm: last_bpm != Some(bar.bpm),
-            sig: bar.sig,
-            events,
-        });
-        last_bpm = Some(bar.bpm);
+    fn total_ticks(&self) -> u32 {
+        self.total_beats() * self.tpb
     }
-    out
+
+    fn is_tuplet(&self, beat: u32) -> bool {
+        self.subdivisions
+            .get(beat as usize)
+            .is_some_and(|d| !d.is_power_of_two())
+    }
+
+    /// Ticks per grid position around `tick`.
+    fn resolution(&self, tick: u32) -> u32 {
+        let beat = tick / self.tpb;
+        if self.is_tuplet(beat) {
+            self.tpb / self.subdivisions[beat as usize]
+        } else {
+            self.tpb / self.straight
+        }
+    }
 }
 
-fn bar_steps(bar: &BarPlan) -> u32 {
-    bar.beats.max(1) * bar.steps_per_beat.max(1)
+fn beat_len(bar: &BarPlan) -> f64 {
+    bar.duration / bar.beats.max(1) as f64
 }
 
-fn step_len(bar: &BarPlan) -> f64 {
-    bar.duration / bar_steps(bar) as f64
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
-/// Places every played note on the grid, one voice: a note ends where the next starts.
-fn grid_notes(input: &ScoreInput, bars: &[&BarPlan], first_step: &[u32]) -> Vec<GridNote> {
-    let (Some(first), Some(last)) = (bars.first(), bars.last()) else {
+/// The subdivision that best suits a beat: `loose` are the positions (0..1) of notes to
+/// round to it, `exact` the ticks of notes it must hold as they are. A lone note can't
+/// establish a tuplet.
+fn subdivision(loose: &[f64], exact: &[u32], tpb: u32, steps_per_beat: u32) -> u32 {
+    if loose.iter().all(|f| f.abs() < FIT_TOLERANCE) && exact.iter().all(|&t| t == 0) {
+        return 1;
+    }
+    let several = loose.len() + exact.len() >= 2;
+    let usable = |d: &u32| {
+        tpb.is_multiple_of(*d)
+            && exact.iter().all(|t| t % (tpb / d) == 0)
+            && (d.is_power_of_two() || *d == steps_per_beat || several)
+    };
+    let error = |d: u32| {
+        let d = d as f64;
+        loose
+            .iter()
+            .map(|f| (f - (f * d).round() / d).abs())
+            .fold(0.0, f64::max)
+    };
+    let choices: Vec<u32> = std::iter::once(steps_per_beat)
+        .chain(SUBDIVISIONS)
+        .filter(usable)
+        .collect();
+    choices
+        .iter()
+        .copied()
+        .find(|&d| error(d) <= FIT_TOLERANCE)
+        .or_else(|| {
+            choices
+                .iter()
+                .copied()
+                .min_by(|&a, &b| error(a).total_cmp(&error(b)))
+        })
+        .unwrap_or(steps_per_beat)
+}
+
+/// A played note before it's on the grid.
+struct Placing {
+    played: usize,
+    /// Set when it starts at a target; otherwise it rounds to its beat's subdivision.
+    tick: Option<u32>,
+    beat: u32,
+    /// Position within `beat`.
+    frac: f64,
+    /// Length in beats, if known.
+    beats: Option<f64>,
+}
+
+/// Works out which beat each note belongs to.
+fn placings(input: &ScoreInput, grid: &Grid) -> Vec<Placing> {
+    let (Some(first), Some(last)) = (grid.bars.first(), grid.bars.last()) else {
         return Vec::new();
     };
     let m = input.matcher;
-    let total = *first_step.last().unwrap_or(&0);
     let window = m.thresholds.window_ms as f64 / 1000.0;
     let from = m.played.partition_point(|p| p.onset < first.start - window);
     let to = m.played.partition_point(|p| p.onset < last.end() + window);
-
-    let mut notes: Vec<GridNote> = Vec::new();
-    let mut extras = Vec::new();
-    for (i, p) in m.played.iter().enumerate().take(to).skip(from) {
+    let mut out = Vec::new();
+    for (played, p) in m.played.iter().enumerate().take(to).skip(from) {
         // In a live view a note waits for its pitch, which comes shortly after the onset.
         if input.until.is_finite() && p.freq.is_none() && p.offset.is_none() {
             continue;
         }
-        match p.matched.and_then(|e| m.expected.get(e)) {
-            Some(e) => {
-                let Some(b) = bars.iter().position(|b| b.index == e.bar) else {
-                    continue;
-                };
-                let s = step_len(bars[b]);
-                let start = first_step[b] + ((e.time - bars[b].start) / s).round() as u32;
-                let len = ((e.len / s).round() as u32).max(1);
-                notes.push(GridNote {
-                    start,
-                    len,
-                    played: i,
-                });
-            }
-            None => extras.push(i),
+        let held = p.offset.map(|o| o - p.onset);
+        if let Some(e) = p.matched.and_then(|e| m.expected.get(e)) {
+            let Some(b) = grid.bars.iter().position(|b| b.index == e.bar) else {
+                continue;
+            };
+            let bar = grid.bars[b];
+            let len = beat_len(bar);
+            let spb = bar.steps_per_beat.max(1) as f64;
+            let step = (((e.time - bar.start) / len) * spb).round();
+            let tick = grid.first_beat[b] * grid.tpb + (step * grid.tpb as f64 / spb) as u32;
+            out.push(Placing {
+                played,
+                tick: Some(tick),
+                beat: tick / grid.tpb,
+                frac: 0.0,
+                beats: Some(held.unwrap_or(e.len) / len),
+            });
+        } else {
+            let b = grid
+                .bars
+                .iter()
+                .rposition(|b| b.start <= p.onset)
+                .unwrap_or_default();
+            let bar = grid.bars[b];
+            let len = beat_len(bar);
+            let pos = grid.first_beat[b] as f64 + (p.onset - bar.start) / len;
+            let beat = (pos + FIT_TOLERANCE)
+                .floor()
+                .clamp(0.0, grid.total_beats().saturating_sub(1) as f64);
+            out.push(Placing {
+                played,
+                tick: None,
+                beat: beat as u32,
+                frac: pos - beat,
+                beats: held.map(|h| h / len),
+            });
         }
     }
-    notes.sort_by_key(|n| n.start);
+    out
+}
 
-    for i in extras {
-        let p = &m.played[i];
-        let b = bars
-            .iter()
-            .rposition(|b| b.start <= p.onset)
-            .unwrap_or_default();
-        let s = step_len(bars[b]);
-        let exact = (p.onset - bars[b].start) / s;
-        let ideal = (first_step[b] as i64 + exact.round() as i64).clamp(0, total as i64 - 1);
-        let start = free_step(&notes, ideal, exact.round() < exact, total);
-        let len = p
-            .offset
-            .map_or(1, |o| (((o - p.onset) / s).round() as u32).max(1));
+/// Places every played note on the grid, one voice: a note ends where the next starts.
+fn grid_notes(placings: &[Placing], grid: &mut Grid) -> Vec<GridNote> {
+    let tpb = grid.tpb;
+    let spb = grid.bars.first().map_or(1, |b| b.steps_per_beat.max(1));
+    for (beat, d) in grid.subdivisions.iter_mut().enumerate() {
+        let here = || placings.iter().filter(|p| p.beat as usize == beat);
+        let loose: Vec<f64> = here()
+            .filter(|p| p.tick.is_none())
+            .map(|p| p.frac)
+            .collect();
+        let exact: Vec<u32> = here().filter_map(|p| p.tick).map(|t| t % tpb).collect();
+        *d = subdivision(&loose, &exact, tpb, spb);
+    }
+
+    let mut notes: Vec<GridNote> = placings
+        .iter()
+        .filter_map(|p| {
+            p.tick.map(|start| GridNote {
+                start,
+                len: 1,
+                played: p.played,
+            })
+        })
+        .collect();
+    notes.sort_by_key(|n| n.start);
+    let total = grid.total_ticks();
+    for p in placings.iter().filter(|p| p.tick.is_none()) {
+        let d = grid.subdivisions[p.beat as usize];
+        let position = (p.frac * d as f64).round();
+        let played_late = p.frac * d as f64 > position;
+        let step = (tpb / d) as i64;
+        let ideal = p.beat as i64 * tpb as i64 + position as i64 * step;
+        let start = free_tick(&notes, ideal, step, played_late, total);
         let at = notes.partition_point(|n| n.start <= start);
         notes.insert(
             at,
             GridNote {
                 start,
-                len,
-                played: i,
+                len: 1,
+                played: p.played,
             },
         );
     }
 
     for i in 0..notes.len() {
-        let next = notes[i + 1..]
+        let start = notes[i].start;
+        let following = notes[i + 1..].iter().find(|n| n.start > start);
+        let room = following.map_or(total - start, |n| n.start - start);
+        let beats = placings
             .iter()
-            .find(|n| n.start > notes[i].start)
-            .map_or(total, |n| n.start);
-        notes[i].len = notes[i].len.min(next - notes[i].start).max(1);
+            .find(|p| p.played == notes[i].played)
+            .and_then(|p| p.beats);
+        notes[i].len = length(grid, start, beats, room, following.is_some());
     }
     notes
 }
 
-/// The step for an extra note ideally at `ideal`: that step if free, otherwise the
-/// neighbour on the side it was played on, then the other one. With none free it stays
-/// put and overlaps.
-fn free_step(notes: &[GridNote], ideal: i64, played_late: bool, total: u32) -> u32 {
-    let free =
-        |s: i64| (0..total as i64).contains(&s) && !notes.iter().any(|n| n.start as i64 == s);
-    let side = if played_late { 1 } else { -1 };
-    [ideal, ideal + side, ideal - side]
-        .into_iter()
-        .find(|&s| free(s))
-        .unwrap_or(ideal) as u32
+/// A note's length in ticks: `beats` as played, within the `room` up to the next note.
+fn length(grid: &Grid, start: u32, beats: Option<f64>, room: u32, followed: bool) -> u32 {
+    let shortest = grid.resolution(start);
+    let Some(beats) = beats else {
+        return shortest.min(room).max(1);
+    };
+    let ticks = beats * grid.tpb as f64;
+    if followed && ticks >= LEGATO * room as f64 {
+        return room;
+    }
+    let units = ticks / shortest as f64;
+    let n = if grid.is_tuplet(start / grid.tpb) {
+        units.round().max(1.0)
+    } else if units < 1.5 {
+        1.0
+    } else {
+        // Sixteenths are for short notes; anything longer reads better in eighths.
+        (units / 2.0).round() * 2.0
+    };
+    let end = start + n as u32 * shortest;
+    // Whatever the note ends in has to be able to hold that position.
+    let at = grid.resolution(end.min(grid.total_ticks().saturating_sub(1)));
+    (end.div_ceil(at) * at - start).min(room).max(1)
 }
 
-/// The notes and rests of one bar, including parts of notes tied in from earlier bars.
+/// The tick for an extra note ideally at `ideal`: that one if free, otherwise the next
+/// grid position on the side it was played on, then the other one. With none free it
+/// stays put and overlaps.
+fn free_tick(notes: &[GridNote], ideal: i64, step: i64, played_late: bool, total: u32) -> u32 {
+    let free =
+        |t: i64| (0..total as i64).contains(&t) && !notes.iter().any(|n| n.start as i64 == t);
+    let side = if played_late { step } else { -step };
+    [ideal, ideal + side, ideal - side]
+        .into_iter()
+        .find(|&t| free(t))
+        .unwrap_or(ideal.clamp(0, total as i64 - 1)) as u32
+}
+
+/// The notes and rests of bar number `b`, including parts of notes tied in from earlier
+/// bars.
 fn bar_events(
-    bar: &BarPlan,
-    first: u32,
+    b: usize,
+    grid: &Grid,
     notes: &[GridNote],
     input: &ScoreInput,
     flats: bool,
 ) -> Vec<ScoreEvent> {
-    let steps = bar_steps(bar);
-    let last = first + steps;
-    let s = step_len(bar);
-    let time = |step: u32| bar.start + step as f64 * s;
+    let bar = grid.bars[b];
+    let tpb = grid.tpb;
+    let first = grid.first_beat[b] * tpb;
+    let last = grid.first_beat[b + 1] * tpb;
+    let len = beat_len(bar);
+    let time = |tick: u32| bar.start + (tick - first) as f64 / tpb as f64 * len;
+    let beat = |tick: u32| (tick - first) / tpb;
     let mut events = Vec::new();
-    let mut cursor = 0;
+    let mut cursor = first;
+    // A rest first finishes its beat, so the beats stay readable.
     let rest = |events: &mut Vec<ScoreEvent>, from: u32, to: u32| {
-        for (step, value, tuplet) in split(bar, from, to - from) {
-            if time(step) < input.until {
-                events.push(ScoreEvent {
-                    time: time(step),
-                    step,
-                    value,
-                    tuplet,
-                    kind: ScoreKind::Rest,
-                });
+        let next_beat = from.div_ceil(tpb) * tpb;
+        let parts = [(from, next_beat.min(to)), (next_beat.min(to), to)];
+        for (a, b) in parts.into_iter().filter(|(a, b)| a < b) {
+            for (tick, value, tuplet) in split(grid, bar, a, b) {
+                if time(tick) < input.until {
+                    events.push(ScoreEvent {
+                        time: time(tick),
+                        beat: beat(tick),
+                        value,
+                        tuplet,
+                        kind: ScoreKind::Rest,
+                    });
+                }
             }
         }
     };
-    for n in notes
+    let in_bar = notes
         .iter()
-        .filter(|n| n.start < last && n.start + n.len > first)
-    {
-        let from = n.start.max(first) - first;
-        let to = (n.start + n.len).min(last) - first;
+        .filter(|n| n.start < last && n.start + n.len > first);
+    for n in in_bar {
+        let from = n.start.max(first);
+        let to = (n.start + n.len).min(last);
         if from > cursor {
             rest(&mut events, cursor, from);
         }
         let continues = n.start + n.len > last;
-        let parts = split(bar, from, to - from);
+        let parts = split(grid, bar, from, to);
         let count = parts.len();
         let note = score_note(input, n.played, flats);
-        for (k, (step, value, tuplet)) in parts.into_iter().enumerate() {
+        for (k, (tick, value, tuplet)) in parts.into_iter().enumerate() {
             let continuation = k > 0 || n.start < first;
             events.push(ScoreEvent {
-                time: time(step),
-                step,
+                time: time(tick),
+                beat: beat(tick),
                 value,
                 tuplet,
                 kind: ScoreKind::Note(ScoreNote {
@@ -365,7 +506,7 @@ fn bar_events(
         if bar.start < input.until {
             events.push(ScoreEvent {
                 time: bar.start,
-                step: 0,
+                beat: 0,
                 value: NoteValue {
                     denominator: 1,
                     dots: 0,
@@ -374,10 +515,52 @@ fn bar_events(
                 kind: ScoreKind::BarRest,
             });
         }
-    } else if cursor < steps {
-        rest(&mut events, cursor, steps);
+    } else if cursor < last {
+        rest(&mut events, cursor, last);
     }
     events
+}
+
+/// Builds the score. Count-in bars are left out. `bars` may be any contiguous part of
+/// the session; notes outside it are skipped.
+pub fn build(input: &ScoreInput) -> Vec<ScoreBar> {
+    let bars: Vec<&BarPlan> = input.bars.iter().filter(|b| !b.is_count_in()).collect();
+    let mut first_beat = Vec::with_capacity(bars.len() + 1);
+    let mut total = 0;
+    for b in &bars {
+        first_beat.push(total);
+        total += b.beats.max(1);
+    }
+    first_beat.push(total);
+    let spb = bars.first().map_or(1, |b| b.steps_per_beat.max(1));
+    let mut grid = Grid {
+        bars,
+        first_beat,
+        tpb: 12 * spb / gcd(12, spb),
+        straight: if spb.is_power_of_two() { spb.max(4) } else { 4 },
+        subdivisions: vec![1; total as usize],
+    };
+    let placed = placings(input, &grid);
+    let notes = grid_notes(&placed, &mut grid);
+
+    let flats = input.scale.is_some_and(|s| s.prefers_flats());
+    let mut out: Vec<ScoreBar> = Vec::with_capacity(grid.bars.len());
+    let mut last_bpm = None;
+    for (i, bar) in grid.bars.iter().enumerate() {
+        let mut events = bar_events(i, &grid, &notes, input, flats);
+        beam(&mut events);
+        out.push(ScoreBar {
+            index: bar.index,
+            start: bar.start,
+            end: bar.end(),
+            bpm: bar.bpm,
+            show_bpm: last_bpm != Some(bar.bpm),
+            sig: bar.sig,
+            events,
+        });
+        last_bpm = Some(bar.bpm);
+    }
+    out
 }
 
 fn score_note(input: &ScoreInput, played: usize, flats: bool) -> ScoreNote {
@@ -423,31 +606,34 @@ pub fn chord_marks(midi: i32, tones: &[u8], flats: bool) -> Vec<i32> {
         .collect()
 }
 
-/// Splits `len` steps from `start` into written values: `(step, value, tuplet)`.
-/// On a tuplet grid, whole beats are written plainly and only parts of a beat as tuplets.
-fn split(bar: &BarPlan, start: u32, len: u32) -> Vec<(u32, NoteValue, Option<u32>)> {
-    let spb = bar.steps_per_beat.max(1);
+/// Splits ticks `start..end` of `bar` into written values: `(tick, value, tuplet)`. Parts
+/// of tuplet beats are written as tuplets; everything else, whole tuplet beats included,
+/// plainly.
+fn split(grid: &Grid, bar: &BarPlan, start: u32, end: u32) -> Vec<(u32, NoteValue, Option<u32>)> {
+    let tpb = grid.tpb;
     let den = bar.sig.den.max(1);
+    let plain_at =
+        |pos: u32| !grid.is_tuplet(pos / tpb) || (pos.is_multiple_of(tpb) && end - pos >= tpb);
     let mut out = Vec::new();
-    if spb.is_power_of_two() {
-        for (at, value) in binary(len, den * spb) {
-            out.push((start + at, value, None));
-        }
-        return out;
-    }
-    let base = 1 << spb.ilog2();
-    let (mut pos, end) = (start, start + len);
+    let mut pos = start;
     while pos < end {
-        if pos.is_multiple_of(spb) && end - pos >= spb {
-            let beats = (end - pos) / spb;
-            for (at, value) in binary(beats, den) {
-                out.push((pos + at * spb, value, None));
+        if plain_at(pos) {
+            let mut run = pos;
+            while run < end && plain_at(run) {
+                run = ((run / tpb + 1) * tpb).min(end);
             }
-            pos += beats * spb;
+            let unit = tpb / grid.straight;
+            for (at, value) in binary((run - pos).div_ceil(unit), den * grid.straight) {
+                out.push((pos + at * unit, value, None));
+            }
+            pos = run;
         } else {
-            let part = (spb - pos % spb).min(end - pos);
-            for (at, value) in binary(part, den * base) {
-                out.push((pos + at, value, Some(spb)));
+            let d = grid.subdivisions[(pos / tpb) as usize];
+            let part = ((pos / tpb + 1) * tpb).min(end) - pos;
+            let unit = tpb / d;
+            let base = 1 << d.ilog2();
+            for (at, value) in binary(part.div_ceil(unit), den * base) {
+                out.push((pos + at * unit, value, Some(d)));
             }
             pos += part;
         }
@@ -482,16 +668,13 @@ fn binary(units: u32, unit: u32) -> Vec<(u32, NoteValue)> {
 }
 
 /// Beams runs of flagged notes within a beat, with one stem direction per group.
-fn beam(events: &mut [ScoreEvent], spb: u32) {
+fn beam(events: &mut [ScoreEvent]) {
     let mut group = 0;
     let mut i = 0;
     while i < events.len() {
         let beamable = |e: &ScoreEvent| matches!(e.kind, ScoreKind::Note(_)) && e.value.beams() > 0;
         let mut end = i;
-        while end < events.len()
-            && beamable(&events[end])
-            && events[end].step / spb == events[i].step / spb
-        {
+        while end < events.len() && beamable(&events[end]) && events[end].beat == events[i].beat {
             end += 1;
         }
         if end - i >= 2 {
@@ -615,13 +798,24 @@ mod tests {
         })
     }
 
+    /// (time in ms, denominator, dots, is a note) of each event.
     fn values(bar: &ScoreBar) -> Vec<(u32, u32, u8, bool)> {
         bar.events
             .iter()
             .map(|e| {
                 let note = matches!(e.kind, ScoreKind::Note(_));
-                (e.step, e.value.denominator, e.value.dots, note)
+                let ms = (e.time * 1000.0).round() as u32;
+                (ms, e.value.denominator, e.value.dots, note)
             })
+            .collect()
+    }
+
+    /// Times in ms of the notes that start in `bar`.
+    fn note_times(bar: &ScoreBar) -> Vec<u32> {
+        bar.events
+            .iter()
+            .filter(|e| matches!(&e.kind, ScoreKind::Note(n) if !n.continuation))
+            .map(|e| (e.time * 1000.0).round() as u32)
             .collect()
     }
 
@@ -678,52 +872,135 @@ mod tests {
     fn matched_notes_take_the_target_grid_position() {
         let b = bars(1, 1, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
         let mut m = matcher(&b);
-        play(&mut m, 0.02, 0.3, 40); // Late and short.
+        play(&mut m, 0.02, 0.38, 40); // Late.
         play(&mut m, 0.48, 0.9, 40); // Early.
         let s = score(&b, &m);
         assert_eq!(
             values(&s[0]),
             [
                 (0, 4, 0, true),
-                (1, 4, 0, true),
-                (2, 2, 0, false), // The two unplayed beats.
+                (500, 4, 0, true),
+                (1000, 2, 0, false), // The two unplayed beats.
             ]
         );
         assert!((s[0].events[1].time - 0.5).abs() < 1e-9);
     }
 
     #[test]
-    fn extra_notes_round_to_the_nearest_step() {
+    fn extra_notes_round_to_a_musical_grid() {
         let b = bars(1, 2, &[(0, 1)]);
         let mut m = matcher(&b);
-        play(&mut m, 0.76, 0.99, 40); // Nearest eighth step is 3 (0.75 s).
-        let s = score(&b, &m);
-        let steps: Vec<u32> = s[0]
-            .events
-            .iter()
-            .filter(|e| matches!(e.kind, ScoreKind::Note(_)))
-            .map(|e| e.step)
-            .collect();
-        assert_eq!(steps, [3]);
+        play(&mut m, 0.76, 0.99, 40); // The off-beat of beat 2.
+        assert_eq!(note_times(&score(&b, &m)[0]), [750]);
     }
 
     #[test]
-    fn extra_note_moves_off_an_occupied_step() {
+    fn eighths_show_over_a_groove_of_quarters() {
+        // As in a real report: the exercise wants quarters, the player plays eighths,
+        // slightly unevenly and not quite held to the next note.
+        let beat = 0.706;
+        let b: Vec<BarPlan> = bars(1, 1, &[(0, 1), (1, 1), (2, 1), (3, 1)])
+            .into_iter()
+            .map(|mut bar| {
+                bar.duration = beat * 4.0;
+                for (i, n) in bar.notes.iter_mut().enumerate() {
+                    n.time = i as f64 * beat;
+                    n.len = beat;
+                }
+                bar
+            })
+            .collect();
+        let mut m = matcher(&b);
+        let onsets = [0.003, 0.343, 0.708, 1.056, 1.422, 1.787, 2.161, 2.511];
+        for (i, &on) in onsets.iter().enumerate() {
+            let next = onsets.get(i + 1).copied().unwrap_or(on + 0.35);
+            play(&mut m, on, next - 0.05, 40);
+        }
+        let s = score(&b, &m);
+        let eighths = s[0]
+            .events
+            .iter()
+            .filter(|e| matches!(e.kind, ScoreKind::Note(_)) && e.value.denominator == 8)
+            .count();
+        assert_eq!(eighths, 8, "{:?}", values(&s[0]));
+        assert!(
+            !s[0]
+                .events
+                .iter()
+                .any(|e| matches!(e.kind, ScoreKind::Rest))
+        );
+    }
+
+    #[test]
+    fn a_note_reaches_the_next_when_held_most_of_the_way() {
+        let b = bars(1, 1, &[(0, 1), (1, 1)]);
+        let mut m = matcher(&b);
+        play(&mut m, 0.0, 0.35, 40);
+        play(&mut m, 0.5, 0.65, 40); // Short, with nothing after it.
+        assert_eq!(
+            values(&score(&b, &m)[0]),
+            [
+                (0, 4, 0, true),
+                (500, 16, 0, true),
+                (625, 8, 1, false), // Finishes the beat...
+                (1000, 2, 0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn sixteenths_and_triplets_are_told_apart() {
+        let b = bars(1, 1, &[]);
+        let mut m = matcher(&b);
+        // Beat 1 in sixteenths, beat 2 in triplets, a little off in places.
+        for t in [0.005, 0.13, 0.245, 0.38] {
+            play(&mut m, t, t + 0.1, 40);
+        }
+        for t in [0.5, 0.67, 0.83] {
+            play(&mut m, t, t + 0.14, 40);
+        }
+        let s = score(&b, &m);
+        let e = &s[0].events;
+        assert_eq!(note_times(&s[0]), [0, 125, 250, 375, 500, 667, 833]);
+        assert!(
+            e[..4]
+                .iter()
+                .all(|e| (e.value.denominator, e.tuplet) == (16, None))
+        );
+        assert!(
+            e[4..7]
+                .iter()
+                .all(|e| (e.value.denominator, e.tuplet) == (8, Some(3)))
+        );
+    }
+
+    #[test]
+    fn a_lone_note_does_not_make_a_tuplet() {
+        let b = bars(1, 1, &[]);
+        let mut m = matcher(&b);
+        play(&mut m, 0.17, 0.3, 40); // A third of the beat in.
+        let s = score(&b, &m);
+        assert!(s[0].events.iter().all(|e| e.tuplet.is_none()));
+    }
+
+    #[test]
+    fn a_slightly_early_note_belongs_to_the_next_beat() {
+        let b = bars(1, 1, &[]);
+        let mut m = matcher(&b);
+        play(&mut m, 0.49, 0.9, 40);
+        assert_eq!(note_times(&score(&b, &m)[0]), [500]);
+    }
+
+    #[test]
+    fn extra_note_moves_off_an_occupied_position() {
         let b = bars(1, 2, &[(1, 1)]);
         let mut m = matcher(&b);
-        play(&mut m, 0.25, 0.4, 40); // Matched to step 1.
-        // Extra, outside the window of an already played target, rounding onto step 1.
+        play(&mut m, 0.25, 0.4, 40); // Matched to the off-beat.
+        // Extra, as its target is taken, rounding onto the same position.
         let extra = m.on_onset(0.27, -10.0);
         m.on_offset(extra, 0.4, -10.0, Some(midi_to_freq(40.0, A4)));
         assert_eq!(m.played[extra].matched, None);
-        let s = score(&b, &m);
-        let steps: Vec<u32> = s[0]
-            .events
-            .iter()
-            .filter(|e| matches!(e.kind, ScoreKind::Note(_)))
-            .map(|e| e.step)
-            .collect();
-        assert_eq!(steps, [1, 2]); // Played late, so it moves right.
+        assert_eq!(note_times(&score(&b, &m)[0]), [250, 500]); // Late, so to the right.
     }
 
     #[test]
@@ -791,7 +1068,7 @@ mod tests {
         let s = score(&b, &m);
         assert_eq!(
             values(&s[0]),
-            [(0, 4, 1, true), (3, 8, 0, true), (4, 2, 0, true)]
+            [(0, 4, 1, true), (750, 8, 0, true), (1000, 2, 0, true)]
         );
         // Five steps need a tie.
         let parts = binary(5, 8);
@@ -856,13 +1133,18 @@ mod tests {
 
     #[test]
     fn sixths_are_tuplets_of_sixteenths() {
-        let b = bars(1, 6, &[]);
-        let parts = split(&b[0], 1, 2);
-        assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].1.denominator, 8);
-        assert_eq!(parts[0].2, Some(6));
-        let one = split(&b[0], 1, 1);
-        assert_eq!(one[0].1.denominator, 16);
+        let b = bars(1, 6, &[(0, 1), (1, 2), (3, 1), (4, 1), (5, 1)]);
+        let mut m = matcher(&b);
+        let step = 0.5 / 6.0;
+        for s in [0, 1, 3, 4, 5] {
+            let t = s as f64 * step;
+            let steps = if s == 1 { 2.0 } else { 1.0 };
+            play(&mut m, t, t + step * steps * 0.9, 40);
+        }
+        let s = score(&b, &m);
+        let e = &s[0].events;
+        assert_eq!((e[0].value.denominator, e[0].tuplet), (16, Some(6)));
+        assert_eq!((e[1].value.denominator, e[1].tuplet), (8, Some(6)));
     }
 
     #[test]
@@ -946,7 +1228,7 @@ mod tests {
         m.expected.truncate(1);
         m.outcomes.truncate(1);
         assert_eq!(m.played[i].matched, Some(1));
-        assert_eq!(score(&b, &m)[0].events.len(), 3);
+        assert_eq!(note_times(&score(&b, &m)[0]), [500]);
     }
 
     #[test]

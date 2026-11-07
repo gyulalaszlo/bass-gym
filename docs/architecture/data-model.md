@@ -114,11 +114,17 @@ Transport time resets when the output stream is rebuilt.
 `score::build(&ScoreInput)` turns bars and played notes into `ScoreBar`s of notes and
 rests. It's pure, so all notation rules are tested there and painters stay simple.
 
-- Noteheads sit on the step grid, not at the played time. A matched note takes its
-  target's position and length; an extra rounds to the nearest free step.
+- Noteheads sit on a musical grid, not at the played time and not on the exercise's
+  grid. A matched note starts at its target. Every beat picks the simplest of
+  `SUBDIVISIONS` (quarter, eighth, sixteenth, triplet, sextuplet) that fits its notes
+  within `FIT_TOLERANCE`, and extras round to that. A lone note can't make a tuplet.
+- Lengths come from the playing, not the target. A note held for `LEGATO` of the way to
+  the next one reaches it, so small gaps aren't rests; otherwise it rounds to eighths,
+  or a sixteenth if short. While still sounding, a matched note shows its target's length.
+- Positions are ticks: `Grid.tpb` per beat, enough for every subdivision.
 - One voice: a note ends where the next starts. Ties split notes at barlines and where
-  no single value fits. On tuplet grids (`steps_per_beat` not a power of two) whole
-  beats are written plainly and only parts of a beat as tuplets.
+  no single value fits. Parts of tuplet beats are written as tuplets, whole beats
+  plainly. Rests finish their beat first.
 - Bass is written an octave up. `StaffPitch.pos` counts lines and spaces from the bottom
   line (written G2): open E is -2, open G 7.
 - No key signature: every altered note has an accidental, spelled by

@@ -90,9 +90,9 @@ let x_of   = |t: f64| x_now + ((t - self.now) * pps) as f32;
 ```
 
 `score: Some(LiveScore)` adds a staff above the grid on the same axis, built each frame
-from the bars in view with `until = now`. `LIVE_STAFF` has a fixed range so the grid
-doesn't jump. A sounding note appears once its pitch arrives. `ViewPrefs.show_score`
-switches it, in the Display preferences.
+from the bars in view with `until = now`. `LiveScore::layout` has a fixed range so the
+grid doesn't jump. A sounding note appears once its pitch arrives.
+`ViewPrefs.show_score` and `.score_size` set it, in the Display preferences.
 
 `bar_len` is the duration of the current bar. Nothing scrolls: everything repaints from
 `now` with `x_now` fixed, and the exercise calls `request_repaint()` while running.
@@ -126,6 +126,10 @@ Culling relies on time-sorted vectors.
   overlays, editable `Marker`s, a snap function and a `new_marker` closure, and holds no
   session types. `add_remove: false` fixes the marker set, for loop points. The owner
   keeps `EditorState`. It's the first widget using `Sense::drag`.
+- Editor drags work like Ableton: `WaveView::navigate` keeps the point where the drag
+  began under the pointer while vertical movement zooms (down zooms in). Labels wrap and
+  grow, and the area under the waveform grows with the tallest one in view.
+- `ScoreView` paints chord marks first, then staff, then notes, so marks stay a hint.
 
 ## Results dialog (`bg-ui/src/widgets/results.rs`)
 

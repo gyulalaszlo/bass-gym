@@ -37,20 +37,27 @@ pub struct LiveScore<'a> {
     pub scale: Option<Scale>,
     /// Reference tuning, in Hz.
     pub a4: f32,
+    /// Distance between staff lines.
+    pub size: f32,
 }
 
-/// A fixed range, so the grid doesn't jump as notes come and go. It covers a five-string's
-/// low B and the 12th fret of the G string.
-const LIVE_STAFF: StaffLayout = StaffLayout {
-    spacing: 6.5,
-    lo: -5,
-    hi: 14,
-};
+impl LiveScore<'_> {
+    /// A fixed range, so the grid doesn't jump as notes come and go. It covers a
+    /// five-string's low B and the 12th fret of the G string.
+    fn layout(&self) -> StaffLayout {
+        StaffLayout {
+            spacing: self.size,
+            lo: -5,
+            hi: 14,
+            labels: false,
+        }
+    }
+}
 
 impl Beatgrid<'_> {
     /// Extra height the score takes above the grid.
     fn score_height(&self) -> f32 {
-        self.score.map_or(0.0, |_| LIVE_STAFF.height())
+        self.score.map_or(0.0, |s| s.layout().height())
     }
 
     pub fn show(&self, ui: &mut egui::Ui, height: f32) {
@@ -134,9 +141,8 @@ impl Beatgrid<'_> {
         ScoreView {
             bars: &bars,
             axis,
-            layout: LIVE_STAFF,
+            layout: live.layout(),
             lead: None,
-            labels: false,
         }
         .paint(&p, rect);
         p.vline(

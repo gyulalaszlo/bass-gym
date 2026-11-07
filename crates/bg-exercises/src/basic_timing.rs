@@ -193,6 +193,7 @@ impl ExerciseType for BasicTiming {
             chords: &[],
             scale: None,
             a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
+            size: prefs.score_size,
         });
         if self.has_results {
             let s = lock(&self.shared);

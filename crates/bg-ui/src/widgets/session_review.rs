@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use bg_audio::{AnalysisConfig, AudioConfig, AudioEngine, Recording, ReplayHandle, SoundConfig};
 use bg_core::harmony::Scale;
-use bg_core::score::{self, ScoreBar, ScoreChord, ScoreInput};
+use bg_core::score::{self, ScoreBar, ScoreChord, ScoreEvent, ScoreInput, ScoreKind};
 use bg_core::{BarPlan, Matcher};
 use bg_report::{Annotation, Exported, ReportInput};
 use egui::{
@@ -38,6 +38,10 @@ const EDITOR_HEIGHT: f32 = 260.0;
 /// Seconds shown either side of a click when opening the marker editor.
 const EDITOR_SPAN: f64 = 1.0;
 const BASS_GAIN: f32 = 1.0;
+/// How close to a note a click on the score counts as clicking it, in points.
+const NOTE_REACH: f32 = 12.0;
+/// Playback from a note starts this long before it, so its attack is heard whole.
+const NOTE_LEAD: f64 = 0.02;
 
 /// What a finished session leaves behind for review.
 pub struct ReviewInput {
@@ -120,6 +124,21 @@ pub fn position_at(bars: &[ScoreBar], t: f64) -> Option<MusicPosition> {
     })
 }
 
+/// Where playback should start for a click at `x` in `bar`: at the recorded note drawn
+/// there, or else at the start of the bar.
+fn click_start(bar: &ScoreBar, m: &Matcher, axis: TimeAxis, x: f32) -> f64 {
+    let distance = |e: &ScoreEvent| (axis.x(e.time) - x).abs();
+    bar.events
+        .iter()
+        .filter(|e| distance(e) <= NOTE_REACH)
+        .filter_map(|e| match &e.kind {
+            ScoreKind::Note(n) => Some((distance(e), m.played.get(n.played)?.onset)),
+            _ => None,
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map_or(bar.start, |(_, onset)| onset - NOTE_LEAD)
+}
+
 /// The expected, played and bar markers of a session.
 fn overlays(m: &Matcher, bars: &[ScoreBar]) -> Vec<Marker> {
     let mut id = 0;
@@ -177,6 +196,8 @@ pub struct SessionReview {
     chords: bool,
     log: bool,
     replay: Option<ReplayHandle>,
+    /// What to play once the running replay has stopped.
+    queued: Option<(f64, f64)>,
     /// Annotations, in transport time.
     pub markers: Vec<Marker>,
     next_marker: u64,
@@ -217,6 +238,7 @@ impl SessionReview {
             chords: true,
             log: false,
             replay: None,
+            queued: None,
             markers: Vec::new(),
             next_marker: 1 << 32,
             editor: None,
@@ -270,15 +292,34 @@ impl SessionReview {
         self.replay.is_some()
     }
 
+    fn start_replay(&mut self, engine: &mut AudioEngine, from: f64, to: f64) {
+        let handle = ReplayHandle::new(self.click, self.chords);
+        let rec = self.input.recording.clone();
+        if engine.start_replay(&rec, from, to, BASS_GAIN, handle.clone()) {
+            self.replay = Some(handle);
+        }
+    }
+
     fn toggle_play(&mut self, engine: &mut AudioEngine) {
+        self.queued = None;
         if self.is_playing() {
             engine.stop_session();
         } else if let Some((from, to)) = self.selected_range() {
-            let handle = ReplayHandle::new(self.click, self.chords);
-            let rec = self.input.recording.clone();
-            if engine.start_replay(&rec, from, to, BASS_GAIN, handle.clone()) {
-                self.replay = Some(handle);
-            }
+            self.start_replay(engine, from, to);
+        }
+    }
+
+    /// Plays from `from` to the end of the session, taking over from a running replay.
+    fn play_from(&mut self, engine: &mut AudioEngine, from: f64) {
+        let Some(to) = self.score.last().map(|b| b.end) else {
+            return;
+        };
+        if self.is_playing() {
+            // It takes the worker a moment to stop: `tick` starts this one after that.
+            self.queued = Some((from, to));
+            engine.stop_session();
+        } else {
+            self.start_replay(engine, from, to);
         }
     }
 
@@ -287,12 +328,18 @@ impl SessionReview {
         if self.replay.is_none() {
             return;
         }
-        if !dialog_open && engine.session_running() {
-            engine.stop_session();
+        if !dialog_open {
+            self.queued = None;
+            if engine.session_running() {
+                engine.stop_session();
+            }
         }
         if !engine.session_running() {
             engine.release_replay();
             self.replay = None;
+            if let Some((from, to)) = self.queued.take() {
+                self.start_replay(engine, from, to);
+            }
         }
     }
 
@@ -441,11 +488,19 @@ impl SessionReview {
         self.report_row(ui, data_dir);
         ui.add_space(10.0);
         let playhead = self.playhead(engine);
-        if self.editor.is_some() {
-            self.marker_editor(ui, playhead);
-        } else {
-            self.rows(ui, playhead);
-        }
+        // Only this part scrolls: the controls above stay in view.
+        let height = ui.available_height();
+        egui::ScrollArea::vertical()
+            .id_salt("session_review")
+            .max_height(height)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                if self.editor.is_some() {
+                    self.marker_editor(ui, playhead);
+                } else {
+                    self.rows(ui, engine, playhead);
+                }
+            });
     }
 
     fn controls(&mut self, ui: &mut egui::Ui, engine: &mut AudioEngine) {
@@ -461,7 +516,9 @@ impl SessionReview {
                     can_play,
                     button(format!("{icon} {label}")).min_size([84.0, 30.0]),
                 )
-                .on_hover_text("Plays the selected bars (Space)")
+                .on_hover_text(
+                    "Plays the selected bars (Space). Click the score to play from there.",
+                )
                 .clicked()
             {
                 self.toggle_play(engine);
@@ -522,7 +579,7 @@ impl SessionReview {
         });
     }
 
-    fn rows(&mut self, ui: &mut egui::Ui, playhead: Option<f64>) {
+    fn rows(&mut self, ui: &mut egui::Ui, engine: &mut AudioEngine, playhead: Option<f64>) {
         if self.score.is_empty() {
             ui.label(RichText::new("No bars were played.").color(theme::dim()));
             return;
@@ -534,6 +591,7 @@ impl SessionReview {
         let row_h = score_h + NOTE_LANE + WAVE_HEIGHT;
         let mut open_at = None;
         let mut select = None;
+        let mut play = None;
         for (n, range) in score::rows(self.score.len(), per_row)
             .into_iter()
             .enumerate()
@@ -587,6 +645,9 @@ impl SessionReview {
                     let bar = bars.iter().find(|b| b.start <= t && t < b.end);
                     let extend = ui.input(|i| i.modifiers.shift);
                     select = bar.map(|b| (b.index + 1, extend));
+                    if !extend {
+                        play = bar.map(|b| click_start(b, &self.input.matcher, axis, pos.x));
+                    }
                 }
             }
         }
@@ -598,6 +659,9 @@ impl SessionReview {
                 self.from_bar = bar;
                 self.to_bar = bar;
             }
+        }
+        if let Some(t) = play {
+            self.play_from(engine, t);
         }
         if let Some(t) = open_at {
             self.open_editor(t);
@@ -832,6 +896,59 @@ mod tests {
         let p = position_at(&bars, 5.0).unwrap();
         assert_eq!((p.bar, p.beat, p.sub), (1, 1, 1));
         assert_eq!(position_at(&[], 5.0), None);
+    }
+
+    #[test]
+    fn a_click_plays_from_the_note_there_or_the_start_of_the_bar() {
+        use bg_core::score::{NoteValue, ScoreNote};
+        let mut m = Matcher::default();
+        for onset in [10.52, 11.03] {
+            m.played.push(bg_core::scoring::Played {
+                onset,
+                offset: None,
+                peak_db: -10.0,
+                freq: None,
+                harmony: None,
+                matched: None,
+            });
+        }
+        let event = |time, kind| ScoreEvent {
+            time,
+            beat: 0,
+            value: NoteValue {
+                denominator: 4,
+                dots: 0,
+            },
+            tuplet: None,
+            kind,
+        };
+        let note = |played| {
+            ScoreKind::Note(ScoreNote {
+                played,
+                pitch: None,
+                clash: false,
+                chord_marks: Vec::new(),
+                tied: false,
+                continuation: false,
+                stem_up: true,
+                beam_group: None,
+            })
+        };
+        let mut b = bar(0, 10.0);
+        b.events = vec![
+            event(10.5, note(0)),
+            event(11.0, note(1)),
+            event(11.5, ScoreKind::Rest),
+        ];
+        // 100 points per second, starting at the bar.
+        let axis = TimeAxis::new(Rangef::new(0.0, 200.0), 10.0, 12.0);
+        let start = |x| click_start(&b, &m, axis, x);
+        // Notes are written on the grid, but play from where they really were.
+        assert!((start(52.0) - (10.52 - NOTE_LEAD)).abs() < 1e-9);
+        assert!((start(95.0) - (11.03 - NOTE_LEAD)).abs() < 1e-9);
+        assert_eq!(start(20.0), 10.0);
+        // A rest isn't a place of its own.
+        assert_eq!(start(150.0), 10.0);
     }
 
     #[test]

@@ -16,10 +16,16 @@ fn main() {
     }
     let mut wav = hound::WavReader::open(path).expect("readable WAV file");
     let sr = wav.spec().sample_rate as f32;
-    let samples: Vec<f32> = wav
-        .samples::<f32>()
-        .map(|s| s.expect("float WAV"))
-        .collect();
+    let samples: Vec<f32> = match wav.spec().sample_format {
+        hound::SampleFormat::Float => wav
+            .samples::<f32>()
+            .map(|s| s.expect("readable sample"))
+            .collect(),
+        hound::SampleFormat::Int => wav
+            .samples::<i16>()
+            .map(|s| s.expect("16-bit WAV") as f32 / 32768.0)
+            .collect(),
+    };
 
     let mut detector = NoteDetector::new(sr, cfg);
     let mut events = Vec::new();

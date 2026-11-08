@@ -3,3 +3,6 @@
 
 # SoundFonts are built from samples/ (`cargo soundfonts`)
 /assets/soundfonts/*.sf2
+
+# ignore backing tracks
+/samples/*bass*/

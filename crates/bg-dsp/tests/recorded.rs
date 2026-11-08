@@ -41,10 +41,24 @@ fn a_ringing_low_e_is_one_note() {
 fn repeated_notes_are_all_found() {
     let found = onsets("repeated_eighths.wav");
     let expected = [
-        0.076, 0.424, 0.788, 1.137, 1.502, 1.867, 2.241, 2.591, 2.969,
+        0.076, 0.424, 0.788, 1.137, 1.502, 1.867, 2.238, 2.591, 2.969,
     ];
     assert_eq!(found.len(), expected.len(), "{found:?}");
     for (f, e) in found.iter().zip(expected) {
         assert!((f - e).abs() < 0.003, "{found:?}");
+    }
+}
+
+/// Eighths on one pitch at 140 BPM, each muted only 30-50 ms before the next: too briefly
+/// for a window sized for the lowest note to see. Every second note went missing.
+#[test]
+fn fast_eighths_are_all_found() {
+    let found = onsets("fast_eighths.wav");
+    let expected = [
+        0.046, 0.223, 0.479, 0.716, 0.932, 1.164, 1.368, 1.582, 1.785, 1.982, 2.184, 2.392, 2.602,
+    ];
+    assert_eq!(found.len(), expected.len(), "{found:?}");
+    for (f, e) in found.iter().zip(expected) {
+        assert!((f - e).abs() < 0.005, "{found:?}");
     }
 }

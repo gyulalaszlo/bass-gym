@@ -67,11 +67,20 @@ pub fn results_dialog(
                 ui.add_space(8.0);
             }
             let shown = tab.as_deref().copied().unwrap_or_default();
-            egui::ScrollArea::vertical()
-                .id_salt(shown)
-                .max_height(max_h - 110.0)
-                .auto_shrink([false, true])
-                .show(ui, |ui| add(ui, shown));
+            let body_height = max_h - 110.0;
+            if reviewing {
+                // Scrolls by itself, to keep its toolbar in view.
+                ui.vertical(|ui| {
+                    ui.set_max_height(body_height);
+                    add(ui, shown);
+                });
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt(shown)
+                    .max_height(body_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| add(ui, shown));
+            }
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add(button("Close").min_size([96.0, 30.0])).clicked()

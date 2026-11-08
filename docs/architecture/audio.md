@@ -216,6 +216,15 @@ pub enum NoteEvent {
   last 42 ms (`HF_PERIOD_RISE_DB`): low notes can have a sharp edge in every period, so
   bursts recurring at the same level aren't plucks. Too high a margin delays real notes
   by a few ms, because they then wait for the low band.
+- **Dip cue:** the peak cue's reference spans 42 ms, a period of the lowest note, so it
+  can't see a mute shorter than that, which is normal above ~100 BPM eighths.
+  `PeriodTracker` measures the ringing note's period, and `dip_onset` looks for a rise
+  within `DIP_RISE_MS` in the highest peak of one period. The period is cleared at each
+  onset, so a note's first ~60 ms uses the peak cue only, and a lower note can't inherit
+  a short window. Levels over different spans never compare (a longer one fakes a rise).
+  The rise must return within `DIP_RETURN_DB` of the note's peak, which rejects mute noise.
+  Limits: a mute shorter than about a period stays invisible, and beating that swings much
+  more than 12 dB looks like a mute.
 - **Checking against real audio:** `cargo run -p bg-dsp --example detect_wav --
   <report>/audio.wav [release_db]` prints what the detector finds. Clips of real playing
   are in `crates/bg-dsp/tests/fixtures`, tested by `tests/recorded.rs`.

@@ -1,8 +1,11 @@
 //! Note onset / offset detection on a monophonic bass signal.
 //!
-//! Works on short hops (~0.7 ms). Two onset cues are combined:
+//! Works on short hops (~0.7 ms). Three onset cues are combined:
 //! - the signal peak rising above the highest peak of the preceding ~40 ms (which spans a
-//!   full period of a ringing low note, so its waveform ripple doesn't trigger), and
+//!   full period of a ringing low note, so its waveform ripple doesn't trigger),
+//! - a dip and rise of the note's level, measured over one period of the note itself. A
+//!   mute before the next note can be far shorter than those ~40 ms, as it is at high
+//!   tempos, and then the first cue never sees the level fall, and
 //! - a burst in the high band (> 500 Hz): the pluck transient. Its short reference window
 //!   catches re-plucks after mutes shorter than one period of a low note. It must also
 //!   beat the bursts of the last full period, as a low note's waveform can have a sharp
@@ -49,6 +52,25 @@ impl Default for NoteDetectorConfig {
 
 /// How far a high band burst must rise above those of the last period of a low note.
 const HF_PERIOD_RISE_DB: f32 = 1.0;
+/// Periods looked for. Higher notes are found at a multiple of their period, which is
+/// just as good here, and the longest period is that of a low B.
+const PERIOD_MIN_MS: f32 = 5.0;
+const PERIOD_MAX_MS: f32 = 34.0;
+/// How much of the signal is compared with itself one period earlier.
+const PERIOD_WINDOW_MS: f32 = 24.0;
+/// How alike those must be to count as a steady note.
+const PERIOD_MIN_CORRELATION: f32 = 0.8;
+const PERIOD_EVERY_MS: f32 = 4.0;
+/// A smaller change of the measured period is ignored.
+const PERIOD_TOLERANCE: f32 = 0.1;
+/// Slack for that, when measuring a level over a period.
+const PERIOD_MARGIN: f32 = 1.15;
+/// A rise out of a dip must take no longer than this. A pluck is that fast; two strings
+/// beating against each other are not.
+const DIP_RISE_MS: f32 = 25.0;
+/// A rise out of a dip must come back to within this of the note's peak. Anything lower
+/// is the noise of the mute itself.
+const DIP_RETURN_DB: f32 = 15.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteEvent {
@@ -76,6 +98,77 @@ struct Active {
     peak_rms: f32,
 }
 
+/// Measures the period of the ringing note, in hops, by comparing the signal with itself.
+/// An error can only be a multiple of the period, since nothing matches better than the
+/// period itself, and that only makes a dip harder to see.
+struct PeriodTracker {
+    hist: VecDeque<f32>,
+    min_lag: usize,
+    max_lag: usize,
+    window: usize,
+    every: usize,
+    wait: usize,
+    period: Option<usize>,
+}
+
+impl PeriodTracker {
+    fn new(hops: impl Fn(f32) -> usize) -> Self {
+        Self {
+            hist: VecDeque::new(),
+            min_lag: hops(PERIOD_MIN_MS),
+            max_lag: hops(PERIOD_MAX_MS),
+            window: hops(PERIOD_WINDOW_MS),
+            every: hops(PERIOD_EVERY_MS),
+            wait: 0,
+            period: None,
+        }
+    }
+
+    /// Forgets the note. The next one can be much lower, and with this one's period its
+    /// ripple would look like dips.
+    fn reset(&mut self) {
+        self.hist.clear();
+        self.period = None;
+    }
+
+    fn push(&mut self, sample: f32) {
+        self.hist.push_back(sample);
+        if self.hist.len() > self.max_lag + self.window {
+            self.hist.pop_front();
+            self.wait = self.wait.saturating_sub(1);
+            if self.wait == 0 {
+                self.wait = self.every;
+                self.measure();
+            }
+        }
+    }
+
+    /// Keeps the last period when the signal isn't steady, as during a mute.
+    fn measure(&mut self) {
+        let hist = self.hist.make_contiguous();
+        let now = &hist[hist.len() - self.window..];
+        let energy = |s: &[f32]| s.iter().map(|v| v * v).sum::<f32>();
+        let now_energy = energy(now);
+        let mut best = (PERIOD_MIN_CORRELATION, None);
+        for lag in self.min_lag..=self.max_lag {
+            let start = hist.len() - self.window - lag;
+            let then = &hist[start..start + self.window];
+            let dot: f32 = now.iter().zip(then).map(|(a, b)| a * b).sum();
+            let correlation = dot / (now_energy * energy(then)).sqrt().max(f32::MIN_POSITIVE);
+            if correlation > best.0 {
+                best = (correlation, Some(lag));
+            }
+        }
+        let Some(lag) = best.1 else {
+            return;
+        };
+        let moved = |p: usize| p.abs_diff(lag) as f32 > p as f32 * PERIOD_TOLERANCE;
+        if self.period.is_none_or(moved) {
+            self.period = Some(lag);
+        }
+    }
+}
+
 pub struct NoteDetector {
     cfg: NoteDetectorConfig,
     hpf: Biquad,
@@ -97,6 +190,11 @@ pub struct NoteDetector {
     peak_hist: VecDeque<f32>,
     hist_len: usize,
     hist_skip: usize,
+    period: PeriodTracker,
+    /// The note's level over one period, for as long as that period holds.
+    level_hist: VecDeque<f32>,
+    level_hist_len: usize,
+    level_span: usize,
     energy_hist: VecDeque<f32>,
     rms_hops: usize,
     active: Option<Active>,
@@ -132,6 +230,10 @@ impl NoteDetector {
             peak_hist: VecDeque::new(),
             hist_len: hops(42.0),
             hist_skip: hops(6.0),
+            period: PeriodTracker::new(hops),
+            level_hist: VecDeque::new(),
+            level_hist_len: hops(DIP_RISE_MS),
+            level_span: 0,
             energy_hist: VecDeque::new(),
             rms_hops: hops(40.0),
             active: None,
@@ -182,6 +284,60 @@ impl NoteDetector {
             peak_rms: 0.0,
         });
         self.last_onset = Some(sample);
+        self.period.reset();
+        self.level_hist.clear();
+    }
+
+    /// Where the note's level rose out of a dip, if it just did. The level is the highest
+    /// peak of one period, so it's free of ripple and still shows a mute of a few periods.
+    fn dip_onset(&mut self, hop_peak: f32, hop_start: u64) -> Option<u64> {
+        let period = self.period.period?;
+        let span = (period as f32 * PERIOD_MARGIN).ceil() as usize;
+        if span != self.level_span {
+            // Levels over different spans don't compare: a longer one reaching back to
+            // louder peaks would look like a rise.
+            self.level_span = span;
+            self.level_hist.clear();
+        }
+        let level = self
+            .peak_hist
+            .iter()
+            .rev()
+            .take(span - 1)
+            .fold(hop_peak, |m, &v| m.max(v));
+        self.level_hist.push_back(level);
+        if self.level_hist.len() > self.level_hist_len {
+            self.level_hist.pop_front();
+        }
+        let (trough_at, trough) =
+            self.level_hist
+                .iter()
+                .enumerate()
+                .fold(
+                    (0, f32::MAX),
+                    |low, (i, &v)| {
+                        if v <= low.1 { (i, v) } else { low }
+                    },
+                );
+        let returned = self
+            .active
+            .is_some_and(|a| level > a.peak * from_db(-DIP_RETURN_DB));
+        let risen = returned
+            && level > from_db(self.cfg.gate_db)
+            && level > trough * from_db(self.cfg.onset_rise_db);
+        risen.then(|| {
+            // Halfway up the rise: the noise of a mute wobbles just above its trough.
+            let clear = trough * from_db(self.cfg.onset_rise_db / 2.0);
+            let hops_ago = self
+                .peak_hist
+                .iter()
+                .rev()
+                .take(self.level_hist.len() - trough_at - 1)
+                .enumerate()
+                .rfind(|(_, v)| **v > clear)
+                .map_or(0, |(i, _)| i + 1);
+            hop_start - (hops_ago * self.hop) as u64
+        })
     }
 
     fn process_hop(&mut self, out: &mut Vec<NoteEvent>) {
@@ -189,6 +345,8 @@ impl NoteDetector {
         let hop_peak = self.hop_buf.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         let energy: f32 = self.hop_buf.iter().map(|v| v * v).sum();
         self.env = hop_peak.max(self.env * self.release);
+        let mean = self.hop_buf.iter().sum::<f32>() / self.hop as f32;
+        self.period.push(mean);
 
         // Peaks of the recent past (long enough to span a full period of the lowest note)
         // vs. the peak of the last couple of hops.
@@ -241,6 +399,7 @@ impl NoteDetector {
             }
         }
         let gap_ok = self.last_onset.is_none_or(|t| hop_start >= t + min_gap);
+        let dip = self.dip_onset(hop_peak, hop_start);
         if current > gate && lf_onset && gap_ok {
             let threshold = (hop_peak * 0.3).max(gate * 0.5);
             let idx = self
@@ -250,6 +409,9 @@ impl NoteDetector {
                 .unwrap_or(0);
             self.candidate = None;
             self.emit_onset(hop_start + idx as u64, hop_peak, out);
+        } else if let Some(sample) = dip.filter(|_| gap_ok) {
+            self.candidate = None;
+            self.emit_onset(sample, hop_peak, out);
         } else if hf_onset && gap_ok && self.candidate.is_none() {
             let idx = self
                 .hf_buf
@@ -450,6 +612,93 @@ mod tests {
             .filter(|e| matches!(e, NoteEvent::On { .. }))
             .count();
         assert_eq!(ons, 1);
+    }
+
+    /// Onset times of `signal`, in seconds.
+    fn onsets(sr: f32, signal: &[f32]) -> Vec<f32> {
+        detect(sr, signal)
+            .iter()
+            .filter_map(|e| match e {
+                NoteEvent::On { sample, .. } => Some(*sample as f32 / sr),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// One pitch whose level follows `level`, at `t` seconds. Harmonics stay in phase, so
+    /// nothing but the level tells notes apart, and there's no pluck click.
+    fn shaped(sr: f32, secs: f32, freq: f32, level: impl Fn(f32) -> f32) -> Vec<f32> {
+        (0..(sr * secs) as usize)
+            .map(|i| {
+                let t = i as f32 / sr;
+                let tone: f32 = (1..5)
+                    .map(|h| (TAU * freq * h as f32 * t).sin() / h as f32)
+                    .sum();
+                level(t) * tone * 0.3
+            })
+            .collect()
+    }
+
+    /// Level of notes at `starts`, each muted to -12 dB for the `mute` seconds before the
+    /// next one, and rising back over 8 ms.
+    fn muted_notes(t: f32, starts: &[f32], mute: f32) -> f32 {
+        let Some(&next) = starts.iter().find(|&&s| s > t) else {
+            return 1.0;
+        };
+        if t < starts[0] {
+            0.0
+        } else if t > next - mute {
+            0.25
+        } else {
+            let since = t - starts.iter().rev().find(|&&s| s <= t).unwrap_or(&t);
+            0.25 + 0.75 * (since / 0.008).min(1.0)
+        }
+    }
+
+    #[test]
+    fn a_mute_shorter_than_a_low_period_window_separates_notes() {
+        // Eighths at 140 BPM on a D, muted for 30 ms: within the ~40 ms that spans a period
+        // of the lowest note, but several periods of this one. With no pluck in this signal
+        // a rise only shows at the next waveform peak, so onsets can be a period late.
+        let sr = 44_100.0;
+        let starts: Vec<f32> = (0..6).map(|i| 0.2 + i as f32 * 0.214).collect();
+        let sig = shaped(sr, 1.5, 73.4, |t| muted_notes(t, &starts, 0.03));
+        let found = onsets(sr, &sig);
+        assert_eq!(found.len(), starts.len(), "{found:?}");
+        for (f, s) in found.iter().zip(&starts) {
+            assert!((f - s).abs() < 0.014, "{found:?}");
+        }
+    }
+
+    #[test]
+    fn slow_beating_is_not_a_new_note() {
+        // Two strings beating at 4 Hz, swinging the level by 12 dB. A much deeper swing
+        // falls and rises as fast as a mute, and can't be told from one by level alone.
+        let sr = 44_100.0;
+        let sig = shaped(sr, 2.0, 73.4, |t| {
+            if t < 0.1 {
+                0.0
+            } else {
+                0.625 + 0.375 * (TAU * 4.0 * t).cos()
+            }
+        });
+        assert_eq!(onsets(sr, &sig).len(), 1);
+    }
+
+    #[test]
+    fn a_low_note_after_a_high_one_is_not_split_by_its_ripple() {
+        // The low note has a strong octave, so its peaks alternate in height, and the high
+        // note's shorter period must not carry over to it.
+        let sr = 44_100.0;
+        let mut sig = render(sr, 1.5, &[(0.1, 0.3, 196.0, 0.5)]);
+        for (i, s) in sig.iter_mut().enumerate().skip((0.45 * sr) as usize) {
+            let t = i as f32 / sr - 0.45;
+            let f = 41.2;
+            let tone = (TAU * f * t).sin() * 0.4 + (TAU * 2.0 * f * t).sin();
+            *s += (t / 0.002).min(1.0) * (-t / 1.2).exp() * 0.4 * tone;
+        }
+        let found = onsets(sr, &sig);
+        assert_eq!(found.len(), 2, "{found:?}");
     }
 
     #[test]

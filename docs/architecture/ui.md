@@ -160,8 +160,13 @@ released with `has_results`.
 
 - Rows of whole bars: one shared `TimeAxis` per row for score and waveform. A short last
   row keeps the scale of full rows. Rows are culled with `is_rect_visible`.
-- Click the score to select a bar (Shift extends); click the waveform to open
-  `MarkerEditor` around that time.
+- Click the score to select a bar and play from there to the end of the session: from
+  the recorded note under the click, or else the bar's start. Shift extends the selection
+  and doesn't play. Click the waveform to open `MarkerEditor` around that time.
+- Stopping a replay isn't immediate, so a click during playback is `queued` and `tick`
+  starts it once the worker has stopped.
+- The tab scrolls itself below its toolbar: `results_dialog` gives it a bounded `Ui`
+  rather than the scroll area the Statistics tab gets.
 - Export runs `bg_report::export` on a thread and polls the result. `ReviewInput.settings`
   comes from `report_settings`, taken when the session ended.
 - `tick` must run every frame: it stops a replay when the dialog closes and releases the

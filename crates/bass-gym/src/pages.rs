@@ -763,20 +763,24 @@ impl PreferencePage for ScoringPage {
                 ui.add(slider_field(&mut t.window_ms, 40.0..=300.0).suffix("ms"))
                     .on_hover_text("Notes further than this from any target count as extra notes");
                 ui.end_row();
-                ui.label("Score note length");
-                checkbox(ui, &mut t.score_length, "");
-                ui.end_row();
                 ui.label(RichText::new("Good length within").color(theme::green()));
                 let mut g = t.length_good * 100.0;
-                ui.add_enabled(t.score_length, slider_field(&mut g, 5.0..=80.0).suffix("%"));
+                ui.add(slider_field(&mut g, 5.0..=80.0).suffix("%"));
                 t.length_good = g / 100.0;
                 ui.end_row();
                 ui.label(RichText::new("OK length within").color(theme::amber()));
                 let mut o = t.length_ok * 100.0;
-                ui.add_enabled(t.score_length, slider_field(&mut o, g..=150.0).suffix("%"));
+                ui.add(slider_field(&mut o, g..=150.0).suffix("%"));
                 t.length_ok = o / 100.0;
                 ui.end_row();
             });
+        ui.label(
+            RichText::new(
+                "Whether note length is scored is part of each exercise's groove settings.",
+            )
+            .small()
+            .color(theme::dim()),
+        );
         ctx.settings.set(SCORING, &t);
     }
 }

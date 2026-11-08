@@ -5,7 +5,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bg_audio::{SessionIo, SessionLogic, SessionState, Slot};
-use bg_core::plan::BarPlan;
+use bg_core::plan::{BarPlan, PlannedNote};
+use bg_core::scoring::Played;
 use bg_core::{GradeMode, Matcher, Planner, RecentTiming, ScoringThresholds, SessionConfig};
 use bg_sound::{SoundEvent, SoundKind};
 
@@ -36,8 +37,9 @@ pub fn lock(shared: &SharedTiming) -> MutexGuard<'_, TimingShared> {
 /// Runs on the analysis worker thread.
 pub trait Accompaniment: Send {
     /// Called once for every planned bar (count-in included), ahead of time: schedule
-    /// sounds through `io` and record what is played for the UI.
-    fn plan_bar(&mut self, bar: &BarPlan, io: &mut SessionIo);
+    /// sounds through `io` and record what is played for the UI. Returns the attacks
+    /// played in the bar, on the grid (before any humanizing), which can serve as targets.
+    fn plan_bar(&mut self, bar: &BarPlan, io: &mut SessionIo) -> Vec<PlannedNote>;
     /// Compatibility (0..1) of a pitch played for the beat at `time`; `None` when there
     /// is nothing to judge against (e.g. during the count-in).
     fn judge(&self, time: f64, freq: f32) -> Option<f32>;
@@ -47,9 +49,50 @@ pub trait Accompaniment: Send {
     }
 }
 
+/// What a session with an accompaniment scores.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AccompanimentScoring {
+    pub grade_mode: GradeMode,
+    /// The groove's notes are targets.
+    pub groove: bool,
+    /// The accompaniment's attacks are targets.
+    pub hits: bool,
+    /// Played pitches are judged against the accompaniment.
+    pub harmony: bool,
+}
+
+impl Default for AccompanimentScoring {
+    fn default() -> Self {
+        Self {
+            grade_mode: GradeMode::Combined,
+            groove: true,
+            hits: false,
+            harmony: true,
+        }
+    }
+}
+
+/// The targets of a bar: the groove's notes plus the accompaniment's attacks that aren't
+/// within `tol` seconds of one. A merged target keeps the groove note's length and is
+/// accented if either was.
+pub fn merge_targets(groove: &[PlannedNote], hits: &[PlannedNote], tol: f64) -> Vec<PlannedNote> {
+    let mut out = groove.to_vec();
+    for h in hits {
+        match out[..groove.len()]
+            .iter_mut()
+            .find(|g| (g.time - h.time).abs() <= tol)
+        {
+            Some(g) => g.accent |= h.accent,
+            None => out.push(*h),
+        }
+    }
+    out.sort_by(|a, b| a.time.total_cmp(&b.time));
+    out
+}
+
 pub struct TimingSession {
     cfg: SessionConfig,
-    accompaniment: Option<(Box<dyn Accompaniment>, GradeMode)>,
+    accompaniment: Option<(Box<dyn Accompaniment>, AccompanimentScoring)>,
     thresholds: ScoringThresholds,
     planner: Option<Planner>,
     shared: SharedTiming,
@@ -61,7 +104,12 @@ pub struct TimingSession {
 }
 
 impl TimingSession {
-    pub fn new(cfg: SessionConfig, thresholds: ScoringThresholds, shared: SharedTiming) -> Self {
+    pub fn new(
+        cfg: SessionConfig,
+        mut thresholds: ScoringThresholds,
+        shared: SharedTiming,
+    ) -> Self {
+        thresholds.score_length = cfg.score_length;
         Self {
             cfg,
             accompaniment: None,
@@ -75,32 +123,33 @@ impl TimingSession {
         }
     }
 
-    /// A session with backing whose judged pitches are graded according to `grade_mode`.
+    /// A session with backing, scoring what `scoring` asks for.
     pub fn with_accompaniment(
         cfg: SessionConfig,
         thresholds: ScoringThresholds,
         shared: SharedTiming,
         accompaniment: Box<dyn Accompaniment>,
-        grade_mode: GradeMode,
+        scoring: AccompanimentScoring,
     ) -> Self {
         Self {
-            accompaniment: Some((accompaniment, grade_mode)),
+            accompaniment: Some((accompaniment, scoring)),
             ..Self::new(cfg, thresholds, shared)
         }
     }
 
-    /// Stores the pitch of played note `i` and, with an accompaniment, judges it (at its
-    /// target's time when matched). The timing lock is released while judging: the
-    /// accompaniment takes the chord lock, and the UI may hold that one first.
+    /// Stores the pitch of played note `i` and, with an accompaniment, judges it at
+    /// [`judge_time`]. The timing lock is released while judging: the accompaniment takes
+    /// the chord lock, and the UI may hold that one first.
     fn judge(&self, i: usize, freq: f32) {
         let mut shared = lock(&self.shared);
         let m = &shared.matcher;
         let Some(p) = m.played.get(i) else { return };
-        let target = p.matched.and_then(|e| m.expected.get(e));
-        let time = target.map_or(p.onset, |e| e.time);
+        let time = judge_time(m, p);
         shared.matcher.played[i].freq = Some(freq);
         drop(shared);
-        if let Some((acc, _)) = &self.accompaniment {
+        if let Some((acc, scoring)) = &self.accompaniment
+            && scoring.harmony
+        {
             let score = acc.judge(time, freq);
             lock(&self.shared).matcher.on_pitch(i, score);
         }
@@ -113,8 +162,10 @@ impl SessionLogic for TimingSession {
         let planner = Planner::new(self.cfg.clone(), start);
         self.planned_until = start;
         let matcher = match &self.accompaniment {
-            Some((_, mode)) => Matcher::with_harmony(self.thresholds.clone(), *mode),
-            None => Matcher::new(self.thresholds.clone()),
+            Some((_, s)) if s.harmony => {
+                Matcher::with_harmony(self.thresholds.clone(), s.grade_mode)
+            }
+            _ => Matcher::new(self.thresholds.clone()),
         };
         *lock(&self.shared) = TimingShared {
             matcher,
@@ -129,6 +180,10 @@ impl SessionLogic for TimingSession {
         let Some(planner) = self.planner.as_mut() else {
             return SessionState::Finished;
         };
+        let (groove_targets, hit_targets) = self
+            .accompaniment
+            .as_ref()
+            .map_or((true, false), |(_, s)| (s.groove, s.hits));
         let mut shared = lock(&self.shared);
         shared.matcher.update(io.now);
         loop {
@@ -144,13 +199,23 @@ impl SessionLogic for TimingSession {
                     }
                     self.planned_until = bar.end();
                     shared.bpm = bar.bpm;
-                    shared.matcher.add_bar(&bar);
                     drop(shared);
                     schedule(&self.cfg, io, &bar);
-                    if let Some((acc, _)) = self.accompaniment.as_mut() {
-                        acc.plan_bar(&bar, io);
-                    }
+                    let hits = match self.accompaniment.as_mut() {
+                        Some((acc, _)) => acc.plan_bar(&bar, io),
+                        None => Vec::new(),
+                    };
+                    // The groove click still sounds from `bar`; the matcher gets the targets.
+                    let scored = BarPlan {
+                        notes: merge_targets(
+                            if groove_targets { &bar.notes } else { &[] },
+                            if hit_targets { &hits } else { &[] },
+                            grid_tolerance(&bar),
+                        ),
+                        ..bar.clone()
+                    };
                     shared = lock(&self.shared);
+                    shared.matcher.add_bar(&scored);
                     shared.bars.push(bar);
                 }
                 None => break,
@@ -218,6 +283,23 @@ impl SessionLogic for TimingSession {
             acc.stop(now);
         }
     }
+}
+
+/// How far after its onset an extra note is judged: a note played just ahead of a chord
+/// change belongs to the new chord.
+pub const EXTRA_JUDGE_DELAY: f64 = 0.03;
+
+/// The time a played note's pitch is judged at: its target's time when matched, otherwise
+/// shortly after its onset.
+pub fn judge_time(m: &Matcher, p: &Played) -> f64 {
+    p.matched
+        .and_then(|e| m.expected.get(e))
+        .map_or(p.onset + EXTRA_JUDGE_DELAY, |e| e.time)
+}
+
+/// A quarter of the bar's grid step: attacks closer than this are the same target.
+fn grid_tolerance(bar: &BarPlan) -> f64 {
+    bar.duration / (bar.beats.max(1) * bar.steps_per_beat.max(1)) as f64 / 4.0
 }
 
 fn schedule(cfg: &SessionConfig, io: &mut SessionIo, bar: &BarPlan) {
@@ -299,6 +381,16 @@ pub fn timing_meter(
 
 /// A few bars of `cfg` from time 0, for previewing the groove before starting.
 pub fn preview(cfg: &SessionConfig) -> (Vec<BarPlan>, Matcher) {
+    preview_targets(cfg, true, |_| Vec::new())
+}
+
+/// Like [`preview`], with the groove's notes as targets or not, plus `hits(bar)` (merged
+/// as a session merges an accompaniment's attacks).
+pub fn preview_targets(
+    cfg: &SessionConfig,
+    groove: bool,
+    hits: impl Fn(&BarPlan) -> Vec<PlannedNote>,
+) -> (Vec<BarPlan>, Matcher) {
     let cfg = SessionConfig {
         count_in_bars: 0,
         ..cfg.clone()
@@ -306,6 +398,40 @@ pub fn preview(cfg: &SessionConfig) -> (Vec<BarPlan>, Matcher) {
     let mut planner = Planner::new(cfg, 0.0);
     let mut matcher = Matcher::default();
     let bars: Vec<_> = (0..4).filter_map(|_| planner.next_bar(&())).collect();
-    bars.iter().for_each(|b| matcher.add_bar(b));
+    for b in &bars {
+        let notes = merge_targets(
+            if groove { &b.notes } else { &[] },
+            &hits(b),
+            grid_tolerance(b),
+        );
+        matcher.add_bar(&BarPlan { notes, ..b.clone() });
+    }
     (bars, matcher)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn n(time: f64, len: f64, accent: bool) -> PlannedNote {
+        PlannedNote { time, len, accent }
+    }
+
+    #[test]
+    fn targets_merge_close_attacks() {
+        let groove = [n(0.0, 0.5, false), n(1.0, 0.5, false)];
+        let hits = [n(0.01, 2.0, true), n(0.75, 0.25, false), n(1.5, 0.5, true)];
+        let t = merge_targets(&groove, &hits, 0.05);
+        assert_eq!(
+            t,
+            [
+                n(0.0, 0.5, true),
+                n(0.75, 0.25, false),
+                n(1.0, 0.5, false),
+                n(1.5, 0.5, true)
+            ]
+        );
+        assert_eq!(merge_targets(&[], &hits, 0.05), hits);
+        assert_eq!(merge_targets(&groove, &[], 0.05), groove);
+    }
 }

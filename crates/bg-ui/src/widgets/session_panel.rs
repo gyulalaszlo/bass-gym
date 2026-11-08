@@ -335,6 +335,8 @@ fn groove(ui: &mut Ui, cfg: &mut SessionConfig) {
             .font(mono(13.0))
             .color(theme::dim()),
         );
+        checkbox(ui, &mut cfg.score_length, "Score note length")
+            .on_hover_text("Off: hold notes as long as you like");
     });
     groove_editor(ui, &mut cfg.groove, cfg.time_sig);
 }

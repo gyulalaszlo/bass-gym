@@ -88,12 +88,27 @@ Transport time resets when the output stream is rebuilt.
   `steps_per_beat` (from `SessionConfig.time_sig` and `.groove`).
 - The UI shows bar `index + 1`.
 
+## Targets
+
+`Expected` notes come from `TimingSession::tick`, not straight from `BarPlan.notes`.
+`merge_targets` combines the groove's notes with the attacks `Accompaniment::plan_bar`
+returns: grid times, before humanize, anticipations included. Attacks within a quarter of
+a grid step of a groove note merge into it. Basic chords' `ScoringOptions { groove, piano,
+chord_tones }` (in the preset) maps to `AccompanimentScoring { groove, hits, harmony }`.
+The groove click always plays from `bar.notes`, and `shared.bars` keeps the original bar.
+With no targets, every note is an extra, `bar_rate` is `None` and success-triggered ramps
+never fire. `timing_session::preview_targets` does the same merge for the preview grid,
+using `accompaniment::preview_targets`, which leaves out the random anticipations.
+
 ## Grading (`bg-core/src/scoring.rs`)
 
 - `on_onset` takes the nearest target that's free or held by a note further from it, so
   string noise just before a note can't keep the note from its target.
 - `regrade` takes the worst of timing, length and (in Combined mode) harmony.
-- Default thresholds: good 12 ms, ok 30 ms, window 150 ms, length 0.3 / 0.6.
+- Default thresholds: good 12 ms, ok 30 ms, window 150 ms, length 0.3 / 0.6. Whether
+  length is scored comes from the preset (`SessionConfig.score_length`), which
+  `TimingSession::new` copies into `ScoringThresholds.score_length`. The tolerances are
+  global.
 - Each note's window is clamped to half the distance to its neighbours.
 - `Missed` is set in `update` once the window passes with nothing played.
 - Extra notes have no grade. The beatgrid draws them red.
@@ -107,8 +122,13 @@ Transport time resets when the output stream is rebuilt.
   `a4` comes from `TunerPrefs`. `freq` can stay `None`.
 - `harmony` is the checker's score: 1 chord tone, 0.5 passing, 0 clash. `harmony_grade`
   maps it to Good, Ok or Poor.
-- The degree played isn't stored. Derive it from the chord at the target time when
-  matched, otherwise at the onset (as `accompaniment.rs::judge` does).
+- The degree played isn't stored. Derive it from the chord at
+  `timing_session.rs::judge_time`: the target's time when matched, otherwise 30 ms after
+  the onset, so a note played just before a chord change counts for the new chord.
+- With `harmony` off (`AccompanimentScoring`), the matcher has `harmony_enabled = false`
+  and pitches are stored but never judged.
+- `stats().harmony` counts matched notes, plus extras whose pitch was judged. The
+  "unknown" bucket only counts matched notes.
 - `music.rs::note_name` is sharps only. `PPQ = 960`.
 
 ## Score (`bg-core/src/score.rs`)

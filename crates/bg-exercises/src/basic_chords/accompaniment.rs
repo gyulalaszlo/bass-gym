@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use bg_audio::{SessionIo, Slot};
 use bg_core::harmony::{Chord, ChordChecker, Scale, Voicing, VoicingStyle, comp, voice};
 use bg_core::music::freq_to_midi;
-use bg_core::plan::BarPlan;
+use bg_core::plan::{BarPlan, PlannedNote};
 use bg_sound::{SoundEvent, SoundKind};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -44,6 +44,78 @@ pub type SharedChords = Arc<Mutex<ChordShared>>;
 
 pub fn lock_chords(shared: &SharedChords) -> MutexGuard<'_, ChordShared> {
     shared.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The chords touching bar `index` of `beats` beats: (start beat in the bar, end beat in
+/// the bar, progression position counted from the start, not wrapped).
+pub fn segments(index: i64, beats: f32, bars_per_chord: f32) -> Vec<(f32, f32, usize)> {
+    let chord_beats = (bars_per_chord * beats).max(1.0);
+    let bar_beat0 = index.max(0) as f32 * beats;
+    let mut out = Vec::new();
+    let mut b = 0.0;
+    while b < beats - 1e-3 {
+        let pos = ((bar_beat0 + b + 1e-3) / chord_beats).floor() as usize;
+        let next_change = ((pos + 1) as f32 * chord_beats - bar_beat0).min(beats);
+        out.push((b, next_change, pos));
+        b = next_change;
+    }
+    out
+}
+
+/// The comp attacks of a bar, sorted: the pattern's hits plus a re-attack wherever the
+/// chord changes between hits.
+pub fn bar_hits(
+    pattern: &str,
+    beats: u32,
+    segments: &[(f32, f32, usize)],
+    skip_downbeat: bool,
+) -> Vec<comp::Hit> {
+    let end = beats.max(1) as f32;
+    let mut hits = comp::hits(pattern, beats);
+    if skip_downbeat {
+        hits.retain(|h| h.pos > 0.0);
+    }
+    for &(s, _, _) in segments {
+        if s > 0.0 && !hits.iter().any(|h| (h.pos - s).abs() < 1e-3) {
+            let len = hits
+                .iter()
+                .map(|h| h.pos)
+                .filter(|&p| p > s)
+                .fold(end, f32::min)
+                - s;
+            hits.push(comp::Hit {
+                pos: s,
+                len,
+                velocity: 0.7,
+            });
+        }
+    }
+    hits.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+    hits
+}
+
+/// A comp hit as a target: from `pos` to `end` (beats in the bar), accented on the
+/// downbeat and on chord changes.
+fn hit_target(bar: &BarPlan, segments: &[(f32, f32, usize)], pos: f32, end: f32) -> PlannedNote {
+    let beat = bar.duration / bar.beats.max(1) as f64;
+    PlannedNote {
+        time: bar.start + pos as f64 * beat,
+        len: (end - pos) as f64 * beat,
+        accent: segments.iter().any(|seg| (seg.0 - pos).abs() < 1e-3),
+    }
+}
+
+/// The comp hits of a bar as targets, without anticipations (they're random), for
+/// previewing the targets before a session.
+pub fn preview_targets(pattern: &str, bar: &BarPlan, bars_per_chord: f32) -> Vec<PlannedNote> {
+    let segs = segments(bar.index, bar.beats.max(1) as f32, bars_per_chord);
+    bar_hits(pattern, bar.beats, &segs, false)
+        .iter()
+        .filter_map(|h| {
+            let seg = segs.iter().find(|s| h.pos >= s.0 - 1e-3 && h.pos < s.1)?;
+            Some(hit_target(bar, &segs, h.pos, (h.pos + h.len).min(seg.1)))
+        })
+        .collect()
 }
 
 /// Largest humanize changes (at humanize = 1): hit timing (s), hit velocity, chord roll
@@ -190,32 +262,19 @@ impl ChordAccompaniment {
 }
 
 impl Accompaniment for ChordAccompaniment {
-    fn plan_bar(&mut self, bar: &BarPlan, io: &mut SessionIo) {
+    fn plan_bar(&mut self, bar: &BarPlan, io: &mut SessionIo) -> Vec<PlannedNote> {
         if bar.is_count_in() || self.progression.is_empty() {
-            return;
+            return Vec::new();
         }
         let beats = bar.beats.max(1) as f32;
         let beat = bar.duration / beats as f64;
-        let chord_beats = (self.bars_per_chord * beats).max(1.0);
-        let bar_beat0 = bar.index as f32 * beats;
-        let pos_at = |b: f32| ((bar_beat0 + b) / chord_beats).floor() as usize;
         let time_at = |b: f32| bar.start + b as f64 * beat;
-
-        // Chord spans touching this bar: (start beat in bar, end beat in bar, position).
-        let mut segments: Vec<(f32, f32, usize)> = Vec::new();
-        let mut b = 0.0;
-        while b < beats - 1e-3 {
-            let pos = pos_at(b + 1e-3);
-            let next_change = ((pos + 1) as f32 * chord_beats - bar_beat0).min(beats);
-            segments.push((b, next_change, pos));
-            b = next_change;
-        }
-
         // Jazzier players anticipate the next chord by an eighth note: decided up front so
         // this bar's hits can make room for it.
-        let next_pos = pos_at(beats + 1e-3);
+        let next_pos = segments(bar.index + 1, beats, self.bars_per_chord)[0].2;
+        let segments = segments(bar.index, beats, self.bars_per_chord);
         let push = beats - 0.5;
-        let anticipate = next_pos != pos_at(beats - 1e-3)
+        let anticipate = segments.last().is_some_and(|seg| seg.2 != next_pos)
             && self.rng.random::<f32>() < self.style.jazziness * 0.4;
         let cut = if anticipate { push } else { beats };
 
@@ -243,26 +302,9 @@ impl Accompaniment for ChordAccompaniment {
         }
 
         // Comp hits, re-attacking chords that change between hits.
-        let mut hits = comp::hits(&self.comp, bar.beats);
-        if std::mem::take(&mut self.skip_downbeat) {
-            hits.retain(|h| h.pos > 0.0);
-        }
-        for &(s, _, _) in &segments {
-            if s > 0.0 && !hits.iter().any(|h| (h.pos - s).abs() < 1e-3) {
-                let len = hits
-                    .iter()
-                    .map(|h| h.pos)
-                    .filter(|&p| p > s)
-                    .fold(beats, f32::min)
-                    - s;
-                hits.push(comp::Hit {
-                    pos: s,
-                    len,
-                    velocity: 0.7,
-                });
-            }
-        }
-        hits.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+        let skip = std::mem::take(&mut self.skip_downbeat);
+        let hits = bar_hits(&self.comp, bar.beats, &segments, skip);
+        let mut targets = Vec::new();
         for h in hits.iter().filter(|h| h.pos < cut - 1e-3) {
             let Some(&(_, seg_end, _)) = segments
                 .iter()
@@ -291,6 +333,7 @@ impl Accompaniment for ChordAccompaniment {
                 h.velocity,
                 &notes,
             );
+            targets.push(hit_target(bar, &segments, h.pos, end));
         }
 
         if anticipate {
@@ -310,7 +353,13 @@ impl Accompaniment for ChordAccompaniment {
                 &v.notes(),
             );
             self.skip_downbeat = true;
+            targets.push(PlannedNote {
+                time: time_at(push),
+                len: 0.5 * beat,
+                accent: true,
+            });
         }
+        targets
     }
 
     fn judge(&self, time: f64, freq: f32) -> Option<f32> {

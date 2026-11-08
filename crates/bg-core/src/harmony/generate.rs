@@ -50,11 +50,32 @@ fn shares_tone(a: &Chord, b: &Chord) -> bool {
     a.tones().iter().any(|t| bt.contains(t))
 }
 
-/// A seeded random in-key progression. Starts on the tonic, follows functional-harmony
-/// tendencies (more ii–V motion when jazzier), ends on the dominant so it loops back
-/// home, and makes each chord share at least one note with the previous one: when a
-/// move would share none, the new chord is first extended (a seventh or ninth usually
-/// creates the common tone), and only then re-picked.
+/// Weighted first chords of a random progression (degree, weight): mostly the tonic and
+/// the common pre-dominants, never the diminished vii.
+const STARTS: [(usize, u32); 6] = [(0, 3), (1, 2), (3, 2), (5, 2), (4, 1), (2, 1)];
+
+/// Picks a degree from `(degree, weight)` pairs.
+fn weighted(opts: &[(usize, u32)], rng: &mut impl Rng) -> usize {
+    let total: u32 = opts.iter().map(|o| o.1).sum();
+    let mut pick = rng.random_range(0..total.max(1));
+    opts.iter()
+        .find_map(|&(d, w)| {
+            if pick < w {
+                Some(d)
+            } else {
+                pick -= w;
+                None
+            }
+        })
+        .unwrap_or(0)
+}
+
+/// A seeded random in-key progression. Starts on a weighted pick (the tonic most often),
+/// follows functional-harmony tendencies (more ii–V motion when jazzier), ends on the
+/// first chord's dominant (a fifth above it) so it loops back, and makes each chord share
+/// at least one note with the previous one: when a move would share none, the new chord
+/// is first extended (a seventh or ninth usually creates the common tone), and only then
+/// re-picked.
 pub fn random_progression(
     scale: &Scale,
     len: usize,
@@ -73,14 +94,23 @@ pub fn random_progression(
     ];
     let len = len.max(1);
     let j = jazziness.clamp(0.0, 1.0);
-    let mut out = vec![scale.realize(colourize(ChordSpec { degree: 0, size: 3 }, j, rng))];
+    let first = weighted(&STARTS, rng);
+    let home = (first + 4) % 7;
+    let mut out = vec![scale.realize(colourize(
+        ChordSpec {
+            degree: first,
+            size: 3,
+        },
+        j,
+        rng,
+    ))];
     while out.len() < len {
         let prev = out.last().unwrap().clone();
         let last = out.len() + 1 == len;
         let mut tried: Vec<usize> = Vec::new();
         let chord = loop {
-            let degree = if last && len > 2 && !tried.contains(&4) && prev.degree != 4 {
-                4
+            let degree = if last && len > 2 && !tried.contains(&home) && prev.degree != home {
+                home
             } else {
                 let opts: Vec<(usize, u32)> = NEXT[prev.degree]
                     .iter()
@@ -100,18 +130,7 @@ pub fn random_progression(
                 if opts.is_empty() {
                     break scale.realize(colourize(ChordSpec { degree: 4, size: 4 }, j, rng));
                 }
-                let total: u32 = opts.iter().map(|o| o.1).sum();
-                let mut pick = rng.random_range(0..total);
-                opts.iter()
-                    .find_map(|&(d, w)| {
-                        if pick < w {
-                            Some(d)
-                        } else {
-                            pick -= w;
-                            None
-                        }
-                    })
-                    .unwrap_or(0)
+                weighted(&opts, rng)
             };
             let mut spec = colourize(ChordSpec { degree, size: 3 }, j, rng);
             let mut chord = scale.realize(spec);
@@ -138,6 +157,7 @@ mod tests {
 
     #[test]
     fn random_progressions_are_seeded_and_connected() {
+        let mut starts = [0; 7];
         for mode in Mode::ALL {
             let scale = Scale { root: 2, mode };
             for seed in 0..40 {
@@ -146,7 +166,17 @@ mod tests {
                     let b = random_progression(&scale, 8, j, &mut ChaCha8Rng::seed_from_u64(seed));
                     assert_eq!(a, b);
                     assert_eq!(a.len(), 8);
-                    assert_eq!(a[0].degree, 0);
+                    starts[a[0].degree] += 1;
+                    // Ends on the first chord's dominant when that connects (and isn't
+                    // already the chord before).
+                    let home = (a[0].degree + 4) % 7;
+                    let to_home = scale.realize(ChordSpec {
+                        degree: home,
+                        size: 5,
+                    });
+                    if a[6].degree != home && shares_tone(&a[6], &to_home) {
+                        assert_eq!(a[7].degree, home, "{mode:?}, seed {seed}, j {j}");
+                    }
                     for w in a.windows(2) {
                         assert!(
                             shares_tone(&w[0], &w[1]),
@@ -158,6 +188,9 @@ mod tests {
                 }
             }
         }
+        // Varied starts, mostly the tonic, never vii.
+        assert!(starts[0] > starts[4] && starts[6] == 0, "{starts:?}");
+        assert!(starts.iter().filter(|&&n| n > 0).count() == 6, "{starts:?}");
     }
 
     #[test]

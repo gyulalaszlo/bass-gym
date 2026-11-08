@@ -144,6 +144,7 @@ Culling relies on time-sorted vectors.
   histograms, the grade and tempo tables, and an exercise-specific `tables` closure.
 - It's called from `basic_timing.rs` and `basic_chords/mod.rs`. Basic chords' closure
   adds "Per chord" and borrows all of `self`, so the review is taken out of `self` first.
+  Its HIT and IN CHORD columns hide when the preset scores no targets or no chord fit.
 - Passing a `ResultsTab` shows the tabs. Score + Audio widens the dialog to 1400 pt.
 - While a text field or popup is active, Esc and clicks outside don't close the dialog.
 - `results_button` reopens it. Any config edit or preset load clears `has_results`,
@@ -172,6 +173,10 @@ released with `has_results`.
   with one table per module id. `get<T>(id)` returns defaults if the table is missing or
   invalid. `set` bumps the revision. `flush` writes atomically, called from
   `refresh_settings` and `on_exit`.
+- Scoring tolerances are global (`pages.rs::ScoringPage`), but what is scored belongs to
+  the preset. Note length is a checkbox in the groove panel (`SessionConfig.score_length`).
+  Basic chords' "Scoring" section has the target sources (groove, piano hits), chord
+  fit and the checker.
 - Other stores: presets in `<config dir>/presets` (exercise config only) and
   `state.json` for `AppState`.
 - Changing anything in `AudioConfig` reopens the devices, so unrelated settings should

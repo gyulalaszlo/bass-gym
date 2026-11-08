@@ -18,6 +18,8 @@ pub struct SessionConfig {
     pub ramp: TempoRamp,
     pub gap: ClickGap,
     pub auto_stop: AutoStop,
+    /// Grade how long notes are held (the tolerances are a global preference).
+    pub score_length: bool,
 }
 
 impl Default for SessionConfig {
@@ -32,6 +34,7 @@ impl Default for SessionConfig {
             ramp: TempoRamp::default(),
             gap: ClickGap::default(),
             auto_stop: AutoStop::default(),
+            score_length: true,
         }
     }
 }

@@ -14,7 +14,7 @@ use bg_exercises::basic_chords::accompaniment::{ChordAccompaniment, SharedChords
 use bg_exercises::basic_chords::{
     BasicChords, BasicChordsData, ChordLength, FixedSource, ProgressionKind, resolve_progression,
 };
-use bg_exercises::timing_session::{SharedTiming, TimingSession, lock};
+use bg_exercises::timing_session::{AccompanimentScoring, SharedTiming, TimingSession, lock};
 use bg_ui::ExerciseType;
 use serde_json::json;
 
@@ -56,7 +56,42 @@ fn session_cfg() -> SessionConfig {
     }
 }
 
+/// The bass line of `run`: (midi, timing error ms) per groove beat.
+const BASS: [(i32, f64); 12] = [
+    // Dm7: chord tones
+    (38, 0.0),
+    (41, 3.0),
+    (45, -4.0),
+    (48, 2.0),
+    // G7: G, B, E (passing), C# (clash)
+    (43, 0.0),
+    (47, 0.0),
+    (40, 0.0),
+    (37, 0.0),
+    // Cmaj7: C, E 25 ms late, G, B
+    (36, 0.0),
+    (40, 25.0),
+    (43, 0.0),
+    (47, 0.0),
+];
+
 fn run(mode: GradeMode) -> (SharedTiming, SharedChords) {
+    run_with(
+        AccompanimentScoring {
+            grade_mode: mode,
+            ..Default::default()
+        },
+        session_cfg(),
+        0.4,
+    )
+}
+
+/// Plays `BASS` (each note `dur` seconds) along a ii–V–I in half notes.
+fn run_with(
+    scoring: AccompanimentScoring,
+    cfg: SessionConfig,
+    dur: f64,
+) -> (SharedTiming, SharedChords) {
     let scale = Scale {
         root: 0,
         mode: harmony::Mode::Ionian,
@@ -81,43 +116,23 @@ fn run(mode: GradeMode) -> (SharedTiming, SharedChords) {
     );
     let timing = SharedTiming::default();
     let mut session = TimingSession::with_accompaniment(
-        session_cfg(),
+        cfg.clone(),
         ScoringThresholds::default(),
         timing.clone(),
         Box::new(acc),
-        mode,
+        scoring,
     );
 
-    let mut planner = Planner::new(session_cfg(), 0.3);
+    let mut planner = Planner::new(cfg, 0.3);
     let expected: Vec<f64> = std::iter::from_fn(|| planner.next_bar(&()))
         .flat_map(|b| b.notes)
         .map(|n| n.time)
         .collect();
     assert_eq!(expected.len(), 16);
-    // (midi, timing error ms) per beat; None = rest.
-    let bass: [Option<(i32, f64)>; 12] = [
-        // Dm7: chord tones
-        Some((38, 0.0)),
-        Some((41, 3.0)),
-        Some((45, -4.0)),
-        Some((48, 2.0)),
-        // G7: G, B, E (passing), C# (clash)
-        Some((43, 0.0)),
-        Some((47, 0.0)),
-        Some((40, 0.0)),
-        Some((37, 0.0)),
-        // Cmaj7: C, E 25 ms late, G, B
-        Some((36, 0.0)),
-        Some((40, 25.0)),
-        Some((43, 0.0)),
-        Some((47, 0.0)),
-    ];
     let total = expected.last().unwrap() + 1.5;
     let mut audio = vec![0.0f32; (total * SR as f64) as usize];
-    for (&t, note) in expected.iter().zip(&bass) {
-        if let Some((midi, err)) = *note {
-            pluck(&mut audio, t + err / 1000.0, 0.4, midi);
-        }
+    for (&t, &(midi, err)) in expected.iter().zip(&BASS) {
+        pluck(&mut audio, t + err / 1000.0, dur, midi);
     }
 
     session.start(&mut SessionIo::offline(0.0, 0.0));
@@ -207,6 +222,112 @@ fn chord_session_grades_harmony() {
     assert_eq!(grades[4..8], [Good, Good, Good, Good]);
     assert_eq!(t.matcher.outcomes[7].harmony_grade, Some(Poor));
     assert_eq!(t.matcher.outcomes[9].grade, Some(Ok));
+}
+
+#[test]
+fn piano_hits_as_targets() {
+    // Half-note comp ("halves"): the piano attacks beats 1 and 3. With only piano targets,
+    // the bass notes on beats 2 and 4 are extras, still judged for harmony.
+    let (timing, chords) = run_with(
+        AccompanimentScoring {
+            groove: false,
+            hits: true,
+            ..Default::default()
+        },
+        session_cfg(),
+        0.4,
+    );
+    let t = lock(&timing);
+    let m = &t.matcher;
+    let c = lock_chords(&chords);
+    let starts: Vec<f64> = m.expected.iter().map(|e| e.time).collect();
+    assert_eq!(starts.len(), 8, "{starts:?}");
+    for w in starts.windows(2) {
+        assert!((w[1] - w[0] - 1.0).abs() < 1e-6, "{starts:?}");
+    }
+    assert!(
+        c.spans
+            .iter()
+            .all(|s| starts.iter().any(|&t| (t - s.start).abs() < 1e-6))
+    );
+    let hits = m.outcomes[..6]
+        .iter()
+        .filter(|o| o.played.is_some())
+        .count();
+    assert_eq!(hits, 6);
+    let s = m.stats();
+    assert_eq!(s.extra, 6);
+    // Harmony covers all 12 notes, extras included.
+    assert_eq!(s.harmony, [10, 1, 1, 0]);
+}
+
+#[test]
+fn free_play_grades_only_harmony() {
+    let (timing, _) = run_with(
+        AccompanimentScoring {
+            groove: false,
+            ..Default::default()
+        },
+        session_cfg(),
+        0.4,
+    );
+    let t = lock(&timing);
+    assert!(t.matcher.expected.is_empty());
+    let s = t.matcher.stats();
+    assert_eq!((s.total(), s.extra), (0, 12));
+    assert_eq!(s.harmony, [10, 1, 1, 0]);
+}
+
+#[test]
+fn harmony_off_grades_timing_only() {
+    use Grade::*;
+    let (timing, _) = run_with(
+        AccompanimentScoring {
+            harmony: false,
+            ..Default::default()
+        },
+        session_cfg(),
+        0.4,
+    );
+    let t = lock(&timing);
+    let m = &t.matcher;
+    assert!(m.outcomes.iter().all(|o| o.harmony.is_none()));
+    assert!(
+        m.played
+            .iter()
+            .all(|p| p.harmony.is_none() && p.freq.is_some())
+    );
+    // The clash (beat 8) is Good now; only the late note is Ok.
+    let grades: Vec<Grade> = m.outcomes[..12].iter().map(|o| o.grade.unwrap()).collect();
+    assert_eq!(
+        grades,
+        [
+            Good, Good, Good, Good, Good, Good, Good, Good, Good, Ok, Good, Good
+        ]
+    );
+    assert_eq!(m.stats().harmony, [0; 4]);
+}
+
+#[test]
+fn note_length_scoring_follows_the_preset() {
+    // Staccato notes: an eighth of a beat against quarter-note targets.
+    let grade = |score_length| {
+        let cfg = SessionConfig {
+            score_length,
+            ..session_cfg()
+        };
+        let (timing, _) = run_with(
+            AccompanimentScoring {
+                harmony: false,
+                ..Default::default()
+            },
+            cfg,
+            0.12,
+        );
+        lock(&timing).matcher.outcomes[0].grade.unwrap()
+    };
+    assert_eq!(grade(false), Grade::Good);
+    assert_eq!(grade(true), Grade::Poor);
 }
 
 #[test]

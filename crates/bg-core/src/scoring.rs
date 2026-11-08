@@ -39,6 +39,15 @@ pub fn harmony_grade(score: f32) -> Grade {
     }
 }
 
+/// Index into [`SessionStats::harmony`] of a judged note.
+fn harmony_bucket(score: f32) -> usize {
+    match harmony_grade(score) {
+        Grade::Good => 0,
+        Grade::Ok => 1,
+        _ => 2,
+    }
+}
+
 /// Evaluation tolerances. These are user preferences, not part of exercise presets.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -47,6 +56,7 @@ pub struct ScoringThresholds {
     pub ok_ms: f32,
     /// Notes further than this from any expected note count as extra notes.
     pub window_ms: f32,
+    /// Set from `SessionConfig::score_length` for each session.
     pub score_length: bool,
     /// Allowed relative length deviation for a good / ok grade.
     pub length_good: f32,
@@ -444,17 +454,23 @@ impl Matcher {
                     s.levels_db.push(db)
                 }
                 if self.harmony_enabled {
-                    let k = match o.harmony {
-                        Some(h) if h >= 0.999 => 0,
-                        Some(h) if h >= 0.5 => 1,
-                        Some(_) => 2,
-                        None => 3,
-                    };
-                    s.harmony[k] += 1;
+                    s.harmony[o.harmony.map_or(3, harmony_bucket)] += 1;
                 }
             }
         }
         s.extra = self.played.iter().filter(|p| p.matched.is_none()).count();
+        // Extra notes count for harmony too when their pitch was judged, so playing
+        // freely over the chords (without targets) still has harmony statistics.
+        if self.harmony_enabled {
+            for h in self
+                .played
+                .iter()
+                .filter(|p| p.matched.is_none())
+                .filter_map(|p| p.harmony)
+            {
+                s.harmony[harmony_bucket(h)] += 1;
+            }
+        }
         s
     }
 }
@@ -526,6 +542,7 @@ pub struct SessionStats {
     pub accent_levels_db: Vec<f32>,
     pub per_tempo: Vec<TempoStats>,
     /// Played notes by chord compatibility: [chord tone, passing, clash, pitch unknown].
+    /// Extra notes count when their pitch was judged; "unknown" covers matched notes only.
     pub harmony: [usize; 4],
 }
 
@@ -678,6 +695,11 @@ mod tests {
             let s = m.stats();
             assert_eq!(s.harmony, [1, 1, 1, 0]);
             assert!((s.harmony_rate().unwrap() - 1.0 / 3.0).abs() < 1e-6);
+            // A judged extra note counts as well; a pitchless one doesn't.
+            let extra = m.on_onset(1.25, -10.0);
+            m.on_pitch(extra, Some(1.0));
+            m.on_onset(1.3, -10.0);
+            assert_eq!(m.stats().harmony, [2, 1, 1, 0]);
         }
     }
 

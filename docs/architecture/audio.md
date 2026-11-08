@@ -121,9 +121,11 @@ pub enum Slot { Click = 0, Groove = 1, Instrument = 2, Playback = 3 }
 - Click uses the built-in `SineClick` / `Woodblock` / `PluckBass` voices (`bg-sound/src/synth.rs`).
 - Chords default to `sf2:e-piano-mellow` through `rustysynth`, or `FmPiano`.
 - `Voice` needs no hardware, so voices can render offline.
-- `TimingSession::tick` plans ahead: 0.35 s lookahead plus 2 bars. `schedule()` sends
-  clicks and groove notes through `io.play`. `ChordAccompaniment::plan_bar` sends the
-  comp, and its seeded humanize can jitter times.
+- `TimingSession::tick` plans ahead: 0.35 s lookahead plus 2 bars. For each bar,
+  `schedule()` sends clicks and groove notes through `io.play`, and
+  `ChordAccompaniment::plan_bar` sends the comp (its seeded humanize can jitter times)
+  and returns the attacks. Only after that does the bar's merged targets go to
+  `matcher.add_bar` (see data-model.md, Targets).
 - `SessionIo::play` is the single chokepoint for every scheduled sound, including
   calibration.
 - The output converts `at` to a frame and triggers anything due before the block end,

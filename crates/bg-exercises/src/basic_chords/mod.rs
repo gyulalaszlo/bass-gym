@@ -34,10 +34,11 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use self::accompaniment::{ChordAccompaniment, SharedChords, lock_chords};
+use self::accompaniment::{ChordAccompaniment, SharedChords, lock_chords, preview_targets};
 use self::prefs::{BasicChordsPage, BasicChordsPrefs};
 use crate::timing_session::{
-    PERFORMANCE_HEIGHT, SharedTiming, TimingSession, last_time, lock, preview, timing_meter,
+    AccompanimentScoring, PERFORMANCE_HEIGHT, SharedTiming, TimingSession, judge_time, last_time,
+    lock, timing_meter,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +141,43 @@ impl Default for KeyboardOptions {
     }
 }
 
+/// What a session grades: which rhythms are targets, and whether notes must fit the chord.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScoringOptions {
+    /// The groove's notes are targets.
+    pub groove: bool,
+    /// The piano's attacks are targets.
+    pub piano: bool,
+    /// Played notes are graded by how they fit the chord (see `checker`).
+    pub chord_tones: bool,
+}
+
+impl Default for ScoringOptions {
+    fn default() -> Self {
+        Self {
+            groove: true,
+            piano: false,
+            chord_tones: true,
+        }
+    }
+}
+
+impl ScoringOptions {
+    pub fn has_targets(&self) -> bool {
+        self.groove || self.piano
+    }
+
+    fn summary(&self) -> &'static str {
+        match (self.has_targets(), self.chord_tones) {
+            (false, false) => "Free play: nothing is graded.",
+            (false, true) => "Any rhythm: only how the notes fit the chords is graded.",
+            (true, false) => "Rhythm only: any pitch is fine.",
+            (true, true) => "Rhythm and chord fit are both graded.",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BasicChordsData {
@@ -160,6 +198,7 @@ pub struct BasicChordsData {
     pub piano_volume: f32,
     /// Chord-compatibility checker id.
     pub checker: String,
+    pub scoring: ScoringOptions,
     pub seed: u64,
     pub new_seed_each_start: bool,
     pub keyboard: KeyboardOptions,
@@ -179,6 +218,7 @@ impl Default for BasicChordsData {
             humanize: 0.0,
             piano_volume: 0.7,
             checker: "chord_tones".into(),
+            scoring: ScoringOptions::default(),
             seed: 1,
             new_seed_each_start: false,
             keyboard: KeyboardOptions::default(),
@@ -568,7 +608,12 @@ impl BasicChords {
             ctx.scoring.clone(),
             self.timing.clone(),
             Box::new(acc),
-            mode,
+            AccompanimentScoring {
+                grade_mode: mode,
+                groove: d.scoring.groove,
+                hits: d.scoring.piano,
+                harmony: d.scoring.chord_tones,
+            },
         );
         Some((logic, seed))
     }
@@ -803,7 +848,9 @@ impl BasicChords {
             }
             .show(ui, 180.0, zoom);
         } else {
-            let (bars, matcher) = preview(&self.data.session);
+            let d = &self.data;
+            let bars_per_chord = d.chord_length.bars();
+            let (bars, matcher) = chord_preview(&d.session, &d.scoring, &d.comp, bars_per_chord);
             let progression = self.shown_progression();
             let labels: Vec<(f64, f64, String)> = if progression.is_empty() {
                 Vec::new()
@@ -838,30 +885,36 @@ impl BasicChords {
     fn per_chord_table(&self, ui: &mut egui::Ui) {
         let chords = lock_chords(&self.chords);
         let t = lock(&self.timing);
-        if chords.progression.is_empty() || t.matcher.expected.is_empty() {
+        let m = &t.matcher;
+        if chords.progression.is_empty() || (m.expected.is_empty() && m.played.is_empty()) {
             return;
         }
-        // Per progression step: notes, timing hits, chord tones, known pitches.
+        let step_at = |time: f64| {
+            chords
+                .spans
+                .iter()
+                .find(|s| s.start <= time && time < s.end)
+                .map(|s| s.step)
+        };
+        // Per progression step: targets, timing hits, chord tones, judged pitches.
         let mut rows = vec![(0usize, 0usize, 0usize, 0usize); chords.progression.len()];
-        for (e, o) in t.matcher.expected.iter().zip(&t.matcher.outcomes) {
-            let (Some(g), Some(span)) = (
-                o.grade,
-                chords
-                    .spans
-                    .iter()
-                    .find(|s| s.start <= e.time && e.time < s.end),
-            ) else {
+        for (e, o) in m.expected.iter().zip(&m.outcomes) {
+            let (Some(g), Some(step)) = (o.grade, step_at(e.time)) else {
                 continue;
             };
-            let r = &mut rows[span.step];
-            r.0 += 1;
+            rows[step].0 += 1;
             if g.is_hit() {
-                r.1 += 1;
+                rows[step].1 += 1;
             }
-            if let Some(h) = o.harmony {
-                r.3 += 1;
+        }
+        // Every judged note counts for harmony, extras included, under the chord it was
+        // judged against.
+        for p in &m.played {
+            let Some(h) = p.harmony else { continue };
+            if let Some(step) = step_at(judge_time(m, p)) {
+                rows[step].3 += 1;
                 if harmony_grade(h) == Grade::Good {
-                    r.2 += 1;
+                    rows[step].2 += 1;
                 }
             }
         }
@@ -872,11 +925,24 @@ impl BasicChords {
                 format!("{:.0}%", a as f32 * 100.0 / b as f32)
             }
         };
+        let (targets, fit) = (
+            self.data.scoring.has_targets(),
+            self.data.scoring.chord_tones,
+        );
+        let cell = |ui: &mut egui::Ui, text: String| {
+            ui.label(RichText::new(text).font(theme::mono(14.0)));
+        };
         egui::Grid::new("per_chord")
             .spacing(egui::vec2(18.0, 2.0))
             .show(ui, |ui| {
-                for h in ["CHORD", "NOTES", "HIT", "IN CHORD"] {
-                    ui.label(RichText::new(h).small().color(theme::dim()));
+                let heads = [
+                    ("CHORD", true),
+                    ("NOTES", targets),
+                    ("HIT", targets),
+                    ("IN CHORD", fit),
+                ];
+                for (h, _) in heads.iter().filter(|h| h.1) {
+                    ui.label(RichText::new(*h).small().color(theme::dim()));
                 }
                 ui.end_row();
                 for (c, r) in chords.progression.iter().zip(&rows) {
@@ -885,9 +951,13 @@ impl BasicChords {
                             .font(theme::mono(14.0))
                             .color(theme::cyan()),
                     );
-                    ui.label(RichText::new(r.0.to_string()).font(theme::mono(14.0)));
-                    ui.label(RichText::new(pct(r.1, r.0)).font(theme::mono(14.0)));
-                    ui.label(RichText::new(pct(r.2, r.3)).font(theme::mono(14.0)));
+                    if targets {
+                        cell(ui, r.0.to_string());
+                        cell(ui, pct(r.1, r.0));
+                    }
+                    if fit {
+                        cell(ui, pct(r.2, r.3));
+                    }
                     ui.end_row();
                 }
             });
@@ -903,29 +973,67 @@ impl BasicChords {
                 0 => theme::section(ui, "Key", |ui| scale_ui(ui, d)),
                 1 => theme::section(ui, "Progression", |ui| progression_ui(ui, d, run_seed)),
                 2 => theme::section(ui, "Piano", |ui| piano_ui(ui, d)),
-                _ => theme::section(ui, "Compatibility check", |ui| {
-                    let current = harmony::checker(&d.checker);
-                    dropdown(ui, "bc_checker", current.name(), |ui| {
-                        for c in harmony::checkers() {
-                            selectable_value(ui, &mut d.checker, c.id().to_owned(), c.name())
-                                .on_hover_text(c.description());
-                        }
-                    });
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(current.description())
-                                .small()
-                                .color(theme::dim()),
-                        )
-                        .wrap(),
-                    );
-                }),
+                _ => theme::section(ui, "Scoring", |ui| scoring_ui(ui, d)),
             });
         });
         ui.add_space(6.0);
         session_panel(ui, &mut self.data.session, enabled);
         self.data != before
     }
+}
+
+/// The preview grid's bars and targets for these settings.
+fn chord_preview(
+    session: &SessionConfig,
+    scoring: &ScoringOptions,
+    comp: &str,
+    bars_per_chord: f32,
+) -> (Vec<bg_core::BarPlan>, bg_core::Matcher) {
+    crate::timing_session::preview_targets(session, scoring.groove, |bar| {
+        if scoring.piano {
+            preview_targets(comp, bar, bars_per_chord)
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+fn scoring_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
+    let s = &mut d.scoring;
+    ui.label(RichText::new("Targets").small().color(theme::dim()));
+    ui.horizontal_wrapped(|ui| {
+        checkbox(ui, &mut s.groove, "Groove").on_hover_text("Play the groove's rhythm");
+        checkbox(ui, &mut s.piano, "Piano hits")
+            .on_hover_text("Play a note with every piano attack");
+    });
+    ui.add_space(4.0);
+    checkbox(ui, &mut s.chord_tones, "Grade chord fit");
+    ui.add_enabled_ui(s.chord_tones, |ui| {
+        let current = harmony::checker(&d.checker);
+        dropdown(ui, "bc_checker", current.name(), |ui| {
+            for c in harmony::checkers() {
+                selectable_value(ui, &mut d.checker, c.id().to_owned(), c.name())
+                    .on_hover_text(c.description());
+            }
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new(current.description())
+                    .small()
+                    .color(theme::dim()),
+            )
+            .wrap(),
+        );
+    });
+    ui.add_space(4.0);
+    ui.add(
+        egui::Label::new(
+            RichText::new(d.scoring.summary())
+                .small()
+                .color(theme::dim()),
+        )
+        .wrap(),
+    );
 }
 
 fn scale_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {

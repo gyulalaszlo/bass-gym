@@ -238,7 +238,10 @@ impl ExerciseType for BasicTiming {
         let scoring = ctx.scoring;
         let engine = &mut *ctx.engine;
         let data_dir = ctx.data_dir;
-        let staff = ctx.settings.get::<ViewPrefs>(ViewPrefs::ID).score_size;
+        let staff = ctx
+            .settings
+            .get::<ViewPrefs>(ViewPrefs::ID)
+            .results_score_size;
         let review = &mut self.review;
         let tab = review.is_some().then_some(&mut self.results_tab);
         results_dialog(

@@ -498,7 +498,10 @@ impl ExerciseType for BasicChords {
         let scoring = ctx.scoring;
         let engine = &mut *ctx.engine;
         let data_dir = ctx.data_dir;
-        let staff = ctx.settings.get::<ViewPrefs>(ViewPrefs::ID).score_size;
+        let staff = ctx
+            .settings
+            .get::<ViewPrefs>(ViewPrefs::ID)
+            .results_score_size;
         results_dialog(ui.ctx(), &mut open, "Results", tab, |ui, tab| {
             match (tab, review.as_mut(), &stats) {
                 (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir, staff),
@@ -1292,8 +1295,9 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
             ui.end_row();
             ui.label("Release");
             ui.add(
-                bg_ui::widgets::controls::slider_field(&mut d.release, 0.0..=2.0)
-                    .step_by(0.1)
+                bg_ui::widgets::controls::slider_field(&mut d.release, 0.0..=4.0)
+                    .logarithmic()
+                    .decimals(2)
                     .suffix("s"),
             )
             .on_hover_text(

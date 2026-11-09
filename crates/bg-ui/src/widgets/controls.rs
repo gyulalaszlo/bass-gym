@@ -623,6 +623,7 @@ pub struct SliderField<'a, T: Numeric> {
     step: Option<f64>,
     decimals: Option<usize>,
     suffix: Option<String>,
+    logarithmic: bool,
 }
 
 pub fn slider_field<T: Numeric>(
@@ -635,10 +636,16 @@ pub fn slider_field<T: Numeric>(
         step: None,
         decimals: None,
         suffix: None,
+        logarithmic: false,
     }
 }
 
 impl<T: Numeric> SliderField<'_, T> {
+    /// A logarithmic slider: finer at the low end of the range.
+    pub fn logarithmic(mut self) -> Self {
+        self.logarithmic = true;
+        self
+    }
     /// Slider step and ↑ / ↓ step of the field.
     pub fn step_by(mut self, s: f64) -> Self {
         self.step = Some(s);
@@ -672,7 +679,9 @@ impl<T: Numeric> Widget for SliderField<'_, T> {
             2
         });
         ui.horizontal(|ui| {
-            let mut slider = egui::Slider::new(self.value, self.range.clone()).show_value(false);
+            let mut slider = egui::Slider::new(self.value, self.range.clone())
+                .show_value(false)
+                .logarithmic(self.logarithmic);
             if let Some(s) = self.step {
                 slider = slider.step_by(s);
             }

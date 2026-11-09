@@ -283,10 +283,14 @@ impl BassGymApp {
             ui.horizontal(|ui| {
                 let on = sounds.monitor;
                 let label = format!("{}  MONITOR {}", icons::EAR, if on { "ON" } else { "OFF" });
+                // M toggles it too, unless a text field has the keyboard.
+                let key = ui.input(|i| i.modifiers.is_none() && i.key_pressed(egui::Key::M))
+                    && !ui.ctx().egui_wants_keyboard_input();
                 if ui
                     .add(selectable(on, label).color(toggle_color(on)))
-                    .on_hover_text("Mix the bass input into the output")
+                    .on_hover_text("Mix the bass input into the output (M)")
                     .clicked()
+                    || key
                 {
                     sounds.monitor = !on;
                 }

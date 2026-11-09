@@ -23,6 +23,8 @@ struct Look {
     strong: bool,
     small: bool,
     min_size: Vec2,
+    /// Centre the text (selectables are left-aligned by default).
+    centred: bool,
 }
 
 impl Look {
@@ -34,6 +36,7 @@ impl Look {
             strong: false,
             small: false,
             min_size: Vec2::ZERO,
+            centred: false,
         }
     }
 
@@ -128,6 +131,11 @@ macro_rules! look_builders {
             self.look.min_size = s.into();
             self
         }
+        /// Centre the text in the widget.
+        pub fn centred(mut self) -> Self {
+            self.look.centred = true;
+            self
+        }
     };
 }
 
@@ -212,7 +220,7 @@ impl Widget for Selectable {
             (true, false) if hovered => (Some(base), color),
             (true, false) => (None, color),
         };
-        Look::paint(ui, rect, galley, fill, text, false);
+        Look::paint(ui, rect, galley, fill, text, self.look.centred);
         pointer_cursor(ui, &resp);
         resp.widget_info(|| {
             WidgetInfo::selected(

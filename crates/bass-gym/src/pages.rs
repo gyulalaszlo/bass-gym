@@ -914,9 +914,16 @@ impl PreferencePage for DisplayPage {
                     checkbox(ui, &mut v.show_score, "Show as a score above the grid");
                     ui.end_row();
                     ui.label("Score size");
-                    ui.add(slider_field(&mut v.score_size, SCORE_SIZE_RANGE).suffix("pt"))
+                    ui.add_enabled(
+                        v.show_score,
+                        slider_field(&mut v.score_size, SCORE_SIZE_RANGE).suffix("pt"),
+                    )
+                    .on_hover_text("Staff line spacing of the live score above the grid");
+                    ui.end_row();
+                    ui.label("Results score size");
+                    ui.add(slider_field(&mut v.results_score_size, SCORE_SIZE_RANGE).suffix("pt"))
                         .on_hover_text(
-                            "Staff line spacing of the live score and of the Results score",
+                            "Staff line spacing of the score in Results › Score + Audio",
                         );
                     ui.end_row();
                     ui.label("Performance indicator range");

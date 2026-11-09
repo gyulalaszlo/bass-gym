@@ -48,7 +48,15 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 8. `is_rect_visible` culling appears only in `performance.rs`.
 
 `button.rs::selectable` and `selectable_value` work as tab-like primitives. The
-preferences page list uses them.
+preferences page list uses them; `.centred()` centres the text.
+
+Toolbar menus (`toolbar.rs`): `menu` is an icon button opening a tabbed panel, and
+`menu_labelled` the same with the current value as its label. Time signature and key
+use the latter, with `choice_grid` (equal-width, centred selectables).
+
+Shortcuts: Space starts / stops (`Toolbar::transport`) and plays / stops the review;
+M toggles monitoring (sidebar in `app.rs`). Both are ignored while a text field has
+the keyboard.
 
 ## Theme (`bg-ui/src/theme.rs`)
 
@@ -91,8 +99,8 @@ let x_of   = |t: f64| x_now + ((t - self.now) * pps) as f32;
 `score: Some(LiveScore)` adds a staff above the grid on the same axis, built each frame
 from the bars in view with `until = now`. `LiveScore::layout` has a fixed range so the
 grid doesn't jump. A sounding note appears once its pitch arrives.
-`ViewPrefs.show_score` and `.score_size` set it, in the Display preferences;
-`score_size` also sets the Results score.
+`ViewPrefs.show_score` and `.score_size` set it, in the Display preferences. The
+Results score has its own `.results_score_size`.
 
 `bar_len` is the duration of the current bar. Nothing scrolls: everything repaints from
 `now` with `x_now` fixed, and the exercise calls `request_repaint()` while running.
@@ -163,7 +171,7 @@ and playback survive closing the dialog. It's built in `update_review` once
 released with `has_results`.
 
 - Rows of whole bars: one shared `TimeAxis` per row for score and waveform. Staff
-  spacing is `ViewPrefs.score_size`, passed to `ui` each frame, and `bars_per_row`
+  spacing is `ViewPrefs.results_score_size`, passed to `ui` each frame, and `bars_per_row`
   scales with it.
 - "Back to score" sets `reveal` to the editor view's centre; `rows` scrolls that row
   into view on the next frame. A short last

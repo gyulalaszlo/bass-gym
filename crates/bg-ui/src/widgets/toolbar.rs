@@ -350,71 +350,64 @@ impl Toolbar<'_> {
         self.ui.data_mut(|d| d.insert_temp(id, true));
     }
 
-    /// The time signature, as a "4/4" dropdown with common signatures and custom fields.
+    /// The time signature, as a "4/4" menu of common signatures and a custom one.
     pub fn time_sig(&mut self, sig: &mut TimeSignature) -> bool {
+        const COMMON: [(u32, u32); 8] = [
+            (2, 4),
+            (3, 4),
+            (4, 4),
+            (5, 4),
+            (6, 8),
+            (7, 8),
+            (9, 8),
+            (12, 8),
+        ];
         let before = *sig;
-        let text = RichText::new(format!("{}/{}", sig.num, sig.den)).font(theme::mono(20.0));
-        controls::dropdown(self.ui, "toolbar_time_sig", text, |ui| {
-            for (n, d) in [
-                (2, 4),
-                (3, 4),
-                (4, 4),
-                (5, 4),
-                (6, 8),
-                (7, 8),
-                (9, 8),
-                (12, 8),
-            ] {
-                if ui
-                    .add(selectable(sig.num == n && sig.den == d, format!("{n}/{d}")))
-                    .clicked()
-                {
-                    *sig = TimeSignature { num: n, den: d };
-                }
-            }
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.add(number_field(&mut sig.num).range(1..=15).id_salt("ts_num"));
-                ui.label("/");
-                controls::dropdown_value(ui, "ts_den", &mut sig.den, [2, 4, 8, 16], |d| {
-                    d.to_string()
+        let label = (format!("{}/{}", sig.num, sig.den), theme::mono(20.0));
+        self.menu_labelled(
+            "toolbar_time_sig",
+            label,
+            "Time signature",
+            false,
+            300.0,
+            |ui| {
+                theme::caption(ui, "Common");
+                let items: Vec<_> = COMMON
+                    .iter()
+                    .map(|&(n, d)| (TimeSignature { num: n, den: d }, format!("{n}/{d}")))
+                    .collect();
+                choice_grid(ui, "ts_common", 4, &items, sig);
+                ui.add_space(10.0);
+                theme::caption(ui, "Custom");
+                ui.horizontal(|ui| {
+                    ui.add(number_field(&mut sig.num).range(1..=15).id_salt("ts_num"));
+                    ui.label("/");
+                    controls::dropdown_value(ui, "ts_den", &mut sig.den, [2, 4, 8, 16], |d| {
+                        d.to_string()
+                    });
                 });
-            });
-        });
+            },
+        );
         *sig != before
     }
 
-    /// The key: a tonic grid and the modes.
+    /// The key, as a "E maj" menu of tonics and modes.
     pub fn key(&mut self, key: &mut Scale) -> bool {
         const ROOTS: [&str; 12] = [
             "C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B",
         ];
         let before = *key;
-        let text = RichText::new(key.short_name()).font(theme::mono(20.0));
-        controls::dropdown(self.ui, "toolbar_key", text, |ui| {
-            ui.set_min_width(230.0);
-            egui::Grid::new("key_roots")
-                .spacing([4.0, 4.0])
-                .show(ui, |ui| {
-                    for (pc, name) in ROOTS.iter().enumerate() {
-                        let pc = pc as u8;
-                        if ui.add(selectable(key.root == pc, *name)).clicked() {
-                            key.root = pc;
-                        }
-                        if pc % 4 == 3 {
-                            ui.end_row();
-                        }
-                    }
-                });
-            ui.separator();
-            for m in Mode::ALL {
-                if ui.add(selectable(key.mode == m, m.label())).clicked() {
-                    key.mode = m;
-                }
-            }
-        })
-        .0
-        .on_hover_text("Key: sets the score's key signature (and the chords in Basic chords)");
+        let label = (key.short_name(), theme::mono(20.0));
+        let tip = "Key: sets the score's key signature (and the chords in Basic chords)";
+        self.menu_labelled("toolbar_key", label, tip, false, 340.0, |ui| {
+            theme::caption(ui, "Tonic");
+            let roots: Vec<_> = (0..12u8).zip(ROOTS.map(String::from)).collect();
+            choice_grid(ui, "key_roots", 4, &roots, &mut key.root);
+            ui.add_space(10.0);
+            theme::caption(ui, "Mode");
+            let modes: Vec<_> = Mode::ALL.map(|m| (m, m.label().to_owned())).into();
+            choice_grid(ui, "key_modes", 2, &modes, &mut key.mode);
+        });
         *key != before
     }
 
@@ -430,6 +423,21 @@ impl Toolbar<'_> {
         width: f32,
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<R> {
+        let label = (icon.to_owned(), egui::FontId::proportional(20.0));
+        self.menu_labelled(id_salt, label, tooltip, active, width, add)
+    }
+
+    /// A [`Toolbar::menu`] whose button shows `label` (text and font) before the caret,
+    /// for settings whose current value is worth seeing, like the time signature.
+    pub fn menu_labelled<R>(
+        &mut self,
+        id_salt: &str,
+        (text, text_font): (String, egui::FontId),
+        tooltip: &str,
+        active: bool,
+        width: f32,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> Option<R> {
         let ui = &mut *self.ui;
         let id = ui.make_persistent_id(id_salt);
         let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
@@ -440,25 +448,38 @@ impl Toolbar<'_> {
         } else {
             theme::cyan()
         };
-        let label = format!("{icon} {}", icons::CARET_DOWN);
-        let font = egui::FontId::proportional(20.0);
         // Drawn by hand so the label has a fixed horizontal margin (it becomes the tab).
-        let galley = ui
-            .painter()
-            .layout_no_wrap(label.clone(), font.clone(), color);
+        let ctx = ui.ctx().clone();
+        let label = |color| {
+            let mut job = egui::text::LayoutJob::default();
+            let format = |font_id| egui::TextFormat {
+                font_id,
+                color,
+                valign: Align::Center,
+                ..Default::default()
+            };
+            job.append(&text, 0.0, format(text_font.clone()));
+            job.append(
+                &format!(" {}", icons::CARET_DOWN),
+                0.0,
+                format(egui::FontId::proportional(20.0)),
+            );
+            ctx.fonts_mut(|f| f.layout_job(job))
+        };
+        let galley = label(color);
         let (rect, resp) = ui.allocate_exact_size(
             vec2(galley.size().x + 2.0 * MENU_PADDING, BUTTON_HEIGHT),
             egui::Sense::click(),
         );
         let resp = resp.on_hover_text(tooltip);
         if ui.is_rect_visible(rect) {
-            let c = if resp.hovered() && ui.is_enabled() {
-                theme::text()
+            let galley = if resp.hovered() && ui.is_enabled() {
+                label(theme::text())
             } else {
-                color
+                galley.clone()
             };
             ui.painter()
-                .galley(rect.center() - galley.size() / 2.0, galley, c);
+                .galley(rect.center() - galley.size() / 2.0, galley, color);
         }
         if resp.clicked() {
             open = !open;
@@ -507,13 +528,7 @@ impl Toolbar<'_> {
                 ]),
             );
             // The button is under the sheet; draw its label again on the tab.
-            painter.text(
-                resp.rect.center(),
-                egui::Align2::CENTER_CENTER,
-                label,
-                font,
-                color,
-            );
+            painter.galley(resp.rect.center() - galley.size() / 2.0, galley, color);
         }
         Some(r)
     }
@@ -522,6 +537,33 @@ impl Toolbar<'_> {
     pub fn separator(&mut self) {
         self.ui.separator();
     }
+}
+
+/// Equal-width, centred choices in `cols` columns, filling the width; sets `value` to
+/// the one clicked.
+fn choice_grid<T: PartialEq + Copy>(
+    ui: &mut Ui,
+    id_salt: &str,
+    cols: usize,
+    items: &[(T, String)],
+    value: &mut T,
+) {
+    const GAP: f32 = 6.0;
+    let cols = cols.max(1);
+    let w = (ui.available_width() - GAP * (cols - 1) as f32) / cols as f32;
+    egui::Grid::new(id_salt).spacing([GAP, GAP]).show(ui, |ui| {
+        for (i, (v, name)) in items.iter().enumerate() {
+            let item = selectable(*value == *v, name.as_str())
+                .centred()
+                .min_size([w, 32.0]);
+            if ui.add(item).clicked() {
+                *value = *v;
+            }
+            if i % cols == cols - 1 {
+                ui.end_row();
+            }
+        }
+    });
 }
 
 fn tap_tempo(ui: &Ui) -> Option<f32> {

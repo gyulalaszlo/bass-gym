@@ -120,10 +120,10 @@ pub fn preview_targets(pattern: &str, bar: &BarPlan, bars_per_chord: f32) -> Vec
 
 /// Largest humanize changes (at humanize = 1): hit timing (s), hit velocity, chord roll
 /// (s) and per-note velocity.
-const HUMANIZE_TIMING: f32 = 0.012;
-const HUMANIZE_VELOCITY: f32 = 0.15;
-const HUMANIZE_ROLL: f32 = 0.010;
-const HUMANIZE_NOTE_VELOCITY: f32 = 0.05;
+const HUMANIZE_TIMING: f32 = 0.012 * 2.0;
+const HUMANIZE_VELOCITY: f32 = 0.15 * 2.0;
+const HUMANIZE_ROLL: f32 = 0.010 * 4.0;
+const HUMANIZE_NOTE_VELOCITY: f32 = 0.05 * 4.0;
 
 pub struct ChordAccompaniment {
     pub progression: Vec<Chord>,

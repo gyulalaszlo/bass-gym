@@ -339,6 +339,8 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
             w(lo).max(w(hi)).max(w(buf.clone())) + 4.0
         });
 
+        const MARGIN: f32 = 2.0;
+
         let drag_step = self
             .drag_step
             .map(|s| if s.is_nan() { self.step } else { s });
@@ -354,7 +356,7 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                         .horizontal_align(self.align)
                         .font(font.clone())
                         .text_color(value_color(ui))
-                        .desired_width(width),
+                        .desired_width(width + MARGIN),
                 );
                 underline(ui, r.rect, r.has_focus() || r.hovered());
                 r
@@ -363,7 +365,7 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                 let line_h =
                     ui.fonts_mut(|f| f.row_height(&font)) + ui.spacing().extra_text_line_spacing;
                 let (rect, _) =
-                    ui.allocate_exact_size(vec2(width + 2.0, line_h + 2.0), Sense::hover());
+                    ui.allocate_exact_size(vec2(width + MARGIN, line_h), Sense::hover());
                 let r = ui.interact(rect, id, Sense::click_and_drag());
                 if ui.is_rect_visible(rect) {
                     let galley =
@@ -382,7 +384,8 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                 r.on_hover_cursor(egui::CursorIcon::ResizeVertical)
             };
             if let Some(s) = &self.suffix {
-                ui.label(egui::RichText::new(s).color(theme::dim()));
+                let rt = egui::RichText::new(s).color(theme::dim());
+                ui.label(rt.font(font));
             }
             r
         });

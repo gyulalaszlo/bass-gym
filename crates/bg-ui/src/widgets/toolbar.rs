@@ -251,17 +251,6 @@ impl Toolbar<'_> {
         let before = *bpm;
         self.ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let step = |ui: &mut Ui, icon: &str, tip: &str| {
-                ui.add(
-                    egui::Button::new(RichText::new(icon).size(18.0).color(theme::cyan()))
-                        .frame(false),
-                )
-                .on_hover_text(tip)
-                .clicked()
-            };
-            if step(ui, icons::MINUS, "−1 BPM") {
-                *bpm = (*bpm - 1.0).max(20.0);
-            }
             ui.add(
                 number_field(bpm)
                     .range(20.0..=400.0)
@@ -273,9 +262,6 @@ impl Toolbar<'_> {
                     .id_salt("toolbar_bpm"),
             )
             .on_hover_text("Drag up / down (Shift ×10), or click to type (↑ / ↓: ±5, Shift ±50)");
-            if step(ui, icons::PLUS, "+1 BPM") {
-                *bpm = (*bpm + 1.0).min(400.0);
-            }
         });
         *bpm != before
     }

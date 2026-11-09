@@ -68,7 +68,7 @@ impl Keyboard<'_> {
         let (low, high) = range(self.keys);
         let whites: Vec<u8> = (low..=high).filter(|&m| !is_black(m)).collect();
         let ww = ui.available_width() / whites.len() as f32;
-        let height = (ww * 5.5).clamp(70.0, 190.0);
+        let height = (ww * 5.5).clamp(50.0, 100.0);
         let (rect, _) =
             ui.allocate_exact_size(vec2(ui.available_width(), height + 14.0), Sense::hover());
         let p = ui.painter_at(rect);

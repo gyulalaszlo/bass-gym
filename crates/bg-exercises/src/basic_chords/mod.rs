@@ -748,6 +748,11 @@ impl BasicChords {
         } else {
             None
         };
+
+        const PROGRESSION_STRIP_CHORD_NAME_FONT_SIZE: f32 = 32.0;
+        const PROGRESSION_STRIP_CHORD_ROMAN_FONT_SIZE: f32 = 24.0;
+        const PROGRESSION_STRIP_MARGIN: f32 = 12.0;
+
         // One row of compact cells (fixed height, scrolls sideways if it doesn't fit).
         let hide = self.data.keyboard.hide_chord_names;
         egui::ScrollArea::horizontal()
@@ -755,21 +760,27 @@ impl BasicChords {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().item_spacing.x = PROGRESSION_STRIP_MARGIN;
                     for (i, c) in progression.iter().enumerate() {
                         let active = current == Some(i);
                         let name_color = if active { theme::text() } else { theme::cyan() };
                         let name = ui.painter().layout_no_wrap(
                             self.chord_label(c),
-                            theme::mono(18.0),
+                            theme::prop(PROGRESSION_STRIP_CHORD_NAME_FONT_SIZE),
                             name_color,
                         );
                         let roman = ui.painter().layout_no_wrap(
                             if hide { String::new() } else { c.roman() },
-                            theme::mono(12.0),
+                            theme::prop(PROGRESSION_STRIP_CHORD_ROMAN_FONT_SIZE),
                             theme::dim(),
                         );
-                        let size = egui::vec2(name.size().x.max(roman.size().x) + 20.0, 48.0);
+                        let size = egui::vec2(
+                            name.size().x.max(roman.size().x) + (PROGRESSION_STRIP_MARGIN * 3.0),
+                            PROGRESSION_STRIP_CHORD_NAME_FONT_SIZE
+                                + PROGRESSION_STRIP_CHORD_ROMAN_FONT_SIZE
+                                + 16.0
+                                + (2.0 * PROGRESSION_STRIP_MARGIN),
+                        );
                         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                         let p = ui.painter();
                         if active {
@@ -789,14 +800,17 @@ impl BasicChords {
                             );
                         }
                         p.galley(
-                            egui::pos2(rect.center().x - name.size().x / 2.0, rect.top() + 5.0),
+                            egui::pos2(
+                                rect.center().x - name.size().x / 2.0,
+                                rect.top() + PROGRESSION_STRIP_MARGIN,
+                            ),
                             name,
                             name_color,
                         );
                         p.galley(
                             egui::pos2(
                                 rect.center().x - roman.size().x / 2.0,
-                                rect.bottom() - 5.0 - roman.size().y,
+                                rect.bottom() - PROGRESSION_STRIP_MARGIN - roman.size().y,
                             ),
                             roman,
                             theme::dim(),
@@ -1217,6 +1231,18 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
             );
             d.jazziness = pct / 100.0;
             ui.end_row();
+
+            ui.label("");
+            ui.add(
+                egui::Label::new(
+                    RichText::new(jazz_description(d.jazziness))
+                        .small()
+                        .color(theme::dim()),
+                )
+                .wrap(),
+            );
+            ui.end_row();
+
             ui.label("Width");
             let mut pct = d.width * 100.0;
             ui.add(
@@ -1260,14 +1286,6 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
             ui.add(egui::Slider::new(&mut d.piano_volume, 0.0..=1.0).show_value(false));
             ui.end_row();
         });
-    ui.add(
-        egui::Label::new(
-            RichText::new(jazz_description(d.jazziness))
-                .small()
-                .color(theme::dim()),
-        )
-        .wrap(),
-    );
     ui.add_space(6.0);
     egui::Grid::new("bc_keyboard")
         .num_columns(2)

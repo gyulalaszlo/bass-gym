@@ -28,6 +28,21 @@ const LABEL_BUTTON: f32 = 40.0;
 /// Smallest visible span, in axis units.
 const MIN_SPAN: f64 = 0.005;
 
+// Marker-painting related
+// -----------------------
+
+/// The width of the stroke used by the markers
+const MARKER_STROKE_WIDTH: f32 = 2.0;
+
+/// The area above the wave to show the connecting beams of start-end markers
+const MARKER_TOP_AREA_SIZE: f32 = 8.0;
+
+/// The opacity of the extra colour wave area covered by a start-end marker
+const MARKER_WAVE_DIMMING: f32 = 0.2;
+
+/// The opacity of the beam of a start-end marker
+const MARKER_BEAM_DIMMING: f32 = 0.75;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Line {
     Solid,
@@ -411,21 +426,64 @@ impl MarkerEditor<'_> {
     }
 }
 
+fn paint_solid_marker_v_line(
+    p: &egui::Painter,
+    axis: TimeAxis,
+    m: &Marker,
+    time: f64,
+    y_range: impl Into<egui::Rangef>,
+) {
+    let x = axis.x(time);
+
+    p.vline(x, y_range, Stroke::new(MARKER_STROKE_WIDTH, m.color));
+    // p.vline(x1, y_range, Stroke::new(1.0, m.color));
+}
+
 /// Paints a marker over `wave`. Dotted lines reach up to the top of `rect`, so they can
 /// run through whatever sits above the waveform.
 pub fn paint_marker(p: &egui::Painter, axis: TimeAxis, m: &Marker, rect: Rect, wave: Rect) {
     let x = axis.x(m.time);
     match m.line {
         Line::Solid => {
-            p.vline(x, wave.y_range(), Stroke::new(2.5, m.color));
+            paint_solid_marker_v_line(p, axis, m, m.time, wave.y_range());
+            // p.vline(x, wave.y_range(), Stroke::new(2.5, m.color));
         }
         Line::Dotted => dotted_vline(p, x, rect.top()..=wave.bottom(), m.color),
     }
     if let Some(end) = m.end {
         let x1 = axis.x(end);
-        p.vline(x1, wave.y_range(), Stroke::new(1.0, m.color));
-        let bar = Rect::from_x_y_ranges(x..=x1, (wave.top() - 8.0)..=wave.top());
-        p.rect_filled(bar, 1.0, m.color.gamma_multiply(0.75));
+
+        let beam_top = wave.top() - MARKER_TOP_AREA_SIZE;
+        let full_vertical_range = beam_top..=wave.bottom();
+        let connecting_beam_vertical_range = beam_top..=wave.top();
+        let horizontal_range = x..=x1;
+
+        // paint the connecting beam BG
+        p.rect_filled(
+            Rect::from_x_y_ranges(&horizontal_range, connecting_beam_vertical_range),
+            0.0,
+            m.color.gamma_multiply(MARKER_BEAM_DIMMING),
+        );
+
+        // paint an overlay with the marker colour above the waveform
+        p.rect_filled(
+            Rect::from_x_y_ranges(&horizontal_range, wave.y_range()),
+            0.0,
+            m.color.gamma_multiply(MARKER_WAVE_DIMMING),
+        );
+
+        // paint the stroke around the marker
+        let marker_full_area_rect = Rect::from_x_y_ranges(x..=x1, full_vertical_range);
+
+        p.line(
+            vec![
+                marker_full_area_rect.left_bottom(),
+                marker_full_area_rect.left_top(),
+                marker_full_area_rect.right_top(),
+                marker_full_area_rect.right_bottom(),
+            ],
+            Stroke::new(MARKER_STROKE_WIDTH, m.color),
+        );
     }
     if m.line == Line::Solid && m.end.is_none() {
         // A stem down to the label.

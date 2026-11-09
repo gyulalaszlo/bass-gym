@@ -672,7 +672,7 @@ impl SessionReview {
         for b in bars {
             if (self.from_bar - 1..self.to_bar).contains(&b.index) {
                 let r = Rect::from_x_y_ranges(axis.x(b.start)..=axis.x(b.end), rect.y_range());
-                p.rect_filled(r, 0.0, theme::cyan().gamma_multiply(0.07));
+                p.rect_filled(r, 0.0, theme::cyan().gamma_multiply(0.1));
             }
         }
     }

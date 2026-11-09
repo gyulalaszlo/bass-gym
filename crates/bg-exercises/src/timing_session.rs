@@ -14,7 +14,7 @@ use bg_sound::{SoundEvent, SoundKind};
 const LOOKAHEAD: f64 = 0.35;
 /// Bars are planned this many bars ahead, so the beat grid always shows what's coming
 /// (tempo / click-gap decisions for a bar are made when it is planned).
-const PLAN_AHEAD_BARS: f64 = 2.0;
+const PLAN_AHEAD_BARS: f64 = 4.0;
 const START_DELAY: f64 = 0.3;
 
 /// State shared between the session (worker thread) and the exercise UI.

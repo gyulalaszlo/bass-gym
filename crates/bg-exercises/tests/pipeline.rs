@@ -75,17 +75,28 @@ fn injected_timing_errors_are_measured() {
     let mut events = Vec::new();
     let block = 256;
     let mut state = SessionState::Running;
+    let mut onset = 0u64;
     for (i, chunk) in audio.chunks(block).enumerate() {
         events.clear();
         detector.process(chunk, &mut events);
         for ev in &events {
             match *ev {
                 NoteEvent::On { sample, level_db } => {
+                    onset = sample;
                     session.note_on(sample as f64 / SR as f64, level_db)
                 }
                 NoteEvent::Off { sample, peak_db } => {
-                    session.note_off(sample as f64 / SR as f64, peak_db, None)
+                    // Like the audio worker: the pitch from the note's own samples. A
+                    // note without one would be a ghost note, its length not graded.
+                    let from = (onset as usize + (0.008 * SR) as usize).min(sample as usize);
+                    let freq = bg_dsp::detect(&audio[from..sample as usize], SR).map(|r| r.freq);
+                    session.note_off(sample as f64 / SR as f64, peak_db, freq)
                 }
+                NoteEvent::Noise {
+                    sample,
+                    end,
+                    peak_db,
+                } => session.note_noise(sample as f64 / SR as f64, end as f64 / SR as f64, peak_db),
             }
         }
         let now = ((i + 1) * block) as f64 / SR as f64;

@@ -303,6 +303,15 @@ pub(crate) fn run(rx: Receiver<WorkerCmd>, clock: Clock, shared: WorkerShared) {
                                 s.note_off(t(sample), peak_db, freq);
                             }
                         }
+                        NoteEvent::Noise {
+                            sample,
+                            end,
+                            peak_db,
+                        } => {
+                            if let Some(s) = session.as_mut() {
+                                s.note_noise(t(sample), t(end), peak_db);
+                            }
+                        }
                     }
                 }
                 // Early pitch of the sounding note, as soon as enough of it was heard.

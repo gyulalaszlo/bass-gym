@@ -431,8 +431,6 @@ struct Placing {
     frac: f64,
     /// Length in beats, if known.
     beats: Option<f64>,
-    /// Has a pitch. Without one it may be string noise rather than a note.
-    pitched: bool,
 }
 
 /// Works out which beat each note belongs to.
@@ -466,7 +464,6 @@ fn placings(input: &ScoreInput, grid: &Grid) -> Vec<Placing> {
                 beat: tick / grid.tpb,
                 frac: 0.0,
                 beats: Some(held.unwrap_or(e.len) / len),
-                pitched: p.freq.is_some(),
             });
         } else {
             let b = grid
@@ -486,7 +483,6 @@ fn placings(input: &ScoreInput, grid: &Grid) -> Vec<Placing> {
                 beat: beat as u32,
                 frac: pos - beat,
                 beats: held.map(|h| h / len),
-                pitched: p.freq.is_some(),
             });
         }
     }
@@ -500,7 +496,7 @@ fn grid_notes(placings: &[Placing], grid: &mut Grid) -> Vec<GridNote> {
     for (beat, d) in grid.subdivisions.iter_mut().enumerate() {
         let here = || placings.iter().filter(|p| p.beat as usize == beat);
         let loose: Vec<f64> = here()
-            .filter(|p| p.tick.is_none() && p.pitched)
+            .filter(|p| p.tick.is_none())
             .map(|p| p.frac)
             .collect();
         let exact: Vec<u32> = here().filter_map(|p| p.tick).map(|t| t % tpb).collect();
@@ -540,7 +536,7 @@ fn grid_notes(placings: &[Placing], grid: &mut Grid) -> Vec<GridNote> {
             ideal: ideal.min(total.saturating_sub(1)),
             played_late,
         };
-        let Some(start) = spot.choose(&notes, grid, p.pitched) else {
+        let Some(start) = spot.choose(&notes, grid) else {
             continue;
         };
         previous = Some(start);
@@ -603,9 +599,8 @@ struct Spot {
 
 impl Spot {
     /// The tick for the note. If `ideal` is taken it moves by the smallest step on the
-    /// side it was played on, then the other. Moving noise would only misplace it, so
-    /// without a pitch it's left out instead. A note with nowhere to go overlaps.
-    fn choose(&self, notes: &[GridNote], grid: &Grid, pitched: bool) -> Option<u32> {
+    /// side it was played on, then the other. A note with nowhere to go overlaps.
+    fn choose(&self, notes: &[GridNote], grid: &Grid) -> Option<u32> {
         let fits = |t: u32| {
             t < self.before
                 && self.after.is_none_or(|a| t > a)
@@ -613,9 +608,6 @@ impl Spot {
         };
         if fits(self.ideal) {
             return Some(self.ideal);
-        }
-        if !pitched {
-            return None;
         }
         let later = self.ideal + grid.resolution(self.ideal);
         let earlier = self
@@ -1255,8 +1247,8 @@ mod tests {
         );
     }
 
-    /// Bars 6 and 7 of a real report at 70 BPM, quarters with a half note: string noise,
-    /// then the note it preceded.
+    /// Bars 6 and 7 of a real report at 70 BPM, quarters with a half note: a pitchless
+    /// note (string noise, before the detector told it apart), then the note it preceded.
     fn noise_before_a_note() -> (Vec<BarPlan>, Matcher, usize, usize) {
         let beat = 60.0 / 70.0;
         let b: Vec<BarPlan> = bars(2, 1, &[(0, 1), (1, 1), (2, 2)])
@@ -1293,8 +1285,8 @@ mod tests {
     }
 
     #[test]
-    fn string_noise_stays_off_the_score_and_the_note_stays_on_its_beat() {
-        let (b, m, noise, real) = noise_before_a_note();
+    fn a_pitchless_extra_makes_way_and_the_note_stays_on_its_beat() {
+        let (b, m, ghost, real) = noise_before_a_note();
         let s = score(&b, &m);
         let played: Vec<usize> = s
             .iter()
@@ -1304,8 +1296,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(!played.contains(&noise));
-        assert!(played.contains(&real));
+        // Ghost notes are written too (as x noteheads): the extra goes just before.
+        assert!(played.contains(&ghost) && played.contains(&real));
+        let ghost_at = s[0]
+            .events
+            .iter()
+            .find(|e| matches!(&e.kind, ScoreKind::Note(n) if n.played == ghost))
+            .unwrap();
+        assert!(ghost_at.time > s[0].start && ghost_at.time < s[0].end);
         // Beat 1 of the second bar, not a beat before it.
         let first = s[1].events.first().unwrap();
         assert!((first.time - s[1].start).abs() < 1e-9);

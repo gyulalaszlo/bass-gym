@@ -159,6 +159,7 @@ fn run_with(
                     }
                     session.note_off(sample as f64 / SR as f64, peak_db, freq);
                 }
+                NoteEvent::Noise { .. } => {}
             }
         }
         let now = ((i + 1) * 256) as f64 / SR as f64;

@@ -176,6 +176,7 @@ released with `has_results`.
 - "Back to score" sets `reveal` to the editor view's centre; `rows` scrolls that row
   into view on the next frame. A short last
   row keeps the scale of full rows. Rows are culled with `is_rect_visible`.
+- `overlays` draws string noise (`Matcher.noise`) as faint dotted spans on the waveform.
 - Click the score to select a bar and play from there to the end of the session: from
   the recorded note under the click, or else the bar's start. Shift extends the selection
   and doesn't play. Click the waveform to open `MarkerEditor` around that time.

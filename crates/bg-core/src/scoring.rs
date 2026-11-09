@@ -123,6 +123,14 @@ pub struct Played {
     pub matched: Option<usize>,
 }
 
+/// String noise the detector told apart from notes: never graded, kept for review.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Noise {
+    pub onset: f64,
+    pub offset: f64,
+    pub peak_db: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Outcome {
     pub played: Option<usize>,
@@ -172,6 +180,8 @@ pub struct Matcher {
     pub expected: Vec<Expected>,
     pub outcomes: Vec<Outcome>,
     pub played: Vec<Played>,
+    /// String noise, in time order (see [`Noise`]).
+    pub noise: Vec<Noise>,
     /// Index of the first expected note that may still change state.
     first_open: usize,
     now: f64,
@@ -314,9 +324,12 @@ impl Matcher {
         if freq.is_some() {
             p.freq = freq;
         }
+        // A note without a pitch is a ghost note (a muted pluck): short on purpose, so
+        // only its timing counts.
+        let ghost = p.freq.is_none();
         if let Some(i) = p.matched {
             self.outcomes[i].length_ratio =
-                Some(((offset - p.onset) / self.expected[i].len) as f32);
+                (!ghost).then(|| ((offset - p.onset) / self.expected[i].len) as f32);
             self.regrade(i);
         }
     }
@@ -609,6 +622,20 @@ mod tests {
         assert_eq!(m.outcomes[1].played, Some(note));
         assert!((m.outcomes[1].timing_ms.unwrap() + 18.0).abs() < 0.01);
         assert_eq!(m.outcomes[1].grade, Some(Grade::Ok));
+    }
+
+    #[test]
+    fn ghost_notes_are_graded_for_timing_only() {
+        let (mut m, _) = setup();
+        // A muted pluck: no pitch, held a tenth of its quarter-note target.
+        let ghost = m.on_onset(0.502, -20.0);
+        m.on_offset(ghost, 0.55, -20.0, None);
+        assert_eq!(m.outcomes[1].length_ratio, None);
+        assert_eq!(m.outcomes[1].grade, Some(Grade::Good));
+        // The same with a pitch is a note let go far too soon.
+        let note = m.on_onset(1.002, -20.0);
+        m.on_offset(note, 1.05, -20.0, Some(98.0));
+        assert_eq!(m.outcomes[2].grade, Some(Grade::Poor));
     }
 
     #[test]

@@ -94,6 +94,10 @@ pub trait SessionLogic: Send {
         let _ = (onset, freq);
     }
     fn note_off(&mut self, time: f64, peak_db: f32, freq: Option<f32>);
+    /// String noise from `start` to `end`: not a note (see `bg_dsp::NoteEvent::Noise`).
+    fn note_noise(&mut self, start: f64, end: f64, peak_db: f32) {
+        let _ = (start, end, peak_db);
+    }
     /// The session ended (finished by itself or stopped by the user).
     fn stop(&mut self, io: &mut SessionIo) {
         io.silence();

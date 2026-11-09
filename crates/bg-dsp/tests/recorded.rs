@@ -2,9 +2,8 @@
 
 use bg_dsp::{NoteDetector, NoteDetectorConfig, NoteEvent};
 
-/// Onset times in seconds of a clip in `tests/fixtures`, leaving out the very start,
-/// where a clip cut from a session can begin inside the previous note.
-fn onsets(name: &str) -> Vec<f32> {
+/// What the detector reports for a clip in `tests/fixtures`, with its sample rate.
+fn events(name: &str) -> (Vec<NoteEvent>, f32) {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     let mut wav = hound::WavReader::open(path).unwrap();
     let sr = wav.spec().sample_rate as f32;
@@ -17,6 +16,13 @@ fn onsets(name: &str) -> Vec<f32> {
     for chunk in samples.chunks(256) {
         detector.process(chunk, &mut events);
     }
+    (events, sr)
+}
+
+/// Onset times in seconds of a clip in `tests/fixtures`, leaving out the very start,
+/// where a clip cut from a session can begin inside the previous note.
+fn onsets(name: &str) -> Vec<f32> {
+    let (events, sr) = events(name);
     events
         .iter()
         .filter_map(|e| match e {
@@ -25,6 +31,55 @@ fn onsets(name: &str) -> Vec<f32> {
         })
         .filter(|&t| t > 0.02)
         .collect()
+}
+
+/// Start times of what was reported as string noise.
+fn noise(name: &str) -> Vec<f32> {
+    let (events, sr) = events(name);
+    events
+        .iter()
+        .filter_map(|e| match e {
+            NoteEvent::Noise { sample, .. } => Some(*sample as f32 / sr),
+            _ => None,
+        })
+        .collect()
+}
+
+fn assert_near(found: &[f32], expected: &[f32], tolerance: f32) {
+    assert_eq!(found.len(), expected.len(), "{found:?}");
+    for (f, e) in found.iter().zip(expected) {
+        assert!((f - e).abs() < tolerance, "{found:?}");
+    }
+}
+
+/// Quarter notes with string noise between some of them: the touch of a finger before a
+/// note, or lifting off after one. Noise peaks 15-25 dB below the notes.
+#[test]
+fn string_noise_is_not_a_note() {
+    let name = "string_noise.wav";
+    assert_near(&noise(name), &[2.525, 4.453, 5.102], 0.005);
+    // The note at 2.63 starts 22 dB down for 9 ms before its pluck: it starts there.
+    assert_near(
+        &onsets(name),
+        &[0.070, 0.717, 1.363, 2.632, 3.258, 3.879, 4.533, 5.163],
+        0.004,
+    );
+}
+
+/// Muted plucks (ghost notes), a real note and string noise. Most ghost notes start with
+/// the faint touch of the finger, their thud following 15-30 ms later: the thud is the
+/// onset (0.45, 1.36, 1.79, 2.70, 3.56).
+#[test]
+fn ghost_notes_start_at_their_thud() {
+    let name = "ghost_notes.wav";
+    assert_near(&noise(name), &[0.746, 2.624, 3.967], 0.005);
+    assert_near(
+        &onsets(name),
+        &[
+            0.164, 0.453, 0.934, 1.363, 1.788, 2.254, 2.702, 3.146, 3.560,
+        ],
+        0.004,
+    );
 }
 
 /// One low E, whose waveform has a sharp edge in every period. It was detected as three

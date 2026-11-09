@@ -40,6 +40,17 @@ fn main() {
             NoteEvent::Off { sample, peak_db } => {
                 println!("{:8.3} off  {peak_db:6.1} dB", sample as f32 / sr);
             }
+            NoteEvent::Noise {
+                sample,
+                end,
+                peak_db,
+            } => {
+                println!(
+                    "{:8.3} noise {peak_db:5.1} dB, to {:.3}",
+                    sample as f32 / sr,
+                    end as f32 / sr
+                );
+            }
         }
     }
 }

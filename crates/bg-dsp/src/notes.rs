@@ -14,6 +14,13 @@
 //!
 //! The note ends when its short-term RMS falls a set amount below its peak, or when the
 //! next onset arrives.
+//!
+//! Each onset is then held for [`HOLD_MS`] before it's reported, to look at what follows:
+//! - String noise (a finger touching or leaving a string) stays far below the notes
+//!   played before it; it's reported as [`NoteEvent::Noise`], not as a note.
+//! - A muted pluck (ghost note) often starts with the faint sound of the finger meeting
+//!   the string, its thud following 15-30 ms later. When the level jumps like that, the
+//!   onset moves to the jump.
 
 use std::collections::VecDeque;
 
@@ -36,6 +43,9 @@ pub struct NoteDetectorConfig {
     /// Shifts every detected note end by this much (negative = earlier), to compensate
     /// for how quickly or slowly notes are muted.
     pub end_offset_ms: f32,
+    /// A note whose peak stays this far below the recent notes' is string noise; 0 keeps
+    /// everything.
+    pub noise_db: f32,
 }
 
 impl Default for NoteDetectorConfig {
@@ -46,6 +56,7 @@ impl Default for NoteDetectorConfig {
             min_gap_ms: 45.0,
             release_db: 24.0,
             end_offset_ms: 0.0,
+            noise_db: 12.0,
         }
     }
 }
@@ -72,9 +83,23 @@ const DIP_RISE_MS: f32 = 25.0;
 /// is the noise of the mute itself.
 const DIP_RETURN_DB: f32 = 15.0;
 
+/// How long an onset is held before it's reported, to see what follows it.
+pub const HOLD_MS: f32 = 40.0;
+/// A level this far above everything since the onset, bar the last [`JUMP_RISE_MS`],
+/// means the onset was a precursor and the note begins with that rise.
+const JUMP_DB: f32 = 12.0;
+/// Longer than a pluck's own attack, which on a low note takes several milliseconds to
+/// reach its first full peak.
+const JUMP_RISE_MS: f32 = 8.0;
+/// The precursor must last at least this long: a pluck's own first moments are low too.
+const PRECURSOR_MS: f32 = 5.0;
+/// Notes whose levels make up the reference for telling string noise apart.
+const REFERENCE_NOTES: usize = 8;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteEvent {
-    /// `sample` counts from the first sample ever passed to the detector.
+    /// `sample` counts from the first sample ever passed to the detector. Reported
+    /// [`HOLD_MS`] after the onset.
     On {
         sample: u64,
         level_db: f32,
@@ -83,6 +108,27 @@ pub enum NoteEvent {
         sample: u64,
         peak_db: f32,
     },
+    /// String noise from `sample` to `end`: no note was played.
+    Noise {
+        sample: u64,
+        end: u64,
+        peak_db: f32,
+    },
+}
+
+/// An onset not reported yet (see [`HOLD_MS`]).
+#[derive(Clone, Copy, Debug)]
+struct Held {
+    sample: u64,
+    /// Start of the hop the onset was found in: `held_peaks` counts hops from here.
+    first_hop: u64,
+    level: f32,
+    /// Highest peak so far.
+    peak: f32,
+    /// Where the level jumped, if it did.
+    jump: Option<u64>,
+    /// The note already ended: (sample, peak).
+    off: Option<(u64, f32)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -199,6 +245,14 @@ pub struct NoteDetector {
     rms_hops: usize,
     active: Option<Active>,
     last_onset: Option<u64>,
+    held: Option<Held>,
+    /// Hop peaks since the held onset.
+    held_peaks: Vec<f32>,
+    /// String noise still sounding: its start and peak. Its end becomes the noise's end.
+    noise: Option<(u64, f32)>,
+    /// Peaks of the last notes, for telling string noise apart.
+    recent_peaks: VecDeque<f32>,
+    raw: Vec<NoteEvent>,
     sr: f32,
 }
 
@@ -238,6 +292,11 @@ impl NoteDetector {
             rms_hops: hops(40.0),
             active: None,
             last_onset: None,
+            held: None,
+            held_peaks: Vec::new(),
+            noise: None,
+            recent_peaks: VecDeque::new(),
+            raw: Vec::new(),
             sr,
         }
     }
@@ -260,7 +319,11 @@ impl NoteDetector {
             let h = self.hf[0].process(x);
             self.hf_buf.push(self.hf[1].process(h));
             if self.hop_buf.len() == self.hop {
-                self.process_hop(out);
+                let mut raw = std::mem::take(&mut self.raw);
+                raw.clear();
+                self.process_hop(&mut raw);
+                self.settle(&raw, out);
+                self.raw = raw;
                 self.next_sample += self.hop as u64;
                 self.hop_buf.clear();
                 self.hf_buf.clear();
@@ -286,6 +349,123 @@ impl NoteDetector {
         self.last_onset = Some(sample);
         self.period.reset();
         self.level_hist.clear();
+    }
+
+    /// Passes on what this hop found, holding onsets back for [`HOLD_MS`]: see the
+    /// module docs.
+    fn settle(&mut self, raw: &[NoteEvent], out: &mut Vec<NoteEvent>) {
+        let hop_start = self.next_sample;
+        let hop_peak = self.hop_buf.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        for &ev in raw {
+            match ev {
+                NoteEvent::On { sample, level_db } => {
+                    self.release_held(out);
+                    if let Some((start, peak)) = self.noise.take() {
+                        out.push(NoteEvent::Noise {
+                            sample: start,
+                            end: sample,
+                            peak_db: db(peak),
+                        });
+                    }
+                    self.held_peaks.clear();
+                    self.held = Some(Held {
+                        sample,
+                        first_hop: self.next_sample,
+                        level: from_db(level_db),
+                        peak: 0.0,
+                        jump: None,
+                        off: None,
+                    });
+                }
+                NoteEvent::Off { sample, peak_db } => {
+                    if let Some(h) = &mut self.held {
+                        h.off = Some((sample, peak_db));
+                    } else if let Some((start, peak)) = self.noise.take() {
+                        out.push(NoteEvent::Noise {
+                            sample: start,
+                            end: sample,
+                            peak_db: db(peak),
+                        });
+                    } else {
+                        out.push(ev);
+                    }
+                }
+                NoteEvent::Noise { .. } => out.push(ev),
+            }
+        }
+        let Some(h) = &mut self.held else {
+            return;
+        };
+        let since = |ms: f32| (ms / 1000.0 * self.sr) as u64;
+        if h.off.is_none() {
+            let skip = (since(JUMP_RISE_MS) as usize).div_ceil(self.hop);
+            let precursor = (since(PRECURSOR_MS) as usize).div_ceil(self.hop);
+            let peaks = &self.held_peaks;
+            if h.jump.is_none() && peaks.len() >= skip + precursor {
+                let before = peaks[..peaks.len() - skip]
+                    .iter()
+                    .fold(0.0f32, |m, &v| m.max(v));
+                if hop_peak > before * from_db(JUMP_DB) {
+                    // Back to where the rise left the precursor's level.
+                    let clear = before * from_db(JUMP_DB / 2.0);
+                    let k = peaks.iter().rposition(|&v| v <= clear).map_or(0, |i| i + 1);
+                    h.jump = Some(if k < peaks.len() {
+                        h.first_hop + (k * self.hop) as u64
+                    } else {
+                        let idx = self
+                            .hop_buf
+                            .iter()
+                            .position(|v| v.abs() >= clear)
+                            .unwrap_or(0);
+                        hop_start + idx as u64
+                    });
+                }
+            }
+            self.held_peaks.push(hop_peak);
+            h.peak = h.peak.max(hop_peak);
+        }
+        if hop_start + self.hop as u64 >= h.sample + since(HOLD_MS) {
+            self.release_held(out);
+        }
+    }
+
+    /// Reports the held onset: as a note, or as string noise.
+    fn release_held(&mut self, out: &mut Vec<NoteEvent>) {
+        let Some(h) = self.held.take() else {
+            return;
+        };
+        let peak = h.peak.max(h.level);
+        let mut levels: Vec<f32> = self.recent_peaks.iter().copied().collect();
+        levels.sort_by(f32::total_cmp);
+        let reference = levels.get(levels.len() / 2).copied();
+        let noise = self.cfg.noise_db > 0.0
+            && reference.is_some_and(|r| peak < r * from_db(-self.cfg.noise_db));
+        if noise {
+            match h.off {
+                Some((end, _)) => out.push(NoteEvent::Noise {
+                    sample: h.sample,
+                    end,
+                    peak_db: db(peak),
+                }),
+                None => self.noise = Some((h.sample, peak)),
+            }
+            return;
+        }
+        self.recent_peaks.push_back(peak);
+        if self.recent_peaks.len() > REFERENCE_NOTES {
+            self.recent_peaks.pop_front();
+        }
+        let sample = h.jump.unwrap_or(h.sample);
+        out.push(NoteEvent::On {
+            sample,
+            level_db: db(h.level),
+        });
+        if let Some((end, peak_db)) = h.off {
+            out.push(NoteEvent::Off {
+                sample: end.max(sample + 1),
+                peak_db,
+            });
+        }
     }
 
     /// Where the note's level rose out of a dip, if it just did. The level is the highest

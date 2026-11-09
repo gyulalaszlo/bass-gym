@@ -130,6 +130,15 @@ struct Report {
     sounds: Vec<SoundEntry>,
     annotations: Vec<AnnotationEntry>,
     gaps: Vec<GapEntry>,
+    /// What the detector took for string noise.
+    noise: Vec<NoiseEntry>,
+}
+
+#[derive(Serialize)]
+struct NoiseEntry {
+    start: f64,
+    end: f64,
+    peak_db: f32,
 }
 
 #[derive(Serialize)]
@@ -302,6 +311,16 @@ fn report(input: &ReportInput, region: &Region) -> Report {
             }
         })
         .collect();
+    let noise = m
+        .noise
+        .iter()
+        .filter(|n| region.overlaps(n.onset, n.offset))
+        .map(|n| NoiseEntry {
+            start: rel(n.onset),
+            end: rel(n.offset),
+            peak_db: n.peak_db,
+        })
+        .collect();
     let chords = input
         .chords
         .iter()
@@ -387,6 +406,7 @@ fn report(input: &ReportInput, region: &Region) -> Report {
         sounds,
         annotations,
         gaps,
+        noise,
     }
 }
 

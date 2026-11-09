@@ -168,6 +168,17 @@ fn overlays(m: &Matcher, bars: &[ScoreBar]) -> Vec<Marker> {
             line: Line::Dotted,
         });
     }
+    // String noise: faint, so it's there to check but doesn't read as a note.
+    for n in &m.noise {
+        out.push(Marker {
+            id: next(),
+            time: n.onset,
+            end: Some(n.offset),
+            label: String::new(),
+            color: theme::dim().gamma_multiply(0.6),
+            line: Line::Dotted,
+        });
+    }
     for p in &m.played {
         let grade = p
             .matched

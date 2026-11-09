@@ -614,6 +614,17 @@ impl PreferencePage for LatencyPage {
                     ui.label("Min. gap");
                     ui.add(slider_field(&mut cfg.detector.min_gap_ms, 20.0..=150.0).suffix("ms"));
                     ui.end_row();
+                    ui.label("String noise");
+                    ui.add(
+                        slider_field(&mut cfg.detector.noise_db, 0.0..=30.0)
+                            .step_by(1.0)
+                            .suffix("dB below notes"),
+                    )
+                    .on_hover_text(
+                        "Sounds this far below the recent notes are string noise, not notes \
+                         (shown on the waveform in the results, never graded). 0 = off",
+                    );
+                    ui.end_row();
                     ui.label("Tuner gate");
                     ui.add(slider_field(&mut cfg.tuner_gate_db, -90.0..=-20.0).suffix("dBFS"));
                     ui.end_row();

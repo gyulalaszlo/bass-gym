@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use bg_audio::{SessionIo, SessionLogic, SessionState, Slot};
 use bg_core::plan::{BarPlan, PlannedNote};
-use bg_core::scoring::Played;
+use bg_core::scoring::{Noise, Played};
 use bg_core::{GradeMode, Matcher, Planner, RecentTiming, ScoringThresholds, SessionConfig};
 use bg_sound::{SoundEvent, SoundKind};
 
@@ -265,6 +265,16 @@ impl SessionLogic for TimingSession {
             if let Some(f) = freq {
                 self.judge(i, f);
             }
+        }
+    }
+
+    fn note_noise(&mut self, start: f64, end: f64, peak_db: f32) {
+        if start >= self.scoring_from {
+            lock(&self.shared).matcher.noise.push(Noise {
+                onset: start,
+                offset: end,
+                peak_db,
+            });
         }
     }
 

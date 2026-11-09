@@ -34,6 +34,7 @@ pub struct Matcher {
     pub thresholds: ScoringThresholds, pub bars: Vec<BarInfo>,
     pub harmony_enabled: bool, pub grade_mode: GradeMode,
     pub expected: Vec<Expected>, pub outcomes: Vec<Outcome>, pub played: Vec<Played>,
+    pub noise: Vec<Noise>,   // string noise { onset, offset, peak_db }: review only
     /* private: first_open, now */
 }
 
@@ -115,6 +116,8 @@ using `accompaniment::preview_targets`, which leaves out the random anticipation
   global.
 - Each note's window is clamped to half the distance to its neighbours.
 - `Missed` is set in `update` once the window passes with nothing played.
+- A note with no pitch at its offset is a ghost note (a muted pluck): `length_ratio`
+  stays `None`, so only its timing is graded.
 - Extra notes have no grade. The beatgrid draws them red.
 
 ## Pitch and harmony
@@ -145,9 +148,9 @@ rests. It's pure, so all notation rules are tested there and painters stay simpl
   `SUBDIVISIONS` (quarter, eighth, sixteenth, triplet, sextuplet) that fits its notes
   within `FIT_TOLERANCE`, and extras round to that. A lone note can't make a tuplet.
 - Notes never swap order: an extra is placed between its neighbours in playing order.
-  If its position is taken it moves by the smallest step, or, without a pitch (likely
-  string noise), stays off the score. It's still on the waveform. Pitchless notes don't
-  influence a beat's subdivision.
+  If its position is taken it moves by the smallest step. Pitchless notes are ghost
+  notes (x noteheads) and are placed like any other; string noise never reaches the
+  score (see audio.md, hold stage).
 - Lengths come from the playing, not the target. A note held for `LEGATO` of the way to
   the next one reaches it, so small gaps aren't rests; otherwise it rounds to eighths,
   or a sixteenth if short. While still sounding, a matched note shows its target's length.

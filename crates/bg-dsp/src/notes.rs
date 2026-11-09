@@ -95,6 +95,13 @@ const JUMP_RISE_MS: f32 = 8.0;
 const PRECURSOR_MS: f32 = 5.0;
 /// Notes whose levels make up the reference for telling string noise apart.
 const REFERENCE_NOTES: usize = 8;
+/// A note this much of `noise_db` below the recent ones may still be noise: the sound of
+/// muting a string, or of a finger landing on it, right before a note. It's held until a
+/// note follows within [`FOLLOW_MS`] at least [`FOLLOW_DB`] louder (then it's noise), or
+/// until that long has passed.
+const SUSPECT_PART: f32 = 0.5;
+const FOLLOW_MS: f32 = 110.0;
+const FOLLOW_DB: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteEvent {
@@ -246,6 +253,9 @@ pub struct NoteDetector {
     active: Option<Active>,
     last_onset: Option<u64>,
     held: Option<Held>,
+    /// A quiet note that may still turn out to be noise (see [`SUSPECT_PART`]); its
+    /// `peak` is final.
+    suspect: Option<Held>,
     /// Hop peaks since the held onset.
     held_peaks: Vec<f32>,
     /// String noise still sounding: its start and peak. Its end becomes the noise's end.
@@ -293,6 +303,7 @@ impl NoteDetector {
             active: None,
             last_onset: None,
             held: None,
+            suspect: None,
             held_peaks: Vec::new(),
             noise: None,
             recent_peaks: VecDeque::new(),
@@ -386,6 +397,8 @@ impl NoteDetector {
                             end: sample,
                             peak_db: db(peak),
                         });
+                    } else if let Some(h) = self.suspect.as_mut().filter(|h| h.off.is_none()) {
+                        h.off = Some((sample, peak_db));
                     } else {
                         out.push(ev);
                     }
@@ -393,10 +406,19 @@ impl NoteDetector {
                 NoteEvent::Noise { .. } => out.push(ev),
             }
         }
+        let sr = self.sr;
+        let since = move |ms: f32| (ms / 1000.0 * sr) as u64;
+        if self.held.is_none()
+            && let Some(h) = self.suspect
+            && hop_start >= h.sample + since(FOLLOW_MS)
+        {
+            // Nothing louder followed: a quiet note after all.
+            self.suspect = None;
+            self.report_note(h, out);
+        }
         let Some(h) = &mut self.held else {
             return;
         };
-        let since = |ms: f32| (ms / 1000.0 * self.sr) as u64;
         if h.off.is_none() {
             let skip = (since(JUMP_RISE_MS) as usize).div_ceil(self.hop);
             let precursor = (since(PRECURSOR_MS) as usize).div_ceil(self.hop);
@@ -429,29 +451,56 @@ impl NoteDetector {
         }
     }
 
-    /// Reports the held onset: as a note, or as string noise.
+    /// Reports the held onset: as a note, or as string noise. A quiet one becomes the
+    /// suspect, decided by what follows it.
     fn release_held(&mut self, out: &mut Vec<NoteEvent>) {
-        let Some(h) = self.held.take() else {
+        let Some(mut h) = self.held.take() else {
             return;
         };
-        let peak = h.peak.max(h.level);
+        h.peak = h.peak.max(h.level);
         let mut levels: Vec<f32> = self.recent_peaks.iter().copied().collect();
         levels.sort_by(f32::total_cmp);
-        let reference = levels.get(levels.len() / 2).copied();
-        let noise = self.cfg.noise_db > 0.0
-            && reference.is_some_and(|r| peak < r * from_db(-self.cfg.noise_db));
+        let reference = levels
+            .get(levels.len() / 2)
+            .copied()
+            .filter(|_| self.cfg.noise_db > 0.0);
+        let below = |db: f32| reference.is_some_and(|r| h.peak < r * from_db(-db));
+        let noise = below(self.cfg.noise_db);
+        let suspect = below(self.cfg.noise_db * SUSPECT_PART);
+
+        // The note before may have been the noise of this one's approach.
+        if let Some(s) = self.suspect.take() {
+            let since = (FOLLOW_MS / 1000.0 * self.sr) as u64;
+            if !noise && h.sample < s.sample + since && h.peak > s.peak * from_db(FOLLOW_DB) {
+                let end = s.off.map_or(h.sample, |o| o.0);
+                out.push(NoteEvent::Noise {
+                    sample: s.sample,
+                    end,
+                    peak_db: db(s.peak),
+                });
+            } else {
+                self.report_note(s, out);
+            }
+        }
         if noise {
             match h.off {
                 Some((end, _)) => out.push(NoteEvent::Noise {
                     sample: h.sample,
                     end,
-                    peak_db: db(peak),
+                    peak_db: db(h.peak),
                 }),
-                None => self.noise = Some((h.sample, peak)),
+                None => self.noise = Some((h.sample, h.peak)),
             }
-            return;
+        } else if suspect {
+            self.suspect = Some(h);
+        } else {
+            self.report_note(h, out);
         }
-        self.recent_peaks.push_back(peak);
+    }
+
+    /// Reports `h` as a note.
+    fn report_note(&mut self, h: Held, out: &mut Vec<NoteEvent>) {
+        self.recent_peaks.push_back(h.peak);
         if self.recent_peaks.len() > REFERENCE_NOTES {
             self.recent_peaks.pop_front();
         }
@@ -907,6 +956,28 @@ mod tests {
         };
         assert!((end(-20.0) - (end(0.0) - 0.020)).abs() < 0.001);
         assert!((end(15.0) - (end(0.0) + 0.015)).abs() < 0.001);
+    }
+
+    #[test]
+    fn a_quiet_note_is_noise_only_right_before_a_louder_one() {
+        let sr = 44_100.0;
+        let ons = |gap: f32| {
+            // Three notes set the level; then a note 10 dB down and, `gap` later, a loud one.
+            let notes = [
+                (0.1, 0.25, 55.0, 0.5),
+                (0.4, 0.25, 55.0, 0.5),
+                (0.7, 0.25, 55.0, 0.5),
+                (1.0, 0.04, 73.4, 0.16),
+                (1.0 + gap, 0.3, 55.0, 0.5),
+            ];
+            detect(sr, &render(sr, 2.0, &notes))
+                .iter()
+                .filter(|e| matches!(e, NoteEvent::On { .. }))
+                .count()
+        };
+        assert_eq!(ons(0.07), 4);
+        // A sixteenth at 120 BPM later: a soft note, not noise.
+        assert_eq!(ons(0.125), 5);
     }
 
     #[test]

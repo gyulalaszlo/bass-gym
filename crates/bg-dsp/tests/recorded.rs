@@ -117,3 +117,12 @@ fn fast_eighths_are_all_found() {
         assert!((f - e).abs() < 0.005, "{found:?}");
     }
 }
+
+/// Half notes; the mute at the end of the second makes a sound of its own, only 9 dB
+/// below the notes and 62 ms before the next one, 10 dB louder: noise.
+#[test]
+fn the_sound_of_a_mute_before_a_note_is_noise() {
+    let name = "mute_noise.wav";
+    assert_near(&noise(name), &[2.039], 0.005);
+    assert_near(&onsets(name), &[0.489, 1.289, 2.101, 3.700], 0.004);
+}

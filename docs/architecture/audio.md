@@ -219,12 +219,17 @@ pub enum NoteEvent {
     string noise: `Noise`, passed to `SessionLogic::note_noise` and kept in
     `Matcher.noise` for review, never graded. Real string noise was 15-25 dB down, ghost
     notes at most ~8 dB.
+  - A note half that far down (6 dB) is a suspect: the sound of a mute, or of a finger
+    landing, can be only ~9 dB down, but a much louder note follows within 60-100 ms.
+    If one follows within `FOLLOW_MS` (110) and `FOLLOW_DB` (8) louder, the suspect is
+    noise; otherwise it's reported as a note once that time has passed, so a quiet
+    note is reported up to ~110 ms late.
   - A precursor (the finger meeting the string, before a muted pluck's thud or a real
     pluck) moves the onset: a hop 12 dB above everything since the onset, bar the last
     `JUMP_RISE_MS` (8 ms, longer than a low note's own attack), after at least
     `PRECURSOR_MS`, means the note starts where that rise left the precursor's level.
-  - `tests/fixtures/string_noise.wav` and `ghost_notes.wav` are clips of real playing
-    for both; `examples/note_features.rs` prints per-note measurements of a report's WAV.
+  - `tests/fixtures/string_noise.wav`, `mute_noise.wav` and `ghost_notes.wav` are clips
+    of real playing for these; `examples/note_features.rs` prints per-note measurements of a report's WAV.
 
 - **Time bases:** `NoteEvent` is in input samples since `Analysis` was created.
   `SessionLogic` gets transport seconds, latency compensated. Raw indices aren't passed

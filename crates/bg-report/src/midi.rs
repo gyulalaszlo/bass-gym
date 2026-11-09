@@ -53,6 +53,7 @@ fn note(s: &LoggedSound, region: &Region) -> Option<Note> {
                 midi,
                 velocity: v,
                 duration,
+                ..
             },
         ) => (
             midi.round().clamp(0.0, 127.0) as u8,

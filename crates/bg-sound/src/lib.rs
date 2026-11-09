@@ -18,11 +18,14 @@ pub use synth::{FmPiano, PluckBass, SineClick, Woodblock};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SoundKind {
     Click(ClickKind),
-    /// `duration` in seconds; `midi` may be fractional.
+    /// `duration` in seconds; `midi` may be fractional. `release` is how long (s) a
+    /// voice may let the note ring on after `duration`, until its next attack; voices
+    /// without a natural decay ignore it.
     Note {
         midi: f32,
         velocity: f32,
         duration: f32,
+        release: f32,
     },
 }
 
@@ -172,6 +175,7 @@ mod tests {
                     midi: 40.0,
                     velocity: 1.0,
                     duration: 0.2,
+                    release: 0.0,
                 }
             } else {
                 SoundKind::Click(ClickKind::Accent)
@@ -235,6 +239,7 @@ mod tests {
                 midi: 60.0,
                 velocity: 1.0,
                 duration: 0.2,
+                release: 0.0,
             },
             gain: 1.0,
         });
@@ -276,6 +281,7 @@ mod tests {
                             midi: key as f32,
                             velocity,
                             duration: 0.3,
+                            release: 0.0,
                         },
                         gain: 1.0,
                     });

@@ -77,11 +77,18 @@ fn region_sounds(sounds: &[LoggedSound], from: f64, to: f64) -> Vec<LoggedSound>
         .filter(|s| s.delivered && s.at < to)
         .filter_map(|s| {
             let mut s = *s;
-            if let SoundKind::Note { duration, .. } = &mut s.ev.kind {
-                let end = (s.at + *duration as f64).min(to);
+            if let SoundKind::Note {
+                duration, release, ..
+            } = &mut s.ev.kind
+            {
+                let full = s.at + *duration as f64;
+                let end = full.min(to);
                 let start = s.at.max(from);
                 if end <= start {
                     return None;
+                }
+                if end < full {
+                    *release = 0.0;
                 }
                 *duration = (end - start) as f32;
                 s.at = start;
@@ -193,6 +200,7 @@ mod tests {
                     midi: 60.0,
                     velocity: 1.0,
                     duration,
+                    release: 0.0,
                 },
                 gain: 0.5,
             },

@@ -190,7 +190,7 @@ impl ExerciseType for BasicTiming {
 
         let score = prefs.show_score.then(|| LiveScore {
             chords: &[],
-            scale: None,
+            scale: Some(self.data.session.key),
             a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
             size: prefs.score_size,
         });
@@ -238,6 +238,7 @@ impl ExerciseType for BasicTiming {
         let scoring = ctx.scoring;
         let engine = &mut *ctx.engine;
         let data_dir = ctx.data_dir;
+        let staff = ctx.settings.get::<ViewPrefs>(ViewPrefs::ID).score_size;
         let review = &mut self.review;
         let tab = review.is_some().then_some(&mut self.results_tab);
         results_dialog(
@@ -246,7 +247,7 @@ impl ExerciseType for BasicTiming {
             "Results",
             tab,
             |ui, tab| match (tab, review.as_mut(), &stats) {
-                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir),
+                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir, staff),
                 (_, _, Some(stats)) => results(ui, stats, scoring, |_| {}),
                 _ => {}
             },
@@ -283,7 +284,7 @@ impl BasicTiming {
             bars: shared.bars.clone(),
             matcher: shared.matcher.clone(),
             chords: Vec::new(),
-            scale: None,
+            scale: Some(self.data.session.key),
             a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
             recording: recording.clone(),
             exercise: self.id().to_owned(),

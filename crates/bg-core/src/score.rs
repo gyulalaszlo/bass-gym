@@ -63,6 +63,19 @@ const FLAT_LETTERS: [(i32, bool); 12] = [
 pub enum Accidental {
     Sharp,
     Flat,
+    Natural,
+}
+
+impl Accidental {
+    /// The sign that sets a note to `alter` semitones from its letter.
+    fn of(alter: i8) -> Option<Self> {
+        match alter {
+            1 => Some(Self::Sharp),
+            -1 => Some(Self::Flat),
+            0 => Some(Self::Natural),
+            _ => None,
+        }
+    }
 }
 
 /// A note's place on the staff: `pos` counts lines and spaces up from the bottom line
@@ -70,24 +83,163 @@ pub enum Accidental {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaffPitch {
     pub pos: i32,
+    /// Semitones from the natural letter: -1 flat, 0 natural, 1 sharp.
+    pub alter: i8,
+    /// The sign written before the note. [`staff_pitch`] and [`Spelling::pitch`] mark
+    /// every altered note; [`build`] then writes only what the key and bar call for.
     pub accidental: Option<Accidental>,
 }
 
-/// Where a sounding MIDI note is written. There's no key signature, so every altered
-/// note carries its accidental; `flats` picks the spelling.
+/// Pitch class of each natural letter, C first.
+const NATURAL_PC: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+
+/// How notes are spelled: a letter (0 = C) and alteration per pitch class. In a key, its
+/// own notes take its letters, and the others are sharps or flats as its signature is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spelling {
+    names: [(i32, i8); 12],
+}
+
+impl Spelling {
+    /// Every altered note as a sharp, or as a flat.
+    pub fn chromatic(flats: bool) -> Self {
+        let table = if flats { &FLAT_LETTERS } else { &SHARP_LETTERS };
+        let mut names = [(0, 0); 12];
+        for (name, &(letter, altered)) in names.iter_mut().zip(table) {
+            let alter = match (altered, flats) {
+                (false, _) => 0,
+                (true, true) => -1,
+                (true, false) => 1,
+            };
+            *name = (letter, alter);
+        }
+        Self { names }
+    }
+
+    /// The spelling of `scale`, or sharps without one.
+    pub fn new(scale: Option<Scale>) -> Self {
+        let Some(scale) = scale else {
+            return Self::chromatic(false);
+        };
+        let mut out = Self::chromatic(scale.prefers_flats());
+        let root_letter = out.names[(scale.root % 12) as usize].0;
+        for (i, &pc) in scale.pitch_classes().iter().enumerate() {
+            let letter = (root_letter + i as i32) % 7;
+            let alter = (pc as i32 - NATURAL_PC[letter as usize] + 6).rem_euclid(12) - 6;
+            if alter.abs() <= 1 {
+                out.names[pc as usize] = (letter, alter as i8);
+            }
+        }
+        out
+    }
+
+    /// Where a sounding MIDI note is written (an octave up), with its accidental.
+    pub fn pitch(&self, sounding_midi: i32) -> StaffPitch {
+        let written = sounding_midi + 12;
+        let (letter, alter) = self.names[written.rem_euclid(12) as usize];
+        // The octave of the letter: C flat belongs to the octave above its B.
+        let octave = (written - alter as i32).div_euclid(12) - 1;
+        StaffPitch {
+            pos: octave * 7 + letter - BOTTOM_LINE,
+            alter,
+            accidental: (alter != 0).then(|| Accidental::of(alter)).flatten(),
+        }
+    }
+}
+
+/// Where a sounding MIDI note is written, every altered note with its accidental;
+/// `flats` picks the spelling.
 pub fn staff_pitch(sounding_midi: i32, flats: bool) -> StaffPitch {
-    let written = sounding_midi + 12;
-    let octave = written.div_euclid(12) - 1;
-    let table = if flats { &FLAT_LETTERS } else { &SHARP_LETTERS };
-    let (letter, altered) = table[written.rem_euclid(12) as usize];
-    let accidental = altered.then_some(if flats {
-        Accidental::Flat
-    } else {
-        Accidental::Sharp
-    });
-    StaffPitch {
-        pos: octave * 7 + letter - BOTTOM_LINE,
-        accidental,
+    Spelling::chromatic(flats).pitch(sounding_midi)
+}
+
+/// Letters of the sharps in a key signature, in order (F C G D A E B), and their staff
+/// positions on the bass clef.
+const SHARP_LETTERS_ORDER: [i32; 7] = [3, 0, 4, 1, 5, 2, 6];
+const SHARP_POSITIONS: [i32; 7] = [6, 3, 7, 4, 1, 5, 2];
+/// The same for flats (B E A D G C F).
+const FLAT_LETTERS_ORDER: [i32; 7] = [6, 2, 5, 1, 4, 0, 3];
+const FLAT_POSITIONS: [i32; 7] = [2, 5, 1, 4, 0, 3, -1];
+
+/// A key signature: `count` sharps or flats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeySignature {
+    pub flats: bool,
+    pub count: u8,
+}
+
+impl KeySignature {
+    pub fn of(scale: &Scale) -> Self {
+        let (flats, count) = match scale.parent_major() {
+            0 => (false, 0),
+            7 => (false, 1),
+            2 => (false, 2),
+            9 => (false, 3),
+            4 => (false, 4),
+            11 => (false, 5),
+            5 => (true, 1),
+            10 => (true, 2),
+            3 => (true, 3),
+            8 => (true, 4),
+            1 => (true, 5),
+            _ => (true, 6),
+        };
+        Self { flats, count }
+    }
+
+    /// Staff positions of the signs, in the order they're written.
+    pub fn positions(&self) -> &'static [i32] {
+        let all = if self.flats {
+            &FLAT_POSITIONS
+        } else {
+            &SHARP_POSITIONS
+        };
+        &all[..self.count as usize]
+    }
+
+    /// The alteration the signature gives `letter` (0 = C).
+    fn alter(&self, letter: i32) -> i8 {
+        let order = if self.flats {
+            &FLAT_LETTERS_ORDER
+        } else {
+            &SHARP_LETTERS_ORDER
+        };
+        match (order[..self.count as usize].contains(&letter), self.flats) {
+            (false, _) => 0,
+            (true, true) => -1,
+            (true, false) => 1,
+        }
+    }
+}
+
+/// Writes only the accidentals a bar needs: a note's sign shows where it differs from
+/// the key signature or from an earlier sign on the same line or space in the bar, which
+/// then holds to the barline. Tied continuations carry none.
+fn apply_key(events: &mut [ScoreEvent], key: Option<KeySignature>) {
+    let from_key = |pos: i32| key.map_or(0, |k| k.alter((pos + BOTTOM_LINE).rem_euclid(7)));
+    let mut changed: Vec<(i32, i8)> = Vec::new();
+    for e in events {
+        let ScoreKind::Note(n) = &mut e.kind else {
+            continue;
+        };
+        let Some(p) = n.pitch.as_mut() else {
+            continue;
+        };
+        if n.continuation {
+            p.accidental = None;
+            continue;
+        }
+        let current = changed
+            .iter()
+            .find(|c| c.0 == p.pos)
+            .map_or_else(|| from_key(p.pos), |c| c.1);
+        if p.alter == current {
+            p.accidental = None;
+        } else {
+            p.accidental = Accidental::of(p.alter);
+            changed.retain(|c| c.0 != p.pos);
+            changed.push((p.pos, p.alter));
+        }
     }
 }
 
@@ -486,7 +638,7 @@ fn bar_events(
     grid: &Grid,
     notes: &[GridNote],
     input: &ScoreInput,
-    flats: bool,
+    spelling: &Spelling,
 ) -> Vec<ScoreEvent> {
     let bar = grid.bars[b];
     let tpb = grid.tpb;
@@ -527,7 +679,7 @@ fn bar_events(
         let continues = n.start + n.len > last;
         let parts = split(grid, bar, from, to);
         let count = parts.len();
-        let note = score_note(input, n.played, flats);
+        let note = score_note(input, n.played, spelling);
         for (k, (tick, value, tuplet)) in parts.into_iter().enumerate() {
             let continuation = k > 0 || n.start < first;
             events.push(ScoreEvent {
@@ -590,11 +742,13 @@ pub fn build(input: &ScoreInput) -> Vec<ScoreBar> {
     let placed = placings(input, &grid);
     let notes = grid_notes(&placed, &mut grid);
 
-    let flats = input.scale.is_some_and(|s| s.prefers_flats());
+    let spelling = Spelling::new(input.scale);
+    let key = input.scale.map(|s| KeySignature::of(&s));
     let mut out: Vec<ScoreBar> = Vec::with_capacity(grid.bars.len());
     let mut last_bpm = None;
     for (i, bar) in grid.bars.iter().enumerate() {
-        let mut events = bar_events(i, &grid, &notes, input, flats);
+        let mut events = bar_events(i, &grid, &notes, input, &spelling);
+        apply_key(&mut events, key);
         beam(&mut events);
         out.push(ScoreBar {
             index: bar.index,
@@ -610,11 +764,11 @@ pub fn build(input: &ScoreInput) -> Vec<ScoreBar> {
     out
 }
 
-fn score_note(input: &ScoreInput, played: usize, flats: bool) -> ScoreNote {
+fn score_note(input: &ScoreInput, played: usize, spelling: &Spelling) -> ScoreNote {
     let m = input.matcher;
     let p: &Played = &m.played[played];
     let midi = p.freq.map(|f| freq_to_midi(f, input.a4).0);
-    let pitch = midi.map(|n| staff_pitch(n, flats));
+    let pitch = midi.map(|n| spelling.pitch(n));
     let at = p
         .matched
         .and_then(|e| m.expected.get(e))
@@ -624,7 +778,7 @@ fn score_note(input: &ScoreInput, played: usize, flats: bool) -> ScoreNote {
         .iter()
         .find(|c| c.start - 1e-6 <= at && at < c.end);
     let chord_marks = match (midi, chord) {
-        (Some(n), Some(c)) => chord_marks(n, &c.tones, flats),
+        (Some(n), Some(c)) => chord_marks(n, &c.tones, spelling),
         _ => Vec::new(),
     };
     ScoreNote {
@@ -641,7 +795,7 @@ fn score_note(input: &ScoreInput, played: usize, flats: bool) -> ScoreNote {
 
 /// Staff positions of `tones` (root first) stacked within an octave, from the nearest
 /// root at or below the sounding note `midi`.
-pub fn chord_marks(midi: i32, tones: &[u8], flats: bool) -> Vec<i32> {
+pub fn chord_marks(midi: i32, tones: &[u8], spelling: &Spelling) -> Vec<i32> {
     let Some(&root) = tones.first() else {
         return Vec::new();
     };
@@ -649,7 +803,7 @@ pub fn chord_marks(midi: i32, tones: &[u8], flats: bool) -> Vec<i32> {
     let base = midi - (midi - root).rem_euclid(12);
     tones
         .iter()
-        .map(|&t| staff_pitch(base + (t as i32 - root).rem_euclid(12), flats).pos)
+        .map(|&t| spelling.pitch(base + (t as i32 - root).rem_euclid(12)).pos)
         .collect()
 }
 
@@ -746,10 +900,12 @@ fn beam(events: &mut [ScoreEvent]) {
     }
 }
 
-/// Bars per row for a row `width` wide, keeping the densest bar readable.
-pub fn bars_per_row(bars: &[ScoreBar], width: f32) -> usize {
+/// Bars per row for a row `width` wide, keeping the densest bar readable at a staff
+/// line `spacing` (wider spacing, bigger notes, fewer bars).
+pub fn bars_per_row(bars: &[ScoreBar], width: f32, spacing: f32) -> usize {
     let densest = bars.iter().map(|b| b.events.len()).max().unwrap_or(0);
-    let bar_width = (densest as f32 * 40.0 + 40.0).max(220.0);
+    let scale = (spacing / 8.0).max(0.1);
+    let bar_width = (densest as f32 * 40.0 + 40.0).max(220.0) * scale;
     ((width / bar_width) as usize).max(1)
 }
 
@@ -913,6 +1069,84 @@ mod tests {
         assert!(!e_major.prefers_flats());
         assert!(!d_dorian.prefers_flats()); // Parent C major.
         assert!(g_dorian.prefers_flats()); // Parent F major.
+    }
+
+    fn accidentals(bar: &ScoreBar) -> Vec<Option<Accidental>> {
+        bar.events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                ScoreKind::Note(n) => Some(n.pitch.unwrap().accidental),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn key_signatures_sit_on_the_bass_clef() {
+        let key = |root, mode| KeySignature::of(&Scale { root, mode });
+        let e = key(4, Mode::Ionian);
+        assert_eq!((e.flats, e.positions()), (false, &[6, 3, 7, 4][..]));
+        let b_flat = key(10, Mode::Ionian);
+        assert_eq!((b_flat.flats, b_flat.positions()), (true, &[2, 5][..]));
+        // A Dorian shares G major's single sharp.
+        assert_eq!(key(9, Mode::Dorian).positions(), [6]);
+        assert!(key(0, Mode::Ionian).positions().is_empty());
+    }
+
+    #[test]
+    fn keys_spell_their_own_notes() {
+        // F Locrian (parent G flat major) has a C flat: written on C's space.
+        let f_locrian = Spelling::new(Some(Scale {
+            root: 5,
+            mode: Mode::Locrian,
+        }));
+        let c_flat = f_locrian.pitch(35);
+        assert_eq!((c_flat.pos, c_flat.alter), (3, -1));
+        assert_eq!(staff_pitch(35, false).pos, 2);
+        // Outside the key, the signature's kind of sign: G sharp in E flat is A flat.
+        let e_flat = Spelling::new(Some(Scale {
+            root: 3,
+            mode: Mode::Ionian,
+        }));
+        assert_eq!(e_flat.pitch(32).alter, -1);
+    }
+
+    #[test]
+    fn accidentals_follow_the_key_and_last_to_the_barline() {
+        let b = bars(2, 1, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
+        let mut m = matcher(&b);
+        // Bar 1: F#, F#, F, F#. Bar 2: F, F#, G, G.
+        for (i, midi) in [42, 42, 41, 42, 41, 42, 43, 43].into_iter().enumerate() {
+            let t = i as f64 * 0.5;
+            play(&mut m, t, t + 0.45, midi);
+        }
+        let build_in = |scale| {
+            build(&ScoreInput {
+                bars: &b,
+                matcher: &m,
+                chords: &[],
+                scale,
+                a4: A4,
+                until: f64::INFINITY,
+            })
+        };
+        use Accidental::*;
+        let c = build_in(Some(Scale {
+            root: 0,
+            mode: Mode::Ionian,
+        }));
+        assert_eq!(
+            accidentals(&c[0]),
+            [Some(Sharp), None, Some(Natural), Some(Sharp)]
+        );
+        assert_eq!(accidentals(&c[1]), [None, Some(Sharp), None, None]);
+        // In G major F# is in the key: only the F naturals need a sign.
+        let g = build_in(Some(Scale {
+            root: 7,
+            mode: Mode::Ionian,
+        }));
+        assert_eq!(accidentals(&g[0]), [None, None, Some(Natural), Some(Sharp)]);
+        assert_eq!(accidentals(&g[1]), [Some(Natural), Some(Sharp), None, None]);
     }
 
     #[test]
@@ -1331,7 +1565,10 @@ mod tests {
     #[test]
     fn chord_marks_stack_from_the_root_below() {
         // Note G1 over C major: root C1 is below it.
-        assert_eq!(chord_marks(31, &[0, 4, 7], false), [-4, -2, 0]);
+        assert_eq!(
+            chord_marks(31, &[0, 4, 7], &Spelling::chromatic(false)),
+            [-4, -2, 0]
+        );
     }
 
     #[test]
@@ -1367,8 +1604,9 @@ mod tests {
         assert!(rows(0, 2).is_empty());
         let b = bars(1, 1, &[]);
         let s = score(&b, &matcher(&b));
-        assert_eq!(bars_per_row(&s, 1000.0), 4);
-        assert_eq!(bars_per_row(&s, 10.0), 1);
+        assert_eq!(bars_per_row(&s, 1000.0, 8.0), 4);
+        assert_eq!(bars_per_row(&s, 1000.0, 16.0), 2);
+        assert_eq!(bars_per_row(&s, 10.0, 8.0), 1);
     }
 
     #[test]

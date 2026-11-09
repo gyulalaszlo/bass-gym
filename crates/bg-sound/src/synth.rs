@@ -162,6 +162,7 @@ impl Voice for PluckBass {
                 midi,
                 velocity,
                 duration,
+                ..
             } => (midi, velocity, duration),
             SoundKind::Click(ClickKind::Accent) => (45.0, 1.0, 0.12),
             SoundKind::Click(ClickKind::Beat) => (40.0, 0.8, 0.12),
@@ -242,6 +243,7 @@ impl Voice for FmPiano {
                 midi,
                 velocity,
                 duration,
+                ..
             } => (midi, velocity, duration),
             SoundKind::Click(_) => (72.0, 0.6, 0.1),
         };

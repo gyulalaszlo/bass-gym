@@ -914,10 +914,10 @@ impl PreferencePage for DisplayPage {
                     checkbox(ui, &mut v.show_score, "Show as a score above the grid");
                     ui.end_row();
                     ui.label("Score size");
-                    ui.add_enabled(
-                        v.show_score,
-                        slider_field(&mut v.score_size, SCORE_SIZE_RANGE).suffix("pt"),
-                    );
+                    ui.add(slider_field(&mut v.score_size, SCORE_SIZE_RANGE).suffix("pt"))
+                        .on_hover_text(
+                            "Staff line spacing of the live score and of the Results score",
+                        );
                     ui.end_row();
                     ui.label("Performance indicator range");
                     let unit = if v.indicator_bars == 1 { "bar" } else { "bars" };

@@ -14,7 +14,9 @@ use bg_exercises::basic_chords::accompaniment::{ChordAccompaniment, SharedChords
 use bg_exercises::basic_chords::{
     BasicChords, BasicChordsData, ChordLength, FixedSource, ProgressionKind, resolve_progression,
 };
-use bg_exercises::timing_session::{AccompanimentScoring, SharedTiming, TimingSession, lock};
+use bg_exercises::timing_session::{
+    Accompaniment, AccompanimentScoring, SharedTiming, TimingSession, lock,
+};
 use bg_ui::ExerciseType;
 use serde_json::json;
 
@@ -331,6 +333,70 @@ fn note_length_scoring_follows_the_preset() {
 }
 
 #[test]
+fn anticipated_chords_start_their_span_early() {
+    // A jazzy player pushes some chord changes an eighth early; the spans (and so the
+    // progression strip) must change there, not at the bar line.
+    let scale = Scale {
+        root: 0,
+        mode: harmony::Mode::Ionian,
+    };
+    let specs = harmony::parse_progression("ii7 V7 I7 vi7", &scale).unwrap();
+    let progression: Vec<_> = specs.iter().map(|&s| scale.realize(s)).collect();
+    let chords = SharedChords::default();
+    let mut acc = ChordAccompaniment::new(
+        progression,
+        scale,
+        harmony::checker("chord_tones"),
+        "halves".into(),
+        1.0,
+        harmony::VoicingStyle {
+            jazziness: 1.0,
+            ..Default::default()
+        },
+        0.7,
+        440.0,
+        3,
+        chords.clone(),
+    );
+    let cfg = SessionConfig {
+        count_in_bars: 0,
+        ..session_cfg()
+    };
+    let mut planner = Planner::new(cfg, 1.0);
+    let bars: Vec<_> = std::iter::from_fn(|| planner.next_bar(&()))
+        .take(16)
+        .collect();
+    for b in &bars {
+        acc.plan_bar(b, &mut SessionIo::offline(0.0, 0.0));
+    }
+    let c = lock_chords(&chords);
+    let beat = bars[0].duration / bars[0].beats as f64;
+    let pushed = c
+        .spans
+        .iter()
+        .filter(|s| {
+            bars.iter()
+                .any(|b| (b.start - 0.5 * beat - s.start).abs() < 1e-6)
+        })
+        .count();
+    assert!(pushed > 0, "no anticipations in 16 bars");
+    for w in c.spans.windows(2) {
+        assert!((w[0].end - w[1].start).abs() < 1e-6, "gap or overlap");
+        assert_ne!(w[0].step, w[1].step);
+    }
+    // Every span starts with the piano playing its voicing.
+    for s in &c.spans {
+        let attack: Vec<u8> = c
+            .piano
+            .iter()
+            .filter(|n| (n.time - s.start).abs() < 1e-6)
+            .map(|n| n.midi)
+            .collect();
+        assert_eq!(attack, s.voicing, "at {}", s.start);
+    }
+}
+
+#[test]
 fn v1_presets_migrate() {
     let et = BasicChords::default();
     let v1 = json!({
@@ -352,9 +418,17 @@ fn v1_presets_migrate() {
         (d.seed, d.checker.as_str(), d.session.tempo),
         (42, "chord_or_scale", 100.0)
     );
+    // v2 moved the key into the session settings.
+    assert_eq!(
+        d.session.key,
+        Scale {
+            root: 9,
+            mode: harmony::Mode::Aeolian
+        }
+    );
     let mut et = et;
     et.load_preset(data).unwrap();
-    assert_eq!(et.current_version(), 2);
+    assert_eq!(et.current_version(), 3);
 }
 
 #[test]

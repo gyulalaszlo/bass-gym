@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::groove::Groove;
+use crate::harmony::Scale;
 use crate::music::TimeSignature;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -11,6 +12,8 @@ use crate::music::TimeSignature;
 pub struct SessionConfig {
     pub tempo: f32,
     pub time_sig: TimeSignature,
+    /// The key: the score's key signature, and the scale chords are drawn from.
+    pub key: Scale,
     pub groove: Groove,
     pub click: ClickConfig,
     pub groove_click: GrooveClickConfig,
@@ -27,6 +30,7 @@ impl Default for SessionConfig {
         Self {
             tempo: 90.0,
             time_sig: TimeSignature::default(),
+            key: Scale::default(),
             groove: Groove::default(),
             click: ClickConfig::default(),
             groove_click: GrooveClickConfig::default(),

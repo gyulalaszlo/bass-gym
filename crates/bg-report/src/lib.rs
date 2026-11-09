@@ -324,6 +324,7 @@ fn report(input: &ReportInput, region: &Region) -> Report {
                     midi,
                     velocity,
                     duration,
+                    ..
                 } => ("note", Some(midi), Some(velocity), Some(duration)),
             };
             SoundEntry {
@@ -572,6 +573,7 @@ mod tests {
                     midi: 60.0,
                     velocity: 0.8,
                     duration: 0.5,
+                    release: 0.0,
                 },
             ),
         ]);

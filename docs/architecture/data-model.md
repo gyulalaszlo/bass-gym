@@ -40,6 +40,10 @@ pub struct Matcher {
 // bg-exercises/src/timing_session.rs
 pub struct TimingShared { pub bars: Vec<BarPlan>, pub matcher: Matcher, pub running: bool, pub bpm: f32 }
 
+// bg-core/src/session.rs: SessionConfig { tempo, time_sig, key: Scale, groove, .. }
+// `key` is every exercise's key (set in the toolbar): Basic chords' scale and the score's
+// key signature.
+
 // bg-exercises/src/basic_chords/accompaniment.rs
 pub struct ChordSpan { pub start: f64, pub end: f64, pub step: usize, pub chord: Chord, pub voicing: Vec<u8> }
 pub struct PianoNote { pub time: f64, pub len: f64, pub midi: u8 }
@@ -153,8 +157,12 @@ rests. It's pure, so all notation rules are tested there and painters stay simpl
   plainly. Rests finish their beat first.
 - Bass is written an octave up. `StaffPitch.pos` counts lines and spaces from the bottom
   line (written G2): open E is -2, open G 7.
-- No key signature: every altered note has an accidental, spelled by
-  `Scale::prefers_flats`, sharps when there's no scale.
+- Key signature from `ScoreInput.scale` (`KeySignature::of`, via the parent major).
+  `Spelling` gives the key's own notes its letters (C flat in G flat major) and the
+  rest sharps or flats as the signature is; sharps when there's no scale.
+  `apply_key` writes a sign only where a note differs from the signature or an earlier
+  sign on that line or space in the bar (naturals included); tied continuations
+  carry none.
 - `clash` means the note's harmony score grades Poor. Without chords nothing clashes.
 - `chord_marks` stack the chord within an octave from the nearest root at or below the
   note. `ScoreChord` is the neutral chord form, since bg-core can't name `ChordSpan`.
@@ -171,6 +179,9 @@ the config changes (`has_results = false`).
 - `expected` and `outcomes` are truncated at stop. `played` is kept whole, minus
   count-in notes, which are dropped on arrival.
 - `ChordShared.spans` and `piano` are trimmed at stop, but notes aren't shortened.
+  An anticipated chord (pushed an eighth before the bar line) gets its own span from
+  the push, which the next bar extends, so the strip, chord band and harmony judging
+  change with the piano.
   `PianoNote` has no velocity or gain.
 - Groove-click notes aren't logged. Which sounds were used and the master gain live in
   `SoundConfig`, not per session.

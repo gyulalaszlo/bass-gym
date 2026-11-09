@@ -320,6 +320,7 @@ fn schedule(cfg: &SessionConfig, io: &mut SessionIo, bar: &BarPlan) {
                 midi: gc.pitch as f32,
                 velocity: if n.accent { 1.0 } else { 0.75 },
                 duration: (n.len * 0.9) as f32,
+                release: 0.0,
             };
             io.play(
                 n.time,

@@ -7,7 +7,7 @@ use bg_core::{BarPlan, Matcher};
 use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, vec2};
 
 use crate::theme::{self, mono};
-use crate::widgets::score::{ScoreView, StaffLayout};
+use crate::widgets::score::{ScoreView, StaffLayout, paint_fixed_lead};
 use crate::widgets::time_axis::TimeAxis;
 
 pub struct Beatgrid<'a> {
@@ -95,6 +95,8 @@ impl Beatgrid<'_> {
             lead: None,
         }
         .paint(&p, rect);
+        let key = live.scale.map(|s| score::KeySignature::of(&s));
+        paint_fixed_lead(&p, rect, live.layout(), key);
         p.vline(
             axis.x(self.now),
             rect.y_range(),

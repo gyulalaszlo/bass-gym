@@ -157,8 +157,15 @@ impl Recorder {
     pub fn finish(mut self, stop_time: f64, latency: f64) -> Recording {
         self.sounds.retain(|s| s.at <= stop_time);
         for s in &mut self.sounds {
-            if let SoundKind::Note { duration, .. } = &mut s.ev.kind {
-                *duration = duration.min((stop_time - s.at) as f32);
+            if let SoundKind::Note {
+                duration, release, ..
+            } = &mut s.ev.kind
+            {
+                let left = (stop_time - s.at) as f32;
+                if left < *duration {
+                    *duration = left;
+                    *release = 0.0;
+                }
             }
         }
         let audio = match self.writer {
@@ -196,6 +203,7 @@ mod tests {
                     midi: 60.0,
                     velocity: 1.0,
                     duration,
+                    release: 0.0,
                 },
                 gain: 1.0,
             },

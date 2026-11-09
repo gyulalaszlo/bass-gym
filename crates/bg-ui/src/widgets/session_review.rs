@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use bg_audio::{AnalysisConfig, AudioConfig, AudioEngine, Recording, ReplayHandle, SoundConfig};
 use bg_core::harmony::Scale;
-use bg_core::score::{self, ScoreBar, ScoreChord, ScoreEvent, ScoreInput, ScoreKind};
+use bg_core::score::{self, KeySignature, ScoreBar, ScoreChord, ScoreEvent, ScoreInput, ScoreKind};
 use bg_core::{BarPlan, Matcher};
 use bg_report::{Annotation, Exported, ReportInput};
 use egui::{
@@ -25,10 +25,11 @@ use crate::widgets::controls::{checkbox, number_field, text_field};
 use crate::widgets::marker_editor::{
     EditorState, Header, Line, Marker, MarkerEditor, WaveView, paint_marker,
 };
-use crate::widgets::score::{Lead, ScoreView, StaffLayout, lead_width};
+use crate::widgets::score::{Lead, ScoreView, StaffLayout, lead_width, paint_fixed_lead};
 use crate::widgets::time_axis::TimeAxis;
 use crate::widgets::waveform::{self, PeakSource, WaveStyle};
 
+/// Staff spacing until the owner sets one (see [`SessionReview::ui`]).
 const STAFF_SPACING: f32 = 8.0;
 const WAVE_HEIGHT: f32 = 60.0;
 /// Room for the note bars above the waveform.
@@ -202,6 +203,8 @@ pub struct SessionReview {
     pub markers: Vec<Marker>,
     next_marker: u64,
     editor: Option<EditorState>,
+    /// Scroll the score to show this time (set when leaving the marker editor).
+    reveal: Option<f64>,
     report_title: String,
     report_notes: String,
     export: ExportState,
@@ -242,6 +245,7 @@ impl SessionReview {
             markers: Vec::new(),
             next_marker: 1 << 32,
             editor: None,
+            reveal: None,
             report_title: String::new(),
             report_notes: String::new(),
             export: ExportState::Idle,
@@ -474,7 +478,15 @@ impl SessionReview {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, engine: &mut AudioEngine, data_dir: Option<&Path>) {
+    /// `staff_spacing` is the distance between staff lines (the score size preference).
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        engine: &mut AudioEngine,
+        data_dir: Option<&Path>,
+        staff_spacing: f32,
+    ) {
+        self.layout.spacing = staff_spacing;
         if !ui.ctx().egui_wants_keyboard_input()
             && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Space))
         {
@@ -585,26 +597,32 @@ impl SessionReview {
             return;
         }
         let width = ui.available_width();
-        let lead = lead_width(STAFF_SPACING, true);
-        let per_row = score::bars_per_row(&self.score, width - lead);
+        let key = self.input.scale.map(|s| KeySignature::of(&s));
+        let lead = lead_width(self.layout.spacing, true, key);
+        let per_row = score::bars_per_row(&self.score, width - lead, self.layout.spacing);
         let score_h = self.layout.height();
         let row_h = score_h + NOTE_LANE + WAVE_HEIGHT;
         let mut open_at = None;
         let mut select = None;
         let mut play = None;
-        for (n, range) in score::rows(self.score.len(), per_row)
-            .into_iter()
-            .enumerate()
-        {
+        let rows = score::rows(self.score.len(), per_row);
+        let rows_len = rows.len();
+        for (n, range) in rows.into_iter().enumerate() {
             let (rect, resp) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
             ui.add_space(ROW_GAP);
-            if !ui.is_rect_visible(rect) {
-                continue;
-            }
             let bars = &self.score[range];
             let (Some(first), Some(last)) = (bars.first(), bars.last()) else {
                 continue;
             };
+            if let Some(t) = self.reveal
+                && (t < last.end || n + 1 == rows_len)
+            {
+                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                self.reveal = None;
+            }
+            if !ui.is_rect_visible(rect) {
+                continue;
+            }
             // A short last row keeps the scale of the full ones.
             let bar_len = (last.end - first.start) / bars.len() as f64;
             let row_end = first.start + bar_len * per_row as f64;
@@ -623,7 +641,8 @@ impl SessionReview {
                 layout: self.layout,
                 lead: Some(Lead {
                     clef: n == 0,
-                    sig: first.sig,
+                    key,
+                    sig: Some(first.sig),
                 }),
             }
             .paint(&p, staff);
@@ -760,8 +779,9 @@ impl SessionReview {
             if ui
                 .add(button(format!("{} Back to score", icons::ARROW_LEFT)).small())
                 .clicked()
+                && let Some(editor) = self.editor.take()
             {
-                self.editor = None;
+                self.reveal = Some(editor.view.start + editor.view.span / 2.0);
             }
             ui.label(
                 RichText::new(
@@ -788,6 +808,7 @@ impl SessionReview {
             }
         };
         let score = &self.score;
+        let key = self.input.scale.map(|s| KeySignature::of(&s));
         // Bars are named by the editor's own markers.
         let layout = StaffLayout {
             labels: false,
@@ -805,6 +826,7 @@ impl SessionReview {
                 lead: None,
             }
             .paint(p, rect);
+            paint_fixed_lead(p, rect, layout, key);
         };
         MarkerEditor {
             header: Some(Header {

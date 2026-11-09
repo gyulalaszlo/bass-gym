@@ -48,6 +48,19 @@ impl Mode {
         }
     }
 
+    /// A short name for tight spaces: "maj", "dor", ...
+    pub fn short(self) -> &'static str {
+        match self {
+            Self::Ionian => "maj",
+            Self::Dorian => "dor",
+            Self::Phrygian => "phr",
+            Self::Lydian => "lyd",
+            Self::Mixolydian => "mix",
+            Self::Aeolian => "min",
+            Self::Locrian => "loc",
+        }
+    }
+
     fn rotation(self) -> usize {
         Self::ALL.iter().position(|&m| m == self).unwrap_or(0)
     }
@@ -94,9 +107,30 @@ impl Scale {
     /// Whether this scale's key signature is written with flats (judged by its parent
     /// major key), for spelling notes.
     pub fn prefers_flats(&self) -> bool {
+        matches!(self.parent_major(), 1 | 3 | 5 | 6 | 8 | 10)
+    }
+
+    /// The tonic's name, spelled as the key signature is ("Bb", not "A#").
+    pub fn tonic_name(&self) -> &'static str {
+        const FLAT_NAMES: [&str; 12] = [
+            "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
+        ];
+        if self.prefers_flats() {
+            FLAT_NAMES[(self.root % 12) as usize]
+        } else {
+            crate::music::note_name(self.root as i32)
+        }
+    }
+
+    /// Short name of the key, such as "Bb maj" or "F# min".
+    pub fn short_name(&self) -> String {
+        format!("{} {}", self.tonic_name(), self.mode.short())
+    }
+
+    /// Pitch class of the major key sharing this scale's notes (and key signature).
+    pub fn parent_major(&self) -> u8 {
         let above_parent: u8 = MAJOR_STEPS[..self.mode.rotation()].iter().sum();
-        let parent = (self.root % 12 + 12 - above_parent) % 12;
-        matches!(parent, 1 | 3 | 5 | 6 | 8 | 10)
+        (self.root % 12 + 12 - above_parent) % 12
     }
 
     /// Diatonic triad or seventh chord on `degree` (0-based).

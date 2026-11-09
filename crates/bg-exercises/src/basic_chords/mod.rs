@@ -9,8 +9,7 @@ use crate::fake_session;
 use anyhow::Result;
 use std::sync::Arc;
 
-use bg_core::harmony::{self, Chord, Mode, Scale, comp};
-use bg_core::music::note_name;
+use bg_core::harmony::{self, Chord, comp};
 use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::score::ScoreChord;
 use bg_core::scoring::harmony_grade;
@@ -181,8 +180,8 @@ impl ScoringOptions {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BasicChordsData {
+    /// The key is `session.key`.
     pub session: SessionConfig,
-    pub scale: Scale,
     pub progression: ProgressionSettings,
     pub chord_length: ChordLength,
     /// Comp pattern id (see `harmony::comp::PATTERNS`).
@@ -196,6 +195,8 @@ pub struct BasicChordsData {
     /// 0 = machine-exact … 1 = loose timing and dynamics.
     pub humanize: f32,
     pub piano_volume: f32,
+    /// Seconds piano notes ring on after their written end (cut by the next attack).
+    pub release: f32,
     /// Chord-compatibility checker id.
     pub checker: String,
     pub scoring: ScoringOptions,
@@ -208,7 +209,6 @@ impl Default for BasicChordsData {
     fn default() -> Self {
         Self {
             session: SessionConfig::default(),
-            scale: Scale::default(),
             progression: ProgressionSettings::default(),
             chord_length: ChordLength::One,
             comp: "halves".into(),
@@ -217,6 +217,7 @@ impl Default for BasicChordsData {
             center_octave: harmony::voicing::CENTER_OCTAVE,
             humanize: 0.0,
             piano_volume: 0.7,
+            release: 0.0,
             checker: "chord_tones".into(),
             scoring: ScoringOptions::default(),
             seed: 1,
@@ -233,7 +234,7 @@ pub fn resolve_progression(d: &BasicChordsData, seed: u64) -> Result<Vec<Chord>,
     let text = match p.kind {
         ProgressionKind::Random => {
             return Ok(harmony::random_progression(
-                &d.scale,
+                &d.session.key,
                 p.random_len.max(1) as usize,
                 d.jazziness,
                 &mut rng,
@@ -258,8 +259,13 @@ pub fn resolve_progression(d: &BasicChordsData, seed: u64) -> Result<Vec<Chord>,
             pool[rng.random_range(0..pool.len())].to_owned()
         }
     };
-    let specs = harmony::parse_progression(&text, &d.scale).map_err(|e| e.to_string())?;
-    Ok(harmony::resolve(&specs, &d.scale, d.jazziness, &mut rng))
+    let specs = harmony::parse_progression(&text, &d.session.key).map_err(|e| e.to_string())?;
+    Ok(harmony::resolve(
+        &specs,
+        &d.session.key,
+        d.jazziness,
+        &mut rng,
+    ))
 }
 
 #[derive(Default)]
@@ -284,7 +290,7 @@ pub struct BasicChords {
 
 impl PresetSchema for BasicChords {
     fn current_version(&self) -> u32 {
-        2
+        3
     }
 
     fn migrate_step(&self, from: u32, mut data: Value) -> Result<Value, PresetError> {
@@ -320,6 +326,19 @@ impl PresetSchema for BasicChords {
                         _ => "Four",
                     }),
                 );
+                Ok(data)
+            }
+            // v2: the key moved into the session settings, shared by every exercise.
+            2 => {
+                let o = data
+                    .as_object_mut()
+                    .ok_or_else(|| PresetError::Invalid("expected an object".into()))?;
+                if let Some(scale) = o.remove("scale") {
+                    let session = o.entry("session").or_insert_with(|| json!({}));
+                    if let Some(session) = session.as_object_mut() {
+                        session.insert("key".into(), scale);
+                    }
+                }
                 Ok(data)
             }
             _ => Err(PresetError::NoMigration(from)),
@@ -479,9 +498,10 @@ impl ExerciseType for BasicChords {
         let scoring = ctx.scoring;
         let engine = &mut *ctx.engine;
         let data_dir = ctx.data_dir;
+        let staff = ctx.settings.get::<ViewPrefs>(ViewPrefs::ID).score_size;
         results_dialog(ui.ctx(), &mut open, "Results", tab, |ui, tab| {
             match (tab, review.as_mut(), &stats) {
-                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir),
+                (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir, staff),
                 (_, _, Some(stats)) => results(ui, stats, scoring, |ui| {
                     block(ui, "Per chord", |ui| self.per_chord_table(ui))
                 }),
@@ -538,7 +558,7 @@ impl BasicChords {
             bars: shared.bars.clone(),
             matcher: shared.matcher.clone(),
             chords,
-            scale: Some(self.data.scale),
+            scale: Some(self.data.session.key),
             a4: self.a4,
             recording,
             exercise: self.id().to_owned(),
@@ -588,7 +608,7 @@ impl BasicChords {
             .grade_mode;
         let acc = ChordAccompaniment::new(
             progression,
-            d.scale,
+            d.session.key,
             harmony::checker(&d.checker),
             d.comp.clone(),
             d.chord_length.bars(),
@@ -602,7 +622,8 @@ impl BasicChords {
             seed,
             self.chords.clone(),
         )
-        .with_humanize(d.humanize);
+        .with_humanize(d.humanize)
+        .with_release(d.release);
         let logic = TimingSession::with_accompaniment(
             d.session.clone(),
             ctx.scoring.clone(),
@@ -827,7 +848,7 @@ impl BasicChords {
         let live = |chords| {
             show_score.then_some(LiveScore {
                 chords,
-                scale: Some(self.data.scale),
+                scale: Some(self.data.session.key),
                 a4,
                 size,
             })
@@ -983,10 +1004,9 @@ impl BasicChords {
         let run_seed = self.run_seed;
         let d = &mut self.data;
         ui.add_enabled_ui(enabled, |ui| {
-            theme::responsive_columns(ui, 330.0, 4, |ui, i| match i {
-                0 => theme::section(ui, "Key", |ui| scale_ui(ui, d)),
-                1 => theme::section(ui, "Progression", |ui| progression_ui(ui, d, run_seed)),
-                2 => theme::section(ui, "Piano", |ui| piano_ui(ui, d)),
+            theme::responsive_columns(ui, 330.0, 3, |ui, i| match i {
+                0 => theme::section(ui, "Progression", |ui| progression_ui(ui, d, run_seed)),
+                1 => theme::section(ui, "Piano", |ui| piano_ui(ui, d)),
                 _ => theme::section(ui, "Scoring", |ui| scoring_ui(ui, d)),
             });
         });
@@ -1050,21 +1070,6 @@ fn scoring_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
     );
 }
 
-fn scale_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
-    ui.horizontal_wrapped(|ui| {
-        dropdown(ui, "bc_root", note_name(d.scale.root as i32), |ui| {
-            for pc in 0..12u8 {
-                selectable_value(ui, &mut d.scale.root, pc, note_name(pc as i32));
-            }
-        });
-        dropdown(ui, "bc_mode", d.scale.mode.label(), |ui| {
-            for m in Mode::ALL {
-                selectable_value(ui, &mut d.scale.mode, m, m.label());
-            }
-        });
-    });
-}
-
 fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u64>) {
     let p = &mut d.progression;
     ui.horizontal_wrapped(|ui| {
@@ -1096,7 +1101,7 @@ fn progression_ui(ui: &mut egui::Ui, d: &mut BasicChordsData, run_seed: Option<u
                             .width(ui.available_width().min(280.0))
                             .font(theme::mono(15.0)),
                     );
-                    match harmony::parse_progression(&p.custom, &d.scale) {
+                    match harmony::parse_progression(&p.custom, &d.session.key) {
                         Ok(specs) => {
                             ui.add(
                                 egui::Label::new(
@@ -1284,6 +1289,17 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
             ui.end_row();
             ui.label("Volume");
             ui.add(egui::Slider::new(&mut d.piano_volume, 0.0..=1.0).show_value(false));
+            ui.end_row();
+            ui.label("Release");
+            ui.add(
+                bg_ui::widgets::controls::slider_field(&mut d.release, 0.0..=2.0)
+                    .step_by(0.1)
+                    .suffix("s"),
+            )
+            .on_hover_text(
+                "Lets sampled piano notes ring on after they end, until the next chord \
+                 attack, so the harmony stays in the air at slow tempos",
+            );
             ui.end_row();
         });
     ui.add_space(6.0);

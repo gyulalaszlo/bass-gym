@@ -8,6 +8,7 @@
 use std::cell::Cell;
 
 use bg_core::TimeSignature;
+use bg_core::harmony::{Mode, Scale};
 use bg_core::session::TempoRamp;
 use egui::{Align, Layout, Pos2, Rect, RichText, Shape, Ui, vec2};
 
@@ -381,6 +382,40 @@ impl Toolbar<'_> {
             });
         });
         *sig != before
+    }
+
+    /// The key: a tonic grid and the modes.
+    pub fn key(&mut self, key: &mut Scale) -> bool {
+        const ROOTS: [&str; 12] = [
+            "C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B",
+        ];
+        let before = *key;
+        let text = RichText::new(key.short_name()).font(theme::mono(20.0));
+        controls::dropdown(self.ui, "toolbar_key", text, |ui| {
+            ui.set_min_width(230.0);
+            egui::Grid::new("key_roots")
+                .spacing([4.0, 4.0])
+                .show(ui, |ui| {
+                    for (pc, name) in ROOTS.iter().enumerate() {
+                        let pc = pc as u8;
+                        if ui.add(selectable(key.root == pc, *name)).clicked() {
+                            key.root = pc;
+                        }
+                        if pc % 4 == 3 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            ui.separator();
+            for m in Mode::ALL {
+                if ui.add(selectable(key.mode == m, m.label())).clicked() {
+                    key.mode = m;
+                }
+            }
+        })
+        .0
+        .on_hover_text("Key: sets the score's key signature (and the chords in Basic chords)");
+        *key != before
     }
 
     /// An icon button with a caret that opens a panel of options below it. The open

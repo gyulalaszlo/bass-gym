@@ -22,6 +22,8 @@ pub fn session_toolbar(tb: &mut Toolbar, cfg: &mut SessionConfig) -> bool {
     tb.tempo(&mut cfg.tempo, &mut cfg.ramp);
     tb.gap(Gap::Small);
     tb.time_sig(&mut cfg.time_sig);
+    tb.gap(Gap::Small);
+    tb.key(&mut cfg.key);
     tb.gap(Gap::Large);
     let chips = practice_chips(cfg);
     if !chips.is_empty() {

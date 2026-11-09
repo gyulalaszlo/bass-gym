@@ -110,7 +110,7 @@ No MIDI runs at runtime. Everything is a `SoundEvent` scheduled at a transport t
 
 ```rust
 // bg-sound/src/lib.rs
-pub enum SoundKind { Click(ClickKind), Note { midi: f32, velocity: f32, duration: f32 } }
+pub enum SoundKind { Click(ClickKind), Note { midi: f32, velocity: f32, duration: f32, release: f32 } }
 pub struct SoundEvent { pub kind: SoundKind, pub gain: f32 }
 pub trait Voice: Send { fn trigger(&mut self, ev: &SoundEvent);
     fn render(&mut self, out: &mut [f32]); fn silence(&mut self); }
@@ -120,6 +120,9 @@ pub enum Slot { Click = 0, Groove = 1, Instrument = 2, Playback = 3 }
 
 - Click uses the built-in `SineClick` / `Woodblock` / `PluckBass` voices (`bg-sound/src/synth.rs`).
 - Chords default to `sf2:e-piano-mellow` through `rustysynth`, or `FmPiano`.
+- `release` (Basic chords' Piano › Release) lets a `SoundFontVoice` note ring on after
+  `duration`; the voice's next attack cuts every key still ringing. Synth voices ignore
+  it. Recording and replay keep it, but zero it on notes they cut short.
 - `Voice` needs no hardware, so voices can render offline.
 - `TimingSession::tick` plans ahead: 0.35 s lookahead plus 2 bars. For each bar,
   `schedule()` sends clicks and groove notes through `io.play`, and

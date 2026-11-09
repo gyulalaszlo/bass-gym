@@ -91,7 +91,8 @@ let x_of   = |t: f64| x_now + ((t - self.now) * pps) as f32;
 `score: Some(LiveScore)` adds a staff above the grid on the same axis, built each frame
 from the bars in view with `until = now`. `LiveScore::layout` has a fixed range so the
 grid doesn't jump. A sounding note appears once its pitch arrives.
-`ViewPrefs.show_score` and `.score_size` set it, in the Display preferences.
+`ViewPrefs.show_score` and `.score_size` set it, in the Display preferences;
+`score_size` also sets the Results score.
 
 `bar_len` is the duration of the current bar. Nothing scrolls: everything repaints from
 `now` with `x_now` fixed, and the exercise calls `request_repaint()` while running.
@@ -132,6 +133,9 @@ Culling relies on time-sorted vectors.
   the score. New markers and clicked labels take keyboard focus (`focus_label` asks for
   two frames, as the click can take focus away on its own frame).
 - `ScoreView` paints chord marks first, then staff, then notes, so marks stay a hint.
+- `Lead { clef, key, sig }` draws at the start of a review row (key on every row, clef
+  on the first). The live score and the editor header have no lead; `paint_fixed_lead`
+  covers their left end with the clef and key while notes scroll behind.
 
 ## Results dialog (`bg-ui/src/widgets/results.rs`)
 
@@ -158,7 +162,11 @@ and playback survive closing the dialog. It's built in `update_review` once
 `!session_running` and a recording has arrived, from a `ReviewInput` snapshot, and
 released with `has_results`.
 
-- Rows of whole bars: one shared `TimeAxis` per row for score and waveform. A short last
+- Rows of whole bars: one shared `TimeAxis` per row for score and waveform. Staff
+  spacing is `ViewPrefs.score_size`, passed to `ui` each frame, and `bars_per_row`
+  scales with it.
+- "Back to score" sets `reveal` to the editor view's centre; `rows` scrolls that row
+  into view on the next frame. A short last
   row keeps the scale of full rows. Rows are culled with `is_rect_visible`.
 - Click the score to select a bar and play from there to the end of the session: from
   the recorded note under the click, or else the bar's start. Shift extends the selection

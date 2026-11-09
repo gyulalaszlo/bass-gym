@@ -3,9 +3,9 @@
 
 use bg_core::TimeSignature;
 use bg_core::score::{
-    Accidental, MIDDLE_LINE, ScoreBar, ScoreEvent, ScoreKind, ScoreNote, TOP_LINE,
+    Accidental, KeySignature, MIDDLE_LINE, ScoreBar, ScoreEvent, ScoreKind, ScoreNote, TOP_LINE,
 };
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Shape, Stroke, pos2};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rangef, Rect, Shape, Stroke, pos2};
 
 use crate::theme::{self, mono};
 use crate::widgets::time_axis::TimeAxis;
@@ -20,6 +20,7 @@ const HEAD_HALF: char = '\u{E0A3}';
 const HEAD_BLACK: char = '\u{E0A4}';
 const HEAD_X: char = '\u{E0A9}';
 const FLAT: char = '\u{E260}';
+const NATURAL: char = '\u{E261}';
 const SHARP: char = '\u{E262}';
 const SIG_ZERO: u32 = 0xE080;
 const FLAGS_UP: [char; 4] = ['\u{E240}', '\u{E242}', '\u{E244}', '\u{E246}'];
@@ -69,9 +70,51 @@ impl StaffLayout {
     }
 }
 
-/// Where the staff lines begin, left of the axis, to fit the clef and time signature.
-pub fn lead_width(spacing: f32, clef: bool) -> f32 {
-    (if clef { 3.8 } else { 0.5 } + 2.2) * spacing
+/// Room for a key signature's signs, in staff spaces.
+fn key_width(key: Option<KeySignature>) -> f32 {
+    match key {
+        Some(k) if k.count > 0 => k.count as f32 * KEY_SIGN + KEY_GAP,
+        _ => 0.0,
+    }
+}
+
+/// Distance between the signs of a key signature, in staff spaces.
+const KEY_SIGN: f32 = 1.25;
+/// Space after the key signature, in staff spaces.
+const KEY_GAP: f32 = 0.8;
+
+/// Where the staff lines begin, left of the axis, to fit the clef, key and time
+/// signature.
+pub fn lead_width(spacing: f32, clef: bool, key: Option<KeySignature>) -> f32 {
+    (if clef { 3.8 } else { 0.5 } + key_width(key) + 2.2) * spacing
+}
+
+/// Paints a clef and key signature over the left end of a staff whose notes scroll by
+/// behind them, as in the live score.
+pub fn paint_fixed_lead(p: &Painter, rect: Rect, layout: StaffLayout, key: Option<KeySignature>) {
+    let width = (4.2 + key_width(key)) * layout.spacing;
+    let lead = Rect::from_min_size(rect.min, egui::vec2(width, rect.height()));
+    p.rect_filled(lead, 0.0, theme::bg());
+    let d = Draw {
+        p,
+        sp: layout.spacing,
+        bottom: layout.bottom_line(rect),
+        axis: TimeAxis::new(Rangef::new(lead.left(), lead.right()), 0.0, 1.0),
+    };
+    d.staff(lead);
+    d.lead(
+        lead,
+        Lead {
+            clef: true,
+            key,
+            sig: None,
+        },
+    );
+    p.vline(
+        lead.right(),
+        d.y(TOP_LINE)..=d.bottom,
+        Stroke::new(1.0, theme::grid()),
+    );
 }
 
 pub struct ScoreView<'a> {
@@ -85,7 +128,8 @@ pub struct ScoreView<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Lead {
     pub clef: bool,
-    pub sig: TimeSignature,
+    pub key: Option<KeySignature>,
+    pub sig: Option<TimeSignature>,
 }
 
 impl ScoreView<'_> {
@@ -170,7 +214,20 @@ impl Draw<'_> {
             self.glyph(F_CLEF, x, self.y(6), color);
             x += 3.6 * self.sp;
         }
-        for (n, pos) in [(lead.sig.num, 6), (lead.sig.den, 2)] {
+        if let Some(key) = lead.key {
+            let sign = if key.flats { FLAT } else { SHARP };
+            for &pos in key.positions() {
+                self.glyph(sign, x, self.y(pos), color);
+                x += KEY_SIGN * self.sp;
+            }
+            if key.count > 0 {
+                x += KEY_GAP * self.sp;
+            }
+        }
+        let Some(sig) = lead.sig else {
+            return;
+        };
+        for (n, pos) in [(sig.num, 6), (sig.den, 2)] {
             let mut digit_x = x;
             for c in n.to_string().chars() {
                 let digit = c.to_digit(10).unwrap_or(0);
@@ -286,6 +343,7 @@ impl Draw<'_> {
             let glyph = match a {
                 Accidental::Sharp => SHARP,
                 Accidental::Flat => FLAT,
+                Accidental::Natural => NATURAL,
             };
             self.glyph(glyph, x - 1.1 * self.sp, self.y(pos), color);
         }

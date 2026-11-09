@@ -136,14 +136,14 @@ pub struct ChordAccompaniment {
     /// 0 = machine-exact … 1 = loose: random timing, rolled chords and velocity changes.
     pub humanize: f32,
     pub volume: f32,
+    /// Seconds piano notes may ring on after their written end, until the next attack.
+    pub release: f32,
     pub a4: f32,
     pub shared: SharedChords,
     rng: ChaCha8Rng,
     /// Randomness of the humanized feel (separate, so voicings don't depend on it).
     feel_rng: ChaCha8Rng,
     prev_voicing: Option<Voicing>,
-    /// Voicing prepared early for an anticipated chord (progression position, voicing).
-    anticipated: Option<(usize, Voicing)>,
     /// Skip the first hit of the next bar (it was anticipated).
     skip_downbeat: bool,
     /// Progression position of the last span, to extend chords held across bar lines.
@@ -177,12 +177,12 @@ impl ChordAccompaniment {
             style,
             humanize: 0.0,
             volume,
+            release: 0.0,
             a4,
             shared,
             rng: ChaCha8Rng::seed_from_u64(seed ^ 0x5eed),
             feel_rng: ChaCha8Rng::seed_from_u64(seed ^ 0xfee1),
             prev_voicing: None,
-            anticipated: None,
             skip_downbeat: false,
             last_pos: None,
         }
@@ -194,14 +194,14 @@ impl ChordAccompaniment {
         self
     }
 
+    /// Lets notes ring on for `release` seconds after they end, until the next attack.
+    pub fn with_release(mut self, release: f32) -> Self {
+        self.release = release.max(0.0);
+        self
+    }
+
     /// Voicing for chord number `pos` (counting from the start, not wrapped).
     fn voicing_for(&mut self, pos: usize) -> Voicing {
-        if let Some((p, v)) = self.anticipated.take()
-            && p == pos
-        {
-            self.prev_voicing = Some(v.clone());
-            return v;
-        }
         let chord = &self.progression[pos % self.progression.len()];
         let v = voice(
             chord,
@@ -219,7 +219,7 @@ impl ChordAccompaniment {
     fn play(
         rng: &mut ChaCha8Rng,
         humanize: f32,
-        volume: f32,
+        (volume, release): (f32, f32),
         io: &mut SessionIo,
         shared: &mut ChordShared,
         time: f64,
@@ -254,6 +254,7 @@ impl ChordAccompaniment {
                 midi: midi as f32,
                 velocity,
                 duration: (len * 0.95) as f32,
+                release,
             };
             io.play(t, Slot::Instrument, SoundEvent { kind, gain: volume });
             shared.piano.push(PianoNote { time: t, len, midi });
@@ -325,7 +326,7 @@ impl Accompaniment for ChordAccompaniment {
             Self::play(
                 &mut self.feel_rng,
                 self.humanize,
-                self.volume,
+                (self.volume, self.release),
                 io,
                 &mut shared,
                 time_at(h.pos),
@@ -339,12 +340,24 @@ impl Accompaniment for ChordAccompaniment {
         if anticipate {
             drop(shared);
             let v = self.voicing_for(next_pos);
-            self.anticipated = Some((next_pos, v.clone()));
             shared = lock_chords(&self.shared);
+            // The next chord starts at the push: the next bar extends this span.
+            if let Some(last) = shared.spans.last_mut() {
+                last.end = time_at(push);
+            }
+            let step = next_pos % self.progression.len();
+            shared.spans.push(ChordSpan {
+                start: time_at(push),
+                end: time_at(beats),
+                step,
+                chord: self.progression[step].clone(),
+                voicing: v.notes(),
+            });
+            self.last_pos = Some(next_pos);
             Self::play(
                 &mut self.feel_rng,
                 self.humanize,
-                self.volume,
+                (self.volume, self.release),
                 io,
                 &mut shared,
                 time_at(push),

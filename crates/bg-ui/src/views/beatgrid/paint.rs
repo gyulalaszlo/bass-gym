@@ -64,7 +64,7 @@ fn paint_score(p: &Painter, props: &Props, theme: &Theme, live: LiveScore, rect:
 /// Per visible bar: count-in fill, bar number and BPM, "click off" band if muted, the bar
 /// line, then dashed beat and step lines (the grid, not expected notes).
 fn paint_bars(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
-    let (rect, t) = (l.grid, &theme.bar);
+    let (rect, t, m) = (l.grid, &theme.bar, &theme.metrics);
     let x_of = |time: f64| l.axis.x(time);
     for bar in props
         .bars
@@ -73,7 +73,7 @@ fn paint_bars(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
     {
         let bx = x_of(bar.start);
         let bar_rect = Rect::from_x_y_ranges(bx..=x_of(bar.end()), rect.y_range());
-        let header = Pos2::new(bx + 8.0, rect.top() + 6.0);
+        let header = Pos2::new(bx, rect.top()) + m.label_inset;
         if bar.is_count_in() {
             p.rect_filled(bar_rect.shrink2(vec2(0.0, 1.0)), 0.0, t.count_in_fill);
             p.text(
@@ -92,14 +92,14 @@ fn paint_bars(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
                 t.number,
             );
             let v = p.text(
-                n.right_top() + vec2(12.0, 0.0),
+                n.right_top() + vec2(m.label_gap, 0.0),
                 Align2::LEFT_TOP,
                 format!("{:.0}", bar.bpm),
                 t.font.clone(),
                 t.bpm,
             );
             p.text(
-                v.right_top() + vec2(4.0, 0.0),
+                v.right_top() + vec2(m.unit_gap, 0.0),
                 Align2::LEFT_TOP,
                 "BPM",
                 t.font.clone(),
@@ -109,11 +109,11 @@ fn paint_bars(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
         if bar.muted {
             let band = Rect::from_x_y_ranges(
                 bar_rect.x_range(),
-                (rect.bottom() - 18.0)..=(rect.bottom() - 1.0),
+                (rect.bottom() - m.footer)..=(rect.bottom() - 1.0),
             );
             p.rect_filled(band, 0.0, t.muted_fill);
             p.text(
-                Pos2::new(bx + 8.0, band.center().y),
+                Pos2::new(bx + m.label_inset.x, band.center().y),
                 Align2::LEFT_CENTER,
                 format!("{} CLICK OFF", crate::icons::SPEAKER_SLASH),
                 t.muted_font.clone(),
@@ -168,7 +168,10 @@ fn paint_chords(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
             StrokeKind::Inside,
         );
         clipped(p, r).text(
-            Pos2::new(r.left().max(l.grid.left()) + 6.0, r.center().y),
+            Pos2::new(
+                r.left().max(l.grid.left()) + theme.metrics.chord_inset,
+                r.center().y,
+            ),
             Align2::LEFT_CENTER,
             label,
             t.font.clone(),
@@ -187,7 +190,11 @@ fn paint_expected(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
         if e.time > l.t1 {
             break;
         }
-        let h = if e.accent { 30.0 } else { 20.0 };
+        let h = if e.accent {
+            theme.metrics.accent_height
+        } else {
+            theme.metrics.note_height
+        };
         let r = Rect::from_x_y_ranges(
             x_of(e.time)..=x_of(e.time + e.len).max(x_of(e.time) + 4.0),
             (l.mid - h / 2.0)..=(l.mid + h / 2.0),
@@ -237,7 +244,7 @@ fn paint_played(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
             (l.lane_top - 6.0, l.lane_top + 14.0)
         };
         let (xs, xe) = (x_of(pl.onset), x_of(end).max(x_of(pl.onset) + 1.0));
-        let tick = 6.0;
+        let tick = theme.metrics.bracket_tick;
         p.line_segment(
             [Pos2::new(xs, bottom - 2.0), Pos2::new(xe, bottom - 2.0)],
             Stroke::new(2.0, color.gamma_multiply(0.8)),

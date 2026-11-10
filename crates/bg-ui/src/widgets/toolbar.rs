@@ -237,12 +237,9 @@ impl Toolbar<'_> {
     /// The boxed tap-tempo button ([`TapTempo`]). Sets `bpm` once tapped at least 3
     /// times.
     pub fn tap(&mut self, bpm: &mut f32) -> bool {
-        let props = tap_tempo::Props {
-            height: BUTTON_HEIGHT,
-        };
-        let theme = tap_tempo::Theme::new(&theme::tokens());
+        let theme = tap_tempo::Theme::new(&theme::tokens()).with_height(BUTTON_HEIGHT);
         // Bridge until the exercise owns the toolbar's state (see `kit::mount_temp`).
-        let out = kit::mount_temp::<TapTempo>(self.ui, "tap_tempo", &props, &theme);
+        let out = kit::mount_temp::<TapTempo>(self.ui, "tap_tempo", &(), &theme);
         let before = *bpm;
         for tap_tempo::Emission::Tempo(t) in out {
             *bpm = t;

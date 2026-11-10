@@ -207,7 +207,8 @@ impl ExerciseType for BasicTiming {
                 bars_ahead: view.bars_ahead,
                 chords: &[],
                 score,
-                height: 150.0,
+                // 150 in all at the default text size.
+                lane_height: 102.0,
                 zoom: prefs.zoom_factor(),
             };
             kit::show::<Beatgrid>(ui, "grid", &props, &grid_theme);

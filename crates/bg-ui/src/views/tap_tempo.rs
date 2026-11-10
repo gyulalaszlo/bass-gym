@@ -3,7 +3,7 @@
 //! A tier-2 [`Component`]: the taps are its `State`, a click sends a private
 //! [`Msg::Tap`], and [`update`](TapTempo::update) works out the tempo.
 
-use egui::Ui;
+use egui::{Ui, vec2};
 
 use crate::icons;
 use crate::kit::{Component, Emit};
@@ -25,20 +25,24 @@ pub struct State {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Props {
-    /// Height of the button.
-    pub height: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub button: button::Theme,
 }
 
 impl Theme {
+    /// A button wide enough for its label at any text size.
     pub fn new(t: &Tokens) -> Self {
+        let b = button::Theme::normal(t);
         Self {
-            button: button::Theme::normal(t),
+            button: b.min_size(vec2(t.em(88.0), b.min_size.y)),
+        }
+    }
+
+    /// The same, `height` tall (to line up with its neighbours).
+    pub fn with_height(self, height: f32) -> Self {
+        let b = self.button;
+        Self {
+            button: b.min_size(vec2(b.min_size.x, height)),
         }
     }
 }
@@ -57,25 +61,21 @@ pub enum Emission {
 
 impl Component for TapTempo {
     type State = State;
-    type Props<'a> = Props;
+    type Props<'a> = ();
     type Theme = Theme;
     type Msg = Msg;
     type Emission = Emission;
 
-    fn view(_state: &State, props: &Props, theme: &Theme, ui: &mut Ui, msg: &mut Emit<Msg>) {
+    fn view(_state: &State, _props: &(), theme: &Theme, ui: &mut Ui, msg: &mut Emit<Msg>) {
         let r = ui
-            .add(
-                button(format!("{} TAP", icons::HAND_TAP))
-                    .theme(&theme.button)
-                    .min_size([88.0, props.height]),
-            )
+            .add(button(format!("{} TAP", icons::HAND_TAP)).theme(&theme.button))
             .on_hover_text("Tap at least 3 times in tempo");
         if r.clicked() {
             msg.send(Msg::Tap(ui.input(|i| i.time)));
         }
     }
 
-    fn update(state: &mut State, _props: &Props, msg: Msg, out: &mut Emit<Emission>) {
+    fn update(state: &mut State, _props: &(), msg: Msg, out: &mut Emit<Emission>) {
         let Msg::Tap(now) = msg;
         let taps = &mut state.taps;
         if taps.last().is_some_and(|&t| now - t > RESET_AFTER) {
@@ -105,13 +105,11 @@ mod tests {
     use crate::kit::{Rig, mount};
     use crate::theme::Tokens;
 
-    const PROPS: Props = Props { height: 36.0 };
-
     /// Taps at `times` and returns the emissions.
     fn tap(state: &mut State, times: &[f64]) -> Vec<Emission> {
         let mut out = Emit::new();
         for &t in times {
-            TapTempo::update(state, &PROPS, Msg::Tap(t), &mut out);
+            TapTempo::update(state, &(), Msg::Tap(t), &mut out);
         }
         out.into_vec()
     }
@@ -146,7 +144,7 @@ mod tests {
         let mut state = State::default();
         let mut emitted = Vec::new();
         let mut ui_fn = |ui: &mut Ui| {
-            emitted.extend(mount::<TapTempo>(ui, "tap", &mut state, &PROPS, &theme));
+            emitted.extend(mount::<TapTempo>(ui, "tap", &mut state, &(), &theme));
         };
         let mut rig = Rig::new();
         let at = egui::pos2(20.0, 20.0);

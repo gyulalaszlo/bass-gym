@@ -96,13 +96,15 @@ pub struct Props<'a> {
     pub now: f64, pub bars: &'a [BarPlan], pub matcher: &'a Matcher,
     pub steps_per_beat: u32, pub bars_behind: f64, pub bars_ahead: f64,
     pub chords: &'a [(f64, f64, String)], pub score: Option<LiveScore<'a>>,
-    pub height: f32, pub zoom: f64,
+    pub lane_height: f32, pub zoom: f64,
 }
 ```
 
 - `kit::show::<Beatgrid>(ui, "grid", &props, &theme)`. The theme comes from a
-  `ThemeCache<beatgrid::Theme>` on the exercise. Heights are 150 in Basic timing and
-  180 in Basic chords.
+  `ThemeCache<beatgrid::Theme>` on the exercise. The exercise sets the note lane's
+  height (102 in Basic timing, 108 in Basic chords). The theme's `Metrics` add the
+  header, chord band and footer, which grow with the text size, so the grid is 150 and
+  180 tall at the default size.
 - Zoom: `view.rs::ZOOM_STEPS = [0.5, 0.75, 1.0, 1.5, 2.0]`, default index 2, stored in
   `ViewPrefs.grid_zoom` and set in the Display preferences. The step divides the visible
   span.

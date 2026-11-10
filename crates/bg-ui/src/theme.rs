@@ -16,7 +16,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
-use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
+use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle, Vec2, vec2};
 use serde::{Deserialize, Serialize};
 
 use bg_core::Grade;
@@ -291,11 +291,16 @@ pub fn prop(size: f32) -> FontId {
 
 /// The global design tokens: everything the user's display preferences decide. Component
 /// themes are built from these, and rebuilt when they change (see `kit::ThemeCache`).
+///
+/// Sizes are in points, so the UI zoom scales them on its own. Sizes that hold text
+/// should follow the text size too: build them with [`Tokens::em`], or take them from
+/// [`Tokens::spacing`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
     pub palette: Palette,
     /// Text size multiplier.
     pub text_scale: f32,
+    pub spacing: Spacing,
     /// Corner radius of buttons.
     pub button_rounding: f32,
     /// How much of a button's colour goes into its resting fill.
@@ -307,6 +312,7 @@ impl Default for Tokens {
         Self {
             palette: ECAM,
             text_scale: 1.0,
+            spacing: Spacing::for_text_scale(1.0),
             button_rounding: 4.0,
             button_tint: 0.15,
         }
@@ -315,9 +321,11 @@ impl Default for Tokens {
 
 /// The tokens currently applied (see [`apply`]).
 pub fn tokens() -> Tokens {
+    let scale = text_scale();
     Tokens {
         palette: palette(),
-        text_scale: text_scale(),
+        text_scale: scale,
+        spacing: Spacing::for_text_scale(scale),
         button_rounding: button_rounding(),
         button_tint: f32::from_bits(BUTTON_TINT.load(Ordering::Relaxed)),
     }
@@ -366,6 +374,16 @@ impl Tokens {
         self.palette.magenta.color()
     }
 
+    /// A size that follows the text size: `points` at a text scale of 1.
+    pub fn em(&self, points: f32) -> f32 {
+        points * self.text_scale
+    }
+
+    /// `em` for both axes.
+    pub fn em2(&self, x: f32, y: f32) -> Vec2 {
+        vec2(self.em(x), self.em(y))
+    }
+
     /// Monospaced font for values, scaled by the text-size preference.
     pub fn mono(&self, size: f32) -> FontId {
         FontId::new(size * self.text_scale, FontFamily::Monospace)
@@ -390,6 +408,29 @@ impl Tokens {
 
     pub fn grade_color(&self, g: Grade) -> Color32 {
         GradeColors::new(self).get(g)
+    }
+}
+
+/// The shared spacing, also applied to egui's own style (see [`apply`]), so egui widgets
+/// and kit components agree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spacing {
+    /// Between items in a layout.
+    pub item: Vec2,
+    /// Inside a button, around its text.
+    pub button_padding: Vec2,
+    /// Minimum height of interactive items.
+    pub interact_height: f32,
+}
+
+impl Spacing {
+    pub fn for_text_scale(scale: f32) -> Self {
+        Self {
+            item: vec2(10.0, 7.0),
+            button_padding: vec2(10.0, 5.0),
+            // Never smaller than at the default size, so small text stays easy to hit.
+            interact_height: 28.0 * scale.max(1.0),
+        }
     }
 }
 
@@ -494,9 +535,11 @@ pub fn apply(ctx: &egui::Context, prefs: &ThemePrefs) {
         style
             .text_styles
             .insert(TextStyle::Small, FontId::new(13.0 * scale, body));
-        style.spacing.item_spacing = egui::vec2(10.0, 7.0);
-        style.spacing.button_padding = egui::vec2(10.0, 5.0);
-        style.spacing.interact_size.y = 28.0 * scale.max(1.0);
+        // The same spacing the kit's themes are built from.
+        let spacing = Spacing::for_text_scale(scale);
+        style.spacing.item_spacing = spacing.item;
+        style.spacing.button_padding = spacing.button_padding;
+        style.spacing.interact_size.y = spacing.interact_height;
 
         let v = &mut style.visuals;
         *v = if dark {

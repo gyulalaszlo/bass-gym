@@ -24,7 +24,7 @@ use crate::kit::{Emit, View};
 use crate::widgets::score::StaffLayout;
 
 pub use layout::{Layout, layout};
-pub use theme::{BarTheme, ChordTheme, NoteTheme, Theme};
+pub use theme::{BarTheme, ChordTheme, Metrics, NoteTheme, Theme};
 
 /// The beat grid. Show it with [`crate::kit::show`].
 pub struct Beatgrid;
@@ -42,8 +42,9 @@ pub struct Props<'a> {
     pub chords: &'a [(f64, f64, String)],
     /// Show the played notes as a score above the grid.
     pub score: Option<LiveScore<'a>>,
-    /// Height of the grid, without the score.
-    pub height: f32,
+    /// Height of the note lane. The grid adds its header, chord band and footer (from
+    /// the theme) around it, so it grows with the text size.
+    pub lane_height: f32,
     /// Divides the visible span (larger = zoomed in, so notes move slower).
     pub zoom: f64,
 }
@@ -78,10 +79,15 @@ impl View for Beatgrid {
     type Emission = Infallible;
 
     fn view(props: &Props, theme: &Theme, ui: &mut Ui, _out: &mut Emit<Infallible>) {
-        let size = layout::size(props, ui.available_width());
+        let size = layout::size(props, &theme.metrics, ui.available_width());
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
         if ui.is_rect_visible(rect) {
-            paint::paint(ui.painter(), props, theme, &layout(props, rect));
+            paint::paint(
+                ui.painter(),
+                props,
+                theme,
+                &layout(props, &theme.metrics, rect),
+            );
         }
     }
 }

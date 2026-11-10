@@ -2,16 +2,9 @@
 
 use egui::{Rect, Vec2, vec2};
 
-use super::Props;
+use super::{Metrics, Props};
 use crate::kit::{Axis, Part, split};
 use crate::widgets::time_axis::TimeAxis;
-
-/// Height of the chord band, when there are chords.
-const CHORD_BAND: f32 = 24.0;
-/// Room for the bar header above the note lane.
-const HEADER: f32 = 30.0;
-/// Room for the "click off" band below the note lane.
-const FOOTER: f32 = 18.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
@@ -32,8 +25,21 @@ pub struct Layout {
 }
 
 /// The size the grid wants at `width`.
-pub fn size(props: &Props, width: f32) -> Vec2 {
-    vec2(width, props.height + score_height(props))
+pub fn size(props: &Props, m: &Metrics, width: f32) -> Vec2 {
+    vec2(width, grid_height(props, m) + score_height(props))
+}
+
+/// The grid: header, chord band (if any), note lane and footer.
+fn grid_height(props: &Props, m: &Metrics) -> f32 {
+    m.header + chord_band(props, m) + props.lane_height + m.footer
+}
+
+fn chord_band(props: &Props, m: &Metrics) -> f32 {
+    if props.chords.is_empty() {
+        0.0
+    } else {
+        m.chord_band
+    }
 }
 
 fn score_height(props: &Props) -> f32 {
@@ -51,7 +57,7 @@ fn bar_len(props: &Props) -> f64 {
         .map_or(2.0, |b| b.duration)
 }
 
-pub fn layout(props: &Props, rect: Rect) -> Layout {
+pub fn layout(props: &Props, m: &Metrics, rect: Rect) -> Layout {
     let [staff, grid] = split(
         rect,
         Axis::Vertical,
@@ -62,13 +68,9 @@ pub fn layout(props: &Props, rect: Rect) -> Layout {
     let behind = props.bars_behind * bar_len / props.zoom;
     let ahead = props.bars_ahead * bar_len / props.zoom;
     let (t0, t1) = (props.now - behind, props.now + ahead);
-    let band = if props.chords.is_empty() {
-        0.0
-    } else {
-        CHORD_BAND
-    };
-    let lane_top = grid.top() + HEADER + band;
-    let lane_bottom = grid.bottom() - FOOTER;
+    let band = chord_band(props, m);
+    let lane_top = grid.top() + m.header + band;
+    let lane_bottom = grid.bottom() - m.footer;
     Layout {
         staff: props.score.is_some().then_some(staff),
         grid,
@@ -78,7 +80,7 @@ pub fn layout(props: &Props, rect: Rect) -> Layout {
         chord_band: (band > 0.0).then(|| {
             Rect::from_x_y_ranges(
                 grid.x_range(),
-                (grid.top() + 26.0)..=(grid.top() + 26.0 + band - 4.0),
+                (grid.top() + m.chord_band_top)..=(grid.top() + m.chord_band_top + band - 4.0),
             )
         }),
         lane_top,
@@ -90,6 +92,7 @@ pub fn layout(props: &Props, rect: Rect) -> Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Tokens;
     use crate::views::beatgrid::LiveScore;
     use bg_core::{BarPlan, Matcher};
     use egui::pos2;
@@ -104,9 +107,13 @@ mod tests {
             bars_ahead: 2.0,
             chords: &[],
             score: None,
-            height: 150.0,
+            lane_height: 102.0,
             zoom: 1.0,
         }
+    }
+
+    fn metrics() -> Metrics {
+        Metrics::new(&Tokens::default())
     }
 
     fn rect() -> Rect {
@@ -114,10 +121,23 @@ mod tests {
     }
 
     #[test]
+    fn the_grid_is_its_lane_plus_header_and_footer() {
+        let matcher = Matcher::default();
+        let p = props(&[], &matcher);
+        // 30 header + 102 lane + 18 footer.
+        assert_eq!(size(&p, &metrics(), 300.0).y, 150.0);
+        let big = Metrics::new(&Tokens {
+            text_scale: 1.5,
+            ..Tokens::default()
+        });
+        assert_eq!(size(&p, &big, 300.0).y, 45.0 + 102.0 + 27.0);
+    }
+
+    #[test]
     fn now_line_sits_at_the_share_behind() {
         let matcher = Matcher::default();
         let p = props(&[], &matcher);
-        let l = layout(&p, rect());
+        let l = layout(&p, &metrics(), rect());
         // No bars: two seconds a bar, one behind and two ahead.
         assert_eq!((l.t0, l.t1), (8.0, 14.0));
         assert_eq!(l.axis.x(p.now), 100.0);
@@ -132,7 +152,7 @@ mod tests {
             zoom: 2.0,
             ..props(&[], &matcher)
         };
-        let l = layout(&p, rect());
+        let l = layout(&p, &metrics(), rect());
         assert_eq!((l.t0, l.t1), (9.0, 12.0));
         assert_eq!(l.axis.x(p.now), 100.0);
     }
@@ -145,9 +165,24 @@ mod tests {
             chords: &chords,
             ..props(&[], &matcher)
         };
-        let l = layout(&p, rect());
-        assert_eq!(l.lane_top, HEADER + CHORD_BAND);
+        let l = layout(&p, &metrics(), rect());
+        let m = metrics();
+        assert_eq!(l.lane_top, m.header + m.chord_band);
         assert!(l.chord_band.is_some());
+    }
+
+    #[test]
+    fn larger_text_makes_room_for_itself() {
+        let matcher = Matcher::default();
+        let p = props(&[], &matcher);
+        let big = Tokens {
+            text_scale: 1.5,
+            ..Tokens::default()
+        };
+        let normal = layout(&p, &metrics(), rect());
+        let large = layout(&p, &Metrics::new(&big), rect());
+        assert!(large.lane_top > normal.lane_top);
+        assert!(large.lane_bottom < normal.lane_bottom);
     }
 
     #[test]
@@ -164,8 +199,8 @@ mod tests {
             ..props(&[], &matcher)
         };
         let h = live.layout().height();
-        let full = Rect::from_min_size(pos2(0.0, 0.0), size(&p, 300.0));
-        let l = layout(&p, full);
+        let full = Rect::from_min_size(pos2(0.0, 0.0), size(&p, &metrics(), 300.0));
+        let l = layout(&p, &metrics(), full);
         assert_eq!(l.staff.map(|s| s.height()), Some(h));
         assert_eq!((l.grid.top(), l.grid.height()), (h, 150.0));
     }

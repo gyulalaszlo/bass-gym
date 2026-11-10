@@ -115,9 +115,11 @@ taken first, and the rest is shared by weight. `Part::NONE` is for a hidden part
 There are two layers.
 
 1. **`theme::Tokens`** are the global design tokens: the palette (5 presets plus custom),
-   the text scale and the button look. They come from the display preferences, so they
-   have to be global. `theme::tokens()` reads the current ones. Only Theme constructors
-   use them.
+   the text scale, the shared `Spacing` (item spacing, button padding, interact height)
+   and the button look. They come from the display preferences, so they have to be
+   global. `theme::tokens()` reads the current ones. Only Theme constructors use them.
+   `theme::apply` copies the same `Spacing` into egui's style, so egui widgets and kit
+   components agree.
 2. **A `Theme` per component** is a plain struct in its own file, built from `&Tokens`.
    A parent's theme holds its children's themes, so the parent decides how each group of
    children looks:
@@ -135,6 +137,15 @@ impl From<&Tokens> for Theme { fn from(t: &Tokens) -> Self { Self::new(t) } }
 - The owner of a theme tree's root keeps a `kit::ThemeCache<Theme>` field. Its `get()`
   rebuilds the theme only when the tokens change. It has a `Default` for themes with
   `From<&Tokens>`. The two exercises hold one for their beat grid.
+- **Sizes, margins, paddings and gaps belong to the theme too**, so a differently themed
+  copy of a component can change them like any colour (e.g. `button::Theme::padding`,
+  `min_size`, or the beat grid's `Metrics`). Sizes are in points, so the UI zoom scales
+  them on its own. Sizes that hold text follow the text size as well: build them with
+  `Tokens::em` / `em2`, or take them from `Tokens::spacing`. Only proportions intrinsic
+  to a shape, such as a dash length, stay as constants in paint code.
+- When a component's height depends on the theme, its Props ask for the part that's
+  the parent's choice (the beat grid's `lane_height`), and the component adds its
+  themed header and footer around it.
 - Painters read only their `Theme`. A `theme::green()` call in migrated paint code is a
   bug. Children that aren't migrated yet, such as `ScoreView` inside the beat grid,
   still read the globals.

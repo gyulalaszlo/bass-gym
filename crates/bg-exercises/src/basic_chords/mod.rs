@@ -899,7 +899,8 @@ impl BasicChords {
                     bars_ahead: 2.0,
                     chords: &labels,
                     score: live(&chords),
-                    height: 180.0,
+                    // 180 in all at the default text size, chord band included.
+                    lane_height: 108.0,
                     zoom,
                 },
             );
@@ -934,7 +935,8 @@ impl BasicChords {
                     bars_ahead: 2.0,
                     chords: &labels,
                     score: live(&[]),
-                    height: 180.0,
+                    // 180 in all at the default text size, chord band included.
+                    lane_height: 108.0,
                     zoom,
                 },
             );

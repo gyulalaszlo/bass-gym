@@ -1,6 +1,6 @@
 //! How the beat grid looks.
 
-use egui::{Color32, FontId, Stroke};
+use egui::{Color32, FontId, Stroke, Vec2};
 
 use crate::theme::{GradeColors, Tokens};
 
@@ -13,6 +13,31 @@ pub struct Theme {
     pub note: NoteTheme,
     /// The now line and its triangle.
     pub now: Color32,
+    pub metrics: Metrics,
+}
+
+/// Sizes, margins and gaps. The ones that hold text follow the text size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Metrics {
+    /// Room for the bar header above the note lane.
+    pub header: f32,
+    /// Room below the note lane; the "click off" band fills it.
+    pub footer: f32,
+    /// Height of the chord band, when there are chords, and its top below the grid's.
+    pub chord_band: f32,
+    pub chord_band_top: f32,
+    /// Bar header text from the bar line and the top.
+    pub label_inset: Vec2,
+    /// Between the bar number and the BPM, and between the BPM and its unit.
+    pub label_gap: f32,
+    pub unit_gap: f32,
+    /// Chord name from the chord's left edge.
+    pub chord_inset: f32,
+    /// Expected notes, and accented ones.
+    pub note_height: f32,
+    pub accent_height: f32,
+    /// Length of the bracket ends of a played note.
+    pub bracket_tick: f32,
 }
 
 /// Bar lines, beat and step lines, and the header of each bar.
@@ -91,6 +116,7 @@ impl Theme {
                 extra: t.red(),
             },
             now: t.magenta(),
+            metrics: Metrics::new(t),
         }
     }
 }
@@ -98,5 +124,23 @@ impl Theme {
 impl From<&Tokens> for Theme {
     fn from(t: &Tokens) -> Self {
         Self::new(t)
+    }
+}
+
+impl Metrics {
+    pub fn new(t: &Tokens) -> Self {
+        Self {
+            header: t.em(30.0),
+            footer: t.em(18.0),
+            chord_band: t.em(24.0),
+            chord_band_top: t.em(26.0),
+            label_inset: t.em2(8.0, 6.0),
+            label_gap: t.em(12.0),
+            unit_gap: t.em(4.0),
+            chord_inset: t.em(6.0),
+            note_height: 20.0,
+            accent_height: 30.0,
+            bracket_tick: 6.0,
+        }
     }
 }

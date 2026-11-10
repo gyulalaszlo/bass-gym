@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use egui::{
     Color32, CursorIcon, FontId, Galley, Pos2, Rect, Response, Sense, TextStyle, Ui, Vec2, Widget,
-    WidgetInfo, WidgetText, WidgetType,
+    WidgetInfo, WidgetText, WidgetType, vec2,
 };
 
 use crate::theme::{self, Tokens};
@@ -29,6 +29,10 @@ pub struct Theme {
     /// Text when disabled.
     pub disabled_text: Color32,
     pub rounding: f32,
+    /// Around the text. `small` buttons drop the vertical part.
+    pub padding: Vec2,
+    /// Smallest size, whatever the text (`small` buttons ignore the height).
+    pub min_size: Vec2,
 }
 
 impl Theme {
@@ -44,7 +48,14 @@ impl Theme {
             fill: t.button_fill(color),
             disabled_text: t.dim(),
             rounding: t.button_rounding,
+            padding: t.spacing.button_padding,
+            min_size: vec2(0.0, t.spacing.interact_height),
         }
+    }
+
+    /// The same look with a different smallest size.
+    pub fn min_size(self, min_size: Vec2) -> Self {
+        Self { min_size, ..self }
     }
 }
 
@@ -80,7 +91,7 @@ impl Look {
 
     /// Lays out the text and allocates the widget. With `fill_width` the item takes the
     /// full width of a justified layout (e.g. a popup list).
-    fn allocate(&self, ui: &mut Ui, fill_width: bool) -> (Rect, Response, Arc<Galley>) {
+    fn allocate(&self, ui: &mut Ui, t: &Theme, fill_width: bool) -> (Rect, Response, Arc<Galley>) {
         // Placeholder colour: painted in the state's text colour.
         let mut rich = egui::RichText::new(&self.text).color(Color32::PLACEHOLDER);
         if let Some(f) = &self.font {
@@ -98,15 +109,13 @@ impl Look {
             TextStyle::Button,
         );
 
-        let mut pad = ui.spacing().button_padding;
+        let mut pad = t.padding;
+        let mut min = t.min_size;
         if self.small {
             pad.y = 0.0;
+            min.y = 0.0;
         }
-        let mut size = galley.size() + 2.0 * pad;
-        if !self.small {
-            size.y = size.y.max(ui.spacing().interact_size.y);
-        }
-        let size = size.max(self.min_size);
+        let size = (galley.size() + 2.0 * pad).max(min).max(self.min_size);
         let (rect, resp) = if fill_width {
             ui.allocate_at_least(size, Sense::click())
         } else {
@@ -122,7 +131,7 @@ impl Look {
         galley: Arc<Galley>,
         fill: Option<Color32>,
         text: Color32,
-        rounding: f32,
+        t: &Theme,
         centred: bool,
     ) {
         if !ui.is_rect_visible(rect) {
@@ -130,13 +139,13 @@ impl Look {
         }
         let p = ui.painter();
         if let Some(fill) = fill {
-            p.rect_filled(rect, rounding, fill);
+            p.rect_filled(rect, t.rounding, fill);
         }
         let y = rect.center().y - galley.size().y / 2.0;
         let x = if centred {
             rect.center().x - galley.size().x / 2.0
         } else {
-            rect.left() + ui.spacing().button_padding.x
+            rect.left() + t.padding.x
         };
         p.galley(Pos2::new(x, y), galley, text);
     }
@@ -167,6 +176,8 @@ macro_rules! look_builders {
             self.look.small = true;
             self
         }
+        /// A smallest size on top of the theme's (for one-off layout needs; a size that
+        /// belongs to the look goes in [`Theme::min_size`]).
         pub fn min_size(mut self, s: impl Into<Vec2>) -> Self {
             self.look.min_size = s.into();
             self
@@ -206,8 +217,8 @@ impl Button {
 
 impl Widget for Button {
     fn ui(self, ui: &mut Ui) -> Response {
-        let (rect, resp, galley) = self.look.allocate(ui, false);
         let t = self.look.theme();
+        let (rect, resp, galley) = self.look.allocate(ui, &t, false);
         let (color, base) = (t.color, t.fill);
         let (fill, text) = if !ui.is_enabled() {
             (base.gamma_multiply(0.5), t.disabled_text)
@@ -216,7 +227,7 @@ impl Widget for Button {
         } else {
             (base, color)
         };
-        Look::paint(ui, rect, galley, Some(fill), text, t.rounding, true);
+        Look::paint(ui, rect, galley, Some(fill), text, &t, true);
         pointer_cursor(ui, &resp);
         resp.widget_info(|| {
             WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &self.look.text)
@@ -249,8 +260,8 @@ impl Selectable {
 
 impl Widget for Selectable {
     fn ui(self, ui: &mut Ui) -> Response {
-        let (rect, resp, galley) = self.look.allocate(ui, true);
         let t = self.look.theme();
+        let (rect, resp, galley) = self.look.allocate(ui, &t, true);
         let (color, base) = (t.color, t.fill);
         let hovered = resp.hovered() || resp.is_pointer_button_down_on();
         let (fill, text) = match (ui.is_enabled(), self.selected) {
@@ -260,7 +271,7 @@ impl Widget for Selectable {
             (true, false) if hovered => (Some(base), color),
             (true, false) => (None, color),
         };
-        Look::paint(ui, rect, galley, fill, text, t.rounding, self.look.centred);
+        Look::paint(ui, rect, galley, fill, text, &t, self.look.centred);
         pointer_cursor(ui, &resp);
         resp.widget_info(|| {
             WidgetInfo::selected(

@@ -114,6 +114,18 @@ pub fn main(m: &Model) -> Main<'_> {
     }
 }
 
+pub struct Settings<'a> {
+    pub session: &'a SessionConfig,
+    pub editable: bool,
+}
+
+pub fn settings(m: &Model) -> Settings<'_> {
+    Settings {
+        session: &m.data.session,
+        editable: !m.frame.running,
+    }
+}
+
 /// Owned, not borrowed: the dialog's region also gets the review mutably.
 pub struct Results {
     pub open: bool,

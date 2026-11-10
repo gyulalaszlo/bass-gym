@@ -157,8 +157,11 @@ impl ExerciseType for BasicTiming {
 
     fn ui(&mut self, ui: &mut egui::Ui, ctx: &mut ExerciseCtx) {
         let theme = self.theme.get();
+        // The live part holds the timing lock while it shows; release it before the
+        // settings.
+        view::main::live(&props::main(&self.model), &theme, ui);
         let mut out = Emit::new();
-        view::main::main(&props::main(&self.model), &theme, ui, &mut out);
+        view::main::settings(&props::settings(&self.model), ui, &mut out);
         self.dispatch(ctx.engine, Some(ui.ctx()), out);
 
         let mut out = Emit::new();

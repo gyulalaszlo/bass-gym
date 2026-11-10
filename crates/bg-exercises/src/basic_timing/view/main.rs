@@ -1,5 +1,6 @@
-//! The scrolling exercise area: the performance strip, the beat grid and the groove
-//! panel.
+//! The scrolling exercise area: the live part (performance strip and beat grid), then
+//! the groove panel. Two regions, so the timing lock the live part holds is released
+//! before the panel.
 
 use bg_ui::egui::Ui;
 use bg_ui::kit::{self, Emit};
@@ -15,7 +16,7 @@ use crate::timing_session::PERFORMANCE_HEIGHT;
 /// Height of the beat grid's note lane: 150 in all at the default text size.
 const LANE_HEIGHT: f32 = 102.0;
 
-pub fn main(p: &props::Main, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
+pub fn live(p: &props::Main, theme: &Theme, ui: &mut Ui) {
     // Live performance, large, above the grid.
     performance_strip(ui, PERFORMANCE_HEIGHT, &[&p.meter]);
     ui.add_space(theme.meter_gap);
@@ -42,10 +43,12 @@ pub fn main(p: &props::Main, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
         ui.ctx().request_repaint();
     }
     ui.add_space(theme.grid_gap);
+}
 
+pub fn settings(p: &props::Settings, ui: &mut Ui, out: &mut Emit<Msg>) {
     // `session_panel` edits in place (not migrated yet): edit a copy, send it if changed.
     let mut cfg = p.session.clone();
-    if session_panel(ui, &mut cfg, !p.running) {
+    if session_panel(ui, &mut cfg, p.editable) {
         out.send(Msg::Session(Box::new(cfg)));
     }
 }

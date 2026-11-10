@@ -171,7 +171,7 @@ Culling relies on time-sorted vectors.
 - `modal_open` keeps the toolbar's Space-to-start from firing while it's open.
 - `results(ui, stats, th, tables)` draws summary groups, `accuracy_timeline`, three
   histograms, the grade and tempo tables, and an exercise-specific `tables` closure.
-- It's called from `basic_timing.rs` and `basic_chords/mod.rs`. Basic chords' closure
+- It's called from `basic_timing/view/results.rs` and `basic_chords/mod.rs`. Basic chords' closure
   adds "Per chord" and borrows all of `self`, so the review is taken out of `self` first.
   Its HIT and IN CHORD columns hide when the preset scores no targets or no chord fit.
 - Passing a `ResultsTab` shows the tabs. Score + Audio widens the dialog to 1400 pt.

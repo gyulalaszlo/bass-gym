@@ -17,7 +17,7 @@ Pick the lowest tier that works. Most components don't need state.
 | 0 Widget | Leaf control | `impl egui::Widget`, returns a `Response` | `widgets/` |
 | 1 View | Display plus input, no state | `Props` + `Theme` in, `Emission` out | `views/` |
 | 2 Component | A view with owned `State` and its own `update` | `State`, `Props`, `Theme`, `Msg` in, `Emission` out | `views/` |
-| 3 Program | A screen: model, sync, update, effects | not built yet (migration phase 2) | the exercise's folder |
+| 3 Program | A screen: model, sync, update, effects | `kit::Program` + `dispatch` | the exercise's folder |
 
 ```rust
 pub trait View {
@@ -153,6 +153,46 @@ impl From<&Tokens> for Theme { fn from(t: &Tokens) -> Self { Self::new(t) } }
 - Leaf widgets take a theme through a builder, e.g. `button(..).theme(&t)`, where `t` is
   a `button::Theme`. Without one they use the default for the current tokens.
 
+## Programs (tier 3)
+
+A program is the root of a screen, such as an exercise. It has effects instead of
+emissions:
+
+```rust
+pub trait Program {
+    type Model; type Msg; type Effect; type Ctx: ?Sized;
+    fn update(model: &mut Self::Model, msg: Self::Msg, fx: &mut Emit<Self::Effect>);
+    fn run(effect: Self::Effect, ctx: &mut Self::Ctx, out: &mut Emit<Self::Msg>);
+}
+```
+
+`kit::dispatch::<P>(model, ctx, msgs)` updates the model with each message and runs
+each effect. Messages that come back from effects are handled in the same dispatch.
+
+One frame:
+1. **sync** reads the outside world (engine, worker state, settings) and turns it into
+   messages. It's the only code that reads it. A per-frame snapshot (`Frame`) is a
+   message too, so even "the session just ended" is decided in `update`.
+2. **props** derives what each view region shows, once.
+3. **view** regions send messages. The shell gives an exercise several regions
+   (toolbar, notices, main), so each region dispatches its own messages.
+4. **update** is pure, so test it like any function. **effects** is the only code that
+   calls the engine. An effect's result comes back as a message (`Msg::Started(id)`).
+
+Files: `crates/bg-exercises/src/basic_timing/`:
+- `mod.rs`: the glue to `ExerciseType`
+- `model.rs`, `msg.rs`, `sync.rs`, `props.rs`, `update.rs`, `effects.rs`, `theme.rs`
+- `view/<region>.rs`
+
+A region is a plain function with the usual argument order, `(props, theme, surface,
+out)`. The surface is a `Ui` or the `Toolbar` builder.
+
+Bridges, while children aren't migrated:
+- Widgets that edit in place (`session_toolbar`, `session_panel`) get a copy of the
+  value. If they report a change, the copy is sent as a message.
+- `view/results.rs` gets the `SessionReview` mutably along with the engine, because the
+  review drives the engine itself. This goes when the review is migrated.
+
 ## Testing
 
 - `layout.rs` and `update.rs` are pure, so test them directly (`beatgrid/layout.rs`,
@@ -165,15 +205,16 @@ impl From<&Tokens> for Theme { fn from(t: &Tokens) -> Self { Self::new(t) } }
 
 ## Migration status
 
-Done (phase 1):
-- `kit`
-- `Tokens`
-- `button::Theme`
-- `views::beatgrid` (tier 1)
-- `views::tap_tempo` (tier 2, bridged through `mount_temp`)
+Done:
+- Phase 1:
+  - `kit`
+  - `Tokens` (spacing included)
+  - `button::Theme`
+  - `views::beatgrid` (tier 1)
+  - `views::tap_tempo` (tier 2, bridged through `mount_temp`)
+- Phase 2: Basic timing as a tier-3 program (`kit::Program`)
 
 Next:
-- tier 3 `Program` on Basic timing (model, sync, props, update, effects, view)
 - Basic chords
 - session review and marker editor (engine calls become effects)
 - preferences and the app shell

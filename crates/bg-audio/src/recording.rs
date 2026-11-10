@@ -17,6 +17,12 @@ const ANCHOR_TOLERANCE: f64 = 0.001;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionId(pub(crate) u64);
 
+impl SessionId {
+    /// An id no engine hands out (they count up from 1), for tests of code that only
+    /// stores and compares ids.
+    pub const UNUSED: Self = Self(0);
+}
+
 /// A sound scheduled during a session.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LoggedSound {

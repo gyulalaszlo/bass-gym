@@ -49,6 +49,11 @@ impl SessionCapture {
         self.recording = None;
     }
 
+    /// The session whose recording is still to come.
+    pub fn pending(&self) -> Option<SessionId> {
+        self.pending
+    }
+
     /// Picks up the recording once the session has ended. Call on every frame.
     pub fn poll(&mut self, engine: &AudioEngine) {
         if let Some(id) = self.pending

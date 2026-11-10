@@ -1,0 +1,32 @@
+//! What Basic timing asks of the engine. The only code here that drives it.
+
+use bg_audio::AudioEngine;
+use bg_core::{ScoringThresholds, SessionConfig};
+use bg_ui::kit::Emit;
+
+use super::msg::Msg;
+use crate::timing_session::{SharedTiming, TimingSession};
+
+pub enum Effect {
+    Start(Box<Start>),
+    Stop,
+}
+
+/// A session to start, recorded.
+pub struct Start {
+    pub cfg: SessionConfig,
+    pub scoring: ScoringThresholds,
+    pub shared: SharedTiming,
+    pub max_recording_bytes: usize,
+}
+
+pub fn run(effect: Effect, engine: &mut AudioEngine, out: &mut Emit<Msg>) {
+    match effect {
+        Effect::Start(s) => {
+            let logic = TimingSession::new(s.cfg, s.scoring, s.shared);
+            let id = engine.start_recorded(Box::new(logic), s.max_recording_bytes);
+            out.send(Msg::Started(id));
+        }
+        Effect::Stop => engine.stop_session(),
+    }
+}

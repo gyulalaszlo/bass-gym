@@ -1295,7 +1295,7 @@ fn piano_ui(ui: &mut egui::Ui, d: &mut BasicChordsData) {
             ui.end_row();
             ui.label("Release");
             ui.add(
-                bg_ui::widgets::controls::slider_field(&mut d.release, 0.0..=4.0)
+                bg_ui::widgets::controls::slider_field(&mut d.release, 0.015..=3.0)
                     .logarithmic()
                     .decimals(2)
                     .suffix("s"),

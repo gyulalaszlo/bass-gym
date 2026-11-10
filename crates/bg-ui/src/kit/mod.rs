@@ -19,7 +19,7 @@ mod view;
 
 pub use component::{Component, mount, mount_temp};
 pub use emit::Emit;
-pub use field::field;
+pub use field::{edited, field};
 pub use program::{Program, dispatch};
 pub use rig::Rig;
 pub use split::{Axis, Part, split};

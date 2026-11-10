@@ -67,8 +67,19 @@ impl kit::Program for Screen {
 }
 
 impl BasicTiming {
-    fn dispatch(&mut self, engine: &mut AudioEngine, msgs: impl IntoIterator<Item = Msg>) {
-        kit::dispatch::<Screen>(&mut self.model, engine, msgs);
+    /// Handles `msgs`, then repaints `ui` if there were any, since the views showed the
+    /// state before them.
+    fn dispatch(
+        &mut self,
+        engine: &mut AudioEngine,
+        ui: Option<&egui::Context>,
+        msgs: impl IntoIterator<Item = Msg>,
+    ) {
+        if kit::dispatch::<Screen>(&mut self.model, engine, msgs)
+            && let Some(ui) = ui
+        {
+            ui.request_repaint();
+        }
     }
 
     /// For messages that can't cause effects (no engine at hand).
@@ -127,15 +138,16 @@ impl ExerciseType for BasicTiming {
 
     /// The shell calls this first each frame, so it also runs `sync`.
     fn toolbar(&mut self, tb: &mut Toolbar, ctx: &mut ExerciseCtx) {
+        let ui = tb.ui().ctx().clone();
         let msgs = sync::sync(&self.model, ctx);
-        self.dispatch(ctx.engine, msgs);
+        self.dispatch(ctx.engine, Some(&ui), msgs);
         let review = sync::review(&self.model, ctx);
-        self.dispatch(ctx.engine, review);
+        self.dispatch(ctx.engine, Some(&ui), review);
 
         let theme = self.theme.get();
         let mut out = Emit::new();
         view::toolbar::toolbar(&props::toolbar(&self.model), &theme, tb, &mut out);
-        self.dispatch(ctx.engine, out);
+        self.dispatch(ctx.engine, Some(&ui), out);
     }
 
     fn notices(&mut self, ui: &mut egui::Ui, _ctx: &mut ExerciseCtx) {
@@ -147,7 +159,7 @@ impl ExerciseType for BasicTiming {
         let theme = self.theme.get();
         let mut out = Emit::new();
         view::main::main(&props::main(&self.model), &theme, ui, &mut out);
-        self.dispatch(ctx.engine, out);
+        self.dispatch(ctx.engine, Some(ui.ctx()), out);
 
         let mut out = Emit::new();
         let p = props::results(&self.model);
@@ -159,7 +171,7 @@ impl ExerciseType for BasicTiming {
             ui.ctx(),
             &mut out,
         );
-        self.dispatch(ctx.engine, out);
+        self.dispatch(ctx.engine, Some(ui.ctx()), out);
     }
 
     fn debug_fake_session(&mut self, ctx: &mut ExerciseCtx) {
@@ -170,6 +182,7 @@ impl ExerciseType for BasicTiming {
         let recording = fake_session::run(&mut logic, shared, a4);
         self.dispatch(
             ctx.engine,
+            None,
             [Msg::FakeSession {
                 recording: Arc::new(recording),
                 open_results: fake_session::opens_results(),

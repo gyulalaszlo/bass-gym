@@ -187,6 +187,13 @@ Files: `crates/bg-exercises/src/basic_timing/`:
 A region is a plain function with the usual argument order, `(props, theme, surface,
 out)`. The surface is a `Ui` or the `Toolbar` builder.
 
+A settings section's props name exactly the fields it shows, and its `Emission` has one
+variant per thing it edits (`progression::Emission::ChordLength(..)`). The program's
+`update` applies them, and any real change drops the results.
+
+After a dispatch that handled messages, the exercise requests a repaint, because the
+views showed the state from before them.
+
 Bridges, while children aren't migrated:
 - Widgets that edit in place (`session_toolbar`, `session_panel`) get a copy of the
   value. If they report a change, the copy is sent as a message.
@@ -213,9 +220,12 @@ Done:
   - `views::beatgrid` (tier 1)
   - `views::tap_tempo` (tier 2, bridged through `mount_temp`)
 - Phase 2: Basic timing as a tier-3 program (`kit::Program`)
+- Phase 3: Basic chords as a program. Its settings sections (`view/config/`) are views
+  over their slice of the data, with typed emissions built with `kit::field` and
+  `kit::edited`. The strip, per-chord table and status are views with their own themes.
+  `theme::FormTheme` is the shared look of settings sections.
 
 Next:
-- Basic chords
 - session review and marker editor (engine calls become effects)
 - preferences and the app shell
 - then the DSL

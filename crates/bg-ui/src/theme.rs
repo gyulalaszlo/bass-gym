@@ -434,6 +434,38 @@ impl Spacing {
     }
 }
 
+/// How settings sections look: the notes under controls, errors, typed values and the
+/// spacing of their rows. Shared by every form-like view.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormTheme {
+    /// Small explanatory text under a control.
+    pub note: Color32,
+    pub error: Color32,
+    /// Typed values, e.g. a progression's numerals.
+    pub value_font: FontId,
+    /// Between the cells of a label / control grid.
+    pub grid_spacing: Vec2,
+    /// Between rows of related controls, and between groups of them.
+    pub gap: f32,
+    pub group_gap: f32,
+    /// Widest a text field gets.
+    pub field_width: f32,
+}
+
+impl FormTheme {
+    pub fn new(t: &Tokens) -> Self {
+        Self {
+            note: t.dim(),
+            error: t.red(),
+            value_font: t.mono(15.0),
+            grid_spacing: vec2(10.0, 6.0),
+            gap: 4.0,
+            group_gap: 6.0,
+            field_width: 280.0,
+        }
+    }
+}
+
 /// The colour of each [`Grade`]: a small theme shared by everything that shows grades.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GradeColors {

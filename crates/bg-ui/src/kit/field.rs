@@ -1,4 +1,4 @@
-//! [`field`]: an editing widget that sends a message instead of writing the value.
+//! [`field`] and [`edited`]: editing that sends a message instead of writing the value.
 
 use egui::{Response, Ui};
 
@@ -33,12 +33,33 @@ where
     resp
 }
 
+/// Runs `edit` on a copy of `value` and returns the copy if it changed: for editing
+/// code that isn't a single widget (a dropdown's list, a group of radio buttons, a
+/// widget that edits in place):
+///
+/// ```ignore
+/// if let Some(kind) = edited(&p.kind, |k| radio_group(ui, k)) {
+///     out.send(Emission::Kind(kind));
+/// }
+/// ```
+pub fn edited<T: Clone + PartialEq>(value: &T, edit: impl FnOnce(&mut T)) -> Option<T> {
+    let mut copy = value.clone();
+    edit(&mut copy);
+    (copy != *value).then_some(copy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::kit::Rig;
     use crate::widgets::controls::checkbox;
     use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn edited_returns_only_changes() {
+        assert_eq!(edited(&1, |v| *v += 1), Some(2));
+        assert_eq!(edited(&1, |v| *v *= 1), None);
+    }
 
     #[test]
     fn sends_the_new_value_only_when_it_changes_and_leaves_the_value_alone() {

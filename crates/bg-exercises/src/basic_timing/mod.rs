@@ -24,8 +24,8 @@ use anyhow::Result;
 use bg_audio::AudioEngine;
 use bg_core::preset::{PresetError, PresetSchema};
 use bg_ui::kit::{self, Emit, ThemeCache};
+use bg_ui::views::tuner::TunerPrefs;
 use bg_ui::widgets::toolbar::Toolbar;
-use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{ExerciseCtx, ExerciseType, egui, icons};
 use serde_json::Value;
 

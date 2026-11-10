@@ -2,8 +2,8 @@
 
 use bg_ui::egui::{RichText, Ui};
 use bg_ui::kit::{self, Emit, ThemeCache, View};
+use bg_ui::views::tuner::TunerPrefs;
 use bg_ui::widgets::controls::{number_field, slider_field};
-use bg_ui::widgets::tuner::TunerPrefs;
 use bg_ui::{PreferencePage, PrefsCtx, icons};
 
 use super::{PageTheme, grid};

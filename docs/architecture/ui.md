@@ -43,7 +43,7 @@ aren't migrated yet.
 Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line in
 `widgets/mod.rs`.
 
-1. A free fn (`theme::section`, `tuner`), or
+1. A free fn (`theme::section`), or
    painting into a given rect via `views/performance.rs::Indicator`.
 2. `ui.allocate_exact_size(...)`, then `ui.painter_at(rect)`, which clips to the rect.
 3. Local `x_of` / `y_of` closures for mapping.

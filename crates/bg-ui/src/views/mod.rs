@@ -11,3 +11,4 @@ pub mod performance;
 pub mod results;
 pub mod review;
 pub mod tap_tempo;
+pub mod tuner;

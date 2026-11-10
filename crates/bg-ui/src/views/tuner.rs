@@ -1,13 +1,15 @@
-//! Always-visible tuner strip.
+//! Always-visible tuner strip. A tier-1 view.
 
+use std::convert::Infallible;
 use std::time::Duration;
 
 use bg_audio::{InputMeter, TunerState};
 use bg_core::music::{freq_to_midi, note_name, note_octave};
-use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, vec2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
-use crate::theme::{self, mono};
+use crate::kit::{Emit, View};
+use crate::theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -31,27 +33,113 @@ impl Default for TunerPrefs {
 
 impl TunerPrefs {
     pub const ID: &'static str = "tuner";
-
-    pub fn color(&self, cents: f32) -> Color32 {
-        let c = cents.abs();
-        if c <= self.in_tune_cents {
-            theme::green()
-        } else if c <= self.close_cents {
-            theme::amber()
-        } else {
-            theme::red()
-        }
-    }
 }
 
 const STALE: Duration = Duration::from_millis(400);
 
-pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &TunerPrefs) {
-    let k = mono(1.0).size; // text scale
-    let height = 100.0 * k;
+pub struct Tuner;
+
+pub struct Props<'a> {
+    pub state: &'a TunerState,
+    pub meter: &'a InputMeter,
+    pub prefs: &'a TunerPrefs,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Theme {
+    pub background: Color32,
+    /// In tune, close, and off; and without a note.
+    pub in_tune: Color32,
+    pub close: Color32,
+    pub off: Color32,
+    pub idle: Color32,
+    pub note_font: FontId,
+    pub octave_font: FontId,
+    pub no_note_font: FontId,
+    pub cents_font: FontId,
+    pub hz_font: FontId,
+    pub hz: Color32,
+    pub unit_font: FontId,
+    pub unit: Color32,
+    pub no_signal_font: FontId,
+    pub scale_font: FontId,
+    pub scale_label: Color32,
+    /// The scale's line and major ticks, and its minor ticks.
+    pub line: Color32,
+    pub minor: Color32,
+    /// The input meter's frame, and its level when clipping.
+    pub meter_frame: Stroke,
+    pub clipping: Color32,
+    pub target: Color32,
+    pub zone_alpha: f32,
+    pub arrow_font: FontId,
+    /// Sizes below are at a text scale of 1 and grow with the text.
+    pub scale: f32,
+    pub height: f32,
+}
+
+impl From<&Tokens> for Theme {
+    fn from(t: &Tokens) -> Self {
+        Self {
+            background: t.bg(),
+            in_tune: t.green(),
+            close: t.amber(),
+            off: t.red(),
+            idle: t.dim(),
+            note_font: t.mono(50.0),
+            octave_font: t.mono(20.0),
+            no_note_font: t.mono(44.0),
+            cents_font: t.mono(26.0),
+            hz_font: t.mono(18.0),
+            hz: t.green(),
+            unit_font: t.mono(13.0),
+            unit: t.cyan(),
+            no_signal_font: t.mono(15.0),
+            scale_font: t.mono(12.0),
+            scale_label: t.text(),
+            line: t.line(),
+            minor: t.dim(),
+            meter_frame: Stroke::new(1.0, t.line()),
+            clipping: t.red(),
+            target: t.magenta(),
+            zone_alpha: 0.6,
+            arrow_font: t.prop(22.0),
+            scale: t.text_scale,
+            height: 100.0,
+        }
+    }
+}
+
+impl Theme {
+    /// The colour of a pitch `cents` off.
+    pub fn tune_color(&self, prefs: &TunerPrefs, cents: f32) -> Color32 {
+        let c = cents.abs();
+        if c <= prefs.in_tune_cents {
+            self.in_tune
+        } else if c <= prefs.close_cents {
+            self.close
+        } else {
+            self.off
+        }
+    }
+}
+
+impl View for Tuner {
+    type Props<'a> = Props<'a>;
+    type Theme = Theme;
+    type Emission = Infallible;
+
+    fn view(p: &Props, theme: &Theme, ui: &mut Ui, _out: &mut Emit<Infallible>) {
+        tuner(ui, theme, p.state, p.meter, p.prefs);
+    }
+}
+
+fn tuner(ui: &mut Ui, theme: &Theme, state: &TunerState, meter: &InputMeter, prefs: &TunerPrefs) {
+    let k = theme.scale;
+    let height = theme.height * k;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, 0.0, theme::bg());
+    p.rect_filled(rect, 0.0, theme.background);
 
     let fresh = state.updated.is_some_and(|t| t.elapsed() < STALE);
     let reading = state.reading.filter(|_| fresh);
@@ -65,9 +153,9 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
     };
     let shown = ui.ctx().animate_value_with_time(id, cents, 0.06);
     let color = if note.is_some() {
-        prefs.color(cents)
+        theme.tune_color(prefs, cents)
     } else {
-        theme::dim()
+        theme.idle
     };
 
     // Note name.
@@ -79,12 +167,18 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
     match note {
         Some(m) => {
             let c = name_rect.center() - vec2(10.0 * k, 0.0);
-            p.text(c, Align2::CENTER_CENTER, note_name(m), mono(50.0), color);
+            p.text(
+                c,
+                Align2::CENTER_CENTER,
+                note_name(m),
+                theme.note_font.clone(),
+                color,
+            );
             p.text(
                 c + vec2(32.0 * k, 16.0 * k),
                 Align2::LEFT_CENTER,
                 note_octave(m).to_string(),
-                mono(20.0),
+                theme.octave_font.clone(),
                 color,
             );
         }
@@ -93,8 +187,8 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
                 name_rect.center(),
                 Align2::CENTER_CENTER,
                 "--",
-                mono(44.0),
-                theme::dim(),
+                theme.no_note_font.clone(),
+                theme.idle,
             );
         }
     }
@@ -111,56 +205,51 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
             right.center() + vec2(-8.0 * k, -14.0 * k),
             Align2::RIGHT_CENTER,
             format!("{:+.1}", cents),
-            mono(26.0),
+            theme.cents_font.clone(),
             color,
         );
         p.text(
             value.right_center() + vec2(12.0, 0.0),
             Align2::LEFT_CENTER,
             "CENT",
-            mono(13.0),
-            theme::cyan(),
+            theme.unit_font.clone(),
+            theme.unit,
         );
         let hz = p.text(
             right.center() + vec2(-8.0 * k, 22.0 * k),
             Align2::RIGHT_CENTER,
             format!("{freq:.2}"),
-            mono(18.0),
-            theme::green(),
+            theme.hz_font.clone(),
+            theme.hz,
         );
         p.text(
             hz.right_center() + vec2(12.0, 0.0),
             Align2::LEFT_CENTER,
             "HZ",
-            mono(13.0),
-            theme::cyan(),
+            theme.unit_font.clone(),
+            theme.unit,
         );
     } else {
         p.text(
             right.center(),
             Align2::CENTER_CENTER,
             "NO SIGNAL",
-            mono(15.0),
-            theme::dim(),
+            theme.no_signal_font.clone(),
+            theme.idle,
         );
     }
     let m_rect = Rect::from_min_max(
         Pos2::new(rect.right() - meter_w - 10.0, rect.top() + 10.0),
         Pos2::new(rect.right() - 10.0, rect.bottom() - 10.0),
     );
-    p.rect_stroke(
-        m_rect,
-        0.0,
-        Stroke::new(1.0, theme::line()),
-        StrokeKind::Inside,
-    );
+    p.rect_stroke(m_rect, 0.0, theme.meter_frame, StrokeKind::Inside);
     let level = ((meter.peak_db + 60.0) / 60.0).clamp(0.0, 1.0);
     let m_color = if meter.peak_db > -3.0 {
-        theme::red()
+        theme.clipping
     } else if meter.note_active {
-        theme::green()
+        theme.in_tune
     } else {
-        theme::dim()
+        theme.idle
     };
     p.rect_filled(
         Rect::from_min_max(
@@ -182,7 +271,7 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
     let x_of = |c: f32| scale.center().x + c.clamp(-50.0, 50.0) / 50.0 * scale.width() / 2.0;
     let mid_y = scale.center().y - 4.0 * k;
     let tick = 10.0 * k;
-    p.hline(scale.x_range(), mid_y, Stroke::new(1.5, theme::line()));
+    p.hline(scale.x_range(), mid_y, Stroke::new(1.5, theme.line));
     // Label every 10 cents, or every 20 / 50 when the scale is too narrow for that.
     let label_w = 34.0 * k;
     let label_every = [10, 20, 50]
@@ -203,7 +292,7 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
             (mid_y - h)..=(mid_y + h),
             Stroke::new(
                 if major { 1.5 } else { 1.0 },
-                if major { theme::line() } else { theme::dim() },
+                if major { theme.line } else { theme.minor },
             ),
         );
         if c % label_every == 0 && c != 0 {
@@ -211,8 +300,8 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
                 Pos2::new(x_of(c as f32), scale.bottom()),
                 Align2::CENTER_BOTTOM,
                 format!("{c:+}"),
-                mono(12.0),
-                theme::text(),
+                theme.scale_font.clone(),
+                theme.scale_label,
             );
         }
     }
@@ -224,13 +313,13 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
     p.rect_stroke(
         zone,
         0.0,
-        Stroke::new(1.0, theme::green().gamma_multiply(0.6)),
+        Stroke::new(1.0, theme.in_tune.gamma_multiply(theme.zone_alpha)),
         StrokeKind::Inside,
     );
     let t = Pos2::new(x_of(0.0), mid_y - tick * 1.9);
     p.add(egui::Shape::convex_polygon(
         vec![t, t + vec2(-7.0, -10.0) * k, t + vec2(7.0, -10.0) * k],
-        theme::magenta(),
+        theme.target,
         Stroke::NONE,
     ));
     if note.is_some() {
@@ -252,7 +341,7 @@ pub fn tuner(ui: &mut egui::Ui, state: &TunerState, meter: &InputMeter, prefs: &
                 Pos2::new(x, mid_y),
                 Align2::CENTER_CENTER,
                 arrow,
-                theme::prop(22.0),
+                theme.arrow_font.clone(),
                 color,
             );
         }

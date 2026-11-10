@@ -5,7 +5,7 @@ use bg_ui::ExerciseCtx;
 use bg_ui::recording::RecordingPrefs;
 use bg_ui::view::ViewPrefs;
 use bg_ui::views::review::{self, ReviewInput, report_settings};
-use bg_ui::widgets::tuner::TunerPrefs;
+use bg_ui::views::tuner::TunerPrefs;
 
 use super::ID;
 use super::model::{Frame, Model};

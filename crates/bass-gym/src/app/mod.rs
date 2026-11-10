@@ -23,8 +23,8 @@ use bg_core::ScoringThresholds;
 use bg_core::preset::PresetStore;
 use bg_ui::kit::{self, Emit, ThemeCache};
 use bg_ui::theme::ThemePrefs;
+use bg_ui::views::tuner::{self, Tuner, TunerPrefs};
 use bg_ui::widgets::toolbar::show_toolbar;
-use bg_ui::widgets::tuner::{TunerPrefs, tuner};
 use bg_ui::{ExerciseCtx, PreferencePage, PrefsCtx, SettingsStore, egui};
 
 use crate::menu::{AppMenu, MenuAction};
@@ -364,12 +364,13 @@ impl eframe::App for BassGymApp {
                     .inner_margin(egui::Margin::same(theme.panel_margin)),
             )
             .show(ui, |ui| {
-                tuner(
-                    ui,
-                    &self.engine.tuner(),
-                    &self.engine.meter(),
-                    &self.tuner_prefs,
-                );
+                let (state, meter) = (self.engine.tuner(), self.engine.meter());
+                let props = tuner::Props {
+                    state: &state,
+                    meter: &meter,
+                    prefs: &self.tuner_prefs,
+                };
+                kit::show::<Tuner>(ui, "tuner", &props, &theme.tuner);
                 ui.add_space(theme.tuner_gap);
                 if let Some(slot) = self.slots.get_mut(self.selected) {
                     let props = bar::Props {

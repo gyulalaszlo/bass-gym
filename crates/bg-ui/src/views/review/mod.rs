@@ -173,7 +173,7 @@ pub(crate) fn overlays(m: &Matcher, bars: &[ScoreBar]) -> Vec<Marker> {
             end: Some(n.offset),
             label: String::new(),
             color: t.dim().gamma_multiply(0.6),
-            line: Line::Dotted,
+            line: Line::Solid,
         });
     }
     for p in &m.played {

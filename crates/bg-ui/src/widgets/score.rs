@@ -7,7 +7,7 @@ use bg_core::score::{
 };
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rangef, Rect, Shape, Stroke, pos2};
 
-use crate::theme::{self, mono};
+use crate::theme::Tokens;
 use crate::widgets::time_axis::TimeAxis;
 
 /// Name of the bundled music font's family.
@@ -34,6 +34,51 @@ const RESTS_FLAGGED: [char; 4] = ['\u{E4E6}', '\u{E4E7}', '\u{E4E8}', '\u{E4E9}'
 const LABEL_HEIGHT: f32 = 16.0;
 /// Stem length, in staff spaces.
 const STEM: f32 = 3.5;
+
+/// How a score looks. The glyphs' size comes from the staff spacing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Theme {
+    /// Under the fixed clef and key, and the line at their right edge.
+    pub background: Color32,
+    pub lead_edge: Color32,
+    /// Staff lines, and the clef, key and time signature.
+    pub staff: Color32,
+    pub lead: Color32,
+    pub bar_line: Color32,
+    /// Notes, and those of unknown pitch, and those that clash with the chord.
+    pub note: Color32,
+    pub unknown: Color32,
+    pub clash: Color32,
+    /// Chord-tone hints next to a note: fitting, and clashing; and how faint.
+    pub fits: Color32,
+    pub hint_alpha: f32,
+    /// Rests, ledger lines, and bar / tuplet labels.
+    pub rest: Color32,
+    pub ledger: Color32,
+    pub label_font: FontId,
+    pub label: Color32,
+}
+
+impl From<&Tokens> for Theme {
+    fn from(t: &Tokens) -> Self {
+        Self {
+            background: t.bg(),
+            lead_edge: t.grid(),
+            staff: t.dim(),
+            lead: t.text(),
+            bar_line: t.text(),
+            note: t.text(),
+            unknown: t.dim(),
+            clash: t.red(),
+            fits: t.green(),
+            hint_alpha: 0.4,
+            rest: t.dim(),
+            ledger: t.dim(),
+            label_font: t.mono(10.0),
+            label: t.dim(),
+        }
+    }
+}
 
 /// Vertical layout of a staff: `lo..=hi` are the staff positions to make room for (see
 /// [`bg_core::score::extent`]).
@@ -91,12 +136,19 @@ pub fn lead_width(spacing: f32, clef: bool, key: Option<KeySignature>) -> f32 {
 
 /// Paints a clef and key signature over the left end of a staff whose notes scroll by
 /// behind them, as in the live score.
-pub fn paint_fixed_lead(p: &Painter, rect: Rect, layout: StaffLayout, key: Option<KeySignature>) {
+pub fn paint_fixed_lead(
+    p: &Painter,
+    rect: Rect,
+    layout: StaffLayout,
+    key: Option<KeySignature>,
+    theme: &Theme,
+) {
     let width = (4.2 + key_width(key)) * layout.spacing;
     let lead = Rect::from_min_size(rect.min, egui::vec2(width, rect.height()));
-    p.rect_filled(lead, 0.0, theme::bg());
+    p.rect_filled(lead, 0.0, theme.background);
     let d = Draw {
         p,
+        t: theme,
         sp: layout.spacing,
         bottom: layout.bottom_line(rect),
         axis: TimeAxis::new(Rangef::new(lead.left(), lead.right()), 0.0, 1.0),
@@ -113,7 +165,7 @@ pub fn paint_fixed_lead(p: &Painter, rect: Rect, layout: StaffLayout, key: Optio
     p.vline(
         lead.right(),
         d.y(TOP_LINE)..=d.bottom,
-        Stroke::new(1.0, theme::grid()),
+        Stroke::new(1.0, theme.lead_edge),
     );
 }
 
@@ -134,9 +186,10 @@ pub struct Lead {
 
 impl ScoreView<'_> {
     /// Paints into `rect`, which should be as tall as the layout's height.
-    pub fn paint(&self, p: &Painter, rect: Rect) {
+    pub fn paint(&self, p: &Painter, rect: Rect, theme: &Theme) {
         let d = Draw {
             p,
+            t: theme,
             sp: self.layout.spacing,
             bottom: self.layout.bottom_line(rect),
             axis: self.axis,
@@ -157,6 +210,7 @@ impl ScoreView<'_> {
 
 struct Draw<'a> {
     p: &'a Painter,
+    t: &'a Theme,
     sp: f32,
     bottom: f32,
     axis: TimeAxis,
@@ -187,12 +241,9 @@ impl Draw<'_> {
                 continue;
             };
             let x = self.head_x(e);
-            let color = if n.clash {
-                theme::red()
-            } else {
-                theme::green()
-            };
-            let stroke = Stroke::new((0.3 * self.sp).max(2.0), color.gamma_multiply(0.4));
+            let color = if n.clash { self.t.clash } else { self.t.fits };
+            let faint = color.gamma_multiply(self.t.hint_alpha);
+            let stroke = Stroke::new((0.3 * self.sp).max(2.0), faint);
             for &m in &n.chord_marks {
                 self.p
                     .hline((x - 0.5 * w)..=(x + 1.5 * w), self.y(m), stroke);
@@ -201,14 +252,14 @@ impl Draw<'_> {
     }
 
     fn staff(&self, rect: Rect) {
-        let stroke = Stroke::new(1.0, theme::dim());
+        let stroke = Stroke::new(1.0, self.t.staff);
         for line in 0..5 {
             self.p.hline(rect.x_range(), self.y(line * 2), stroke);
         }
     }
 
     fn lead(&self, rect: Rect, lead: Lead) {
-        let color = theme::text();
+        let color = self.t.lead;
         let mut x = rect.left() + 0.4 * self.sp;
         if lead.clef {
             self.glyph(F_CLEF, x, self.y(6), color);
@@ -240,7 +291,7 @@ impl Draw<'_> {
 
     fn bar(&self, bar: &ScoreBar, rect: Rect, first: bool, labels: bool) {
         let lines = self.y(TOP_LINE)..=self.bottom;
-        let stroke = Stroke::new(1.0, theme::text());
+        let stroke = Stroke::new(1.0, self.t.bar_line);
         let (left, right) = (self.axis.x(bar.start), self.axis.x(bar.end));
         if first {
             self.p.vline(left, lines.clone(), stroke);
@@ -258,8 +309,8 @@ impl Draw<'_> {
             pos2(left + 2.0, rect.top()),
             Align2::LEFT_TOP,
             label,
-            mono(10.0),
-            theme::dim(),
+            self.t.label_font.clone(),
+            self.t.label,
         );
     }
 
@@ -282,7 +333,7 @@ impl Draw<'_> {
                 ScoreKind::Rest => self.rest(ev),
                 ScoreKind::BarRest => {
                     let x = (self.axis.x(bar.start) + self.axis.x(bar.end)) / 2.0;
-                    self.glyph(REST_WHOLE, x - 0.6 * self.sp, self.y(6), theme::dim());
+                    self.glyph(REST_WHOLE, x - 0.6 * self.sp, self.y(6), self.t.rest);
                 }
             }
         }
@@ -301,20 +352,20 @@ impl Draw<'_> {
         n.pitch.map_or(MIDDLE_LINE, |p| p.pos)
     }
 
-    fn color(n: &ScoreNote) -> Color32 {
+    fn color(&self, n: &ScoreNote) -> Color32 {
         if n.clash {
-            theme::red()
+            self.t.clash
         } else if n.pitch.is_none() {
-            theme::dim()
+            self.t.unknown
         } else {
-            theme::text()
+            self.t.note
         }
     }
 
     fn note(&self, e: &ScoreEvent, n: &ScoreNote) {
         let x = self.head_x(e);
         let pos = Self::pos(n);
-        let color = Self::color(n);
+        let color = self.color(n);
         let w = self.head_width();
 
         for ledger in (2..=-pos)
@@ -325,7 +376,7 @@ impl Draw<'_> {
             self.p.hline(
                 (x - 0.3 * w)..=(x + 1.3 * w),
                 self.y(ledger),
-                Stroke::new(1.0, theme::dim()),
+                Stroke::new(1.0, self.t.ledger),
             );
         }
 
@@ -407,13 +458,9 @@ impl Draw<'_> {
                 .map(|(_, e, n)| self.stem(self.head_x(e), Self::pos(n), up, len).0)
                 .collect();
             let any_clash = members.iter().any(|(_, _, n)| n.clash);
-            let beam_color = if any_clash {
-                theme::red()
-            } else {
-                theme::text()
-            };
+            let beam_color = if any_clash { self.t.clash } else { self.t.note };
             for ((_, _, n), &x) in members.iter().zip(&stems) {
-                self.stem_line(x, self.y(Self::pos(n)), tip, Self::color(n));
+                self.stem_line(x, self.y(Self::pos(n)), tip, self.color(n));
             }
             let thick = 0.5 * self.sp;
             let inward = if up { 1.0 } else { -1.0 };
@@ -434,7 +481,7 @@ impl Draw<'_> {
 
     fn rest(&self, e: &ScoreEvent) {
         let x = self.head_x(e);
-        let color = theme::dim();
+        let color = self.t.rest;
         let glyph = match e.value.denominator {
             1 => REST_WHOLE,
             2 => REST_HALF,
@@ -468,7 +515,7 @@ impl Draw<'_> {
             })
             .collect();
         self.p
-            .add(Shape::line(points, Stroke::new(1.2, Self::color(n))));
+            .add(Shape::line(points, Stroke::new(1.2, self.color(n))));
     }
 
     /// The tuplet number over each run of tuplet events within a beat.
@@ -489,8 +536,8 @@ impl Draw<'_> {
                 pos2((a + b) / 2.0 + 0.5 * self.sp, self.y(TOP_LINE) - 2.0),
                 Align2::CENTER_BOTTOM,
                 n.to_string(),
-                mono(10.0),
-                theme::dim(),
+                self.t.label_font.clone(),
+                self.t.label,
             );
             i += run;
         }

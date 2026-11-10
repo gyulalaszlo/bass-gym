@@ -4,6 +4,7 @@ use egui::{Color32, FontId, Stroke, Vec2, vec2};
 
 use crate::theme::Tokens;
 use crate::views::marker_editor;
+use crate::widgets::score;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
@@ -32,6 +33,7 @@ pub struct Theme {
     pub editor: marker_editor::Theme,
     /// Markers the user adds.
     pub new_marker: Color32,
+    pub score: score::Theme,
     pub metrics: Metrics,
 }
 
@@ -77,6 +79,7 @@ impl Theme {
             done: t.green(),
             editor: marker_editor::Theme::new(t),
             new_marker: t.cyan(),
+            score: t.into(),
             metrics: Metrics {
                 wave_height: 60.0,
                 note_lane: 10.0,

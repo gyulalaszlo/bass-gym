@@ -53,8 +53,8 @@ pub fn editor(p: &Props, theme: &Theme, ui: &mut Ui, playhead: Option<f64>, out:
             layout,
             lead: None,
         }
-        .paint(painter, rect);
-        paint_fixed_lead(painter, rect, layout, key);
+        .paint(painter, rect, &theme.score);
+        paint_fixed_lead(painter, rect, layout, key, &theme.score);
     };
     let id = r.next_marker + 1;
     let new_marker = |time| Marker {

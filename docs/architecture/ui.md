@@ -144,7 +144,8 @@ Culling relies on time-sorted vectors.
 ## Score, waveform and marker editor
 
 - `widgets/time_axis.rs::TimeAxis` maps time to x. Anything that must line up shares one.
-- `widgets/score.rs::ScoreView` paints `bg_core::score` bars along a `TimeAxis`, with
+- `widgets/score.rs::ScoreView` paints `bg_core::score` bars along a `TimeAxis` in a
+  `score::Theme`'s colours, with
   `StaffLayout` for vertical sizes. Notation glyphs come from Bravura
   (`assets/fonts/`, SIL OFL), a separate `FontFamily::Name(MUSIC_FONT)` set up in
   `theme::apply`. `Draw::glyph` places glyphs by their baseline, since SMuFL fonts have

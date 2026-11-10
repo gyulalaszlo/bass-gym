@@ -70,7 +70,7 @@ pub fn rows(p: &Props, theme: &Theme, ui: &mut Ui, playhead: Option<f64>, out: &
                 sig: Some(first.sig),
             }),
         }
-        .paint(&painter, staff);
+        .paint(&painter, staff, &theme.score);
         paint_wave(
             &painter,
             p,

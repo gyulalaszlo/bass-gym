@@ -247,6 +247,8 @@ Done:
 
 - Preference pages (`bass-gym/src/pages/`, and Basic chords' page): sections are views
   over their settings struct, and the page glue stores and applies changes.
+- `widgets/score.rs` takes a `score::Theme` (`ScoreView::paint(p, rect, theme)`,
+  `paint_fixed_lead(.., theme)`), held by the beat grid's and the review's themes.
 - The tuner (`views/tuner.rs`; `Theme::tune_color` replaces `TunerPrefs::color`).
 - The keyboard and groove editor (`views/keyboard.rs`, `views/groove_editor.rs`, which
   emits the edited groove).
@@ -260,8 +262,7 @@ Still bridged or reading the global theme (migrate as they're touched):
 - The toolbar API (`widgets/toolbar.rs`): tap tempo lives in `kit::mount_temp` until the
   toolbar gives its owner the state.
 - `session_toolbar` / `session_panel` edit in place, and their callers pass a copy.
-- Display widgets still paint with `theme::*`: `ScoreView` (with `paint_fixed_lead`),
-  and the small helpers in `theme.rs` (`caption`, `section`, `title_label`)
+- Still painting with `theme::*`: the small helpers in `theme.rs` (`caption`, `section`, `title_label`)
   and `controls.rs`. (`waveform::paint` takes its colour from the caller's
   `WaveStyle`.)
 

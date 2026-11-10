@@ -3,6 +3,7 @@
 use egui::{Color32, FontId, Stroke, Vec2};
 
 use crate::theme::{GradeColors, Tokens};
+use crate::widgets::score;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
@@ -14,6 +15,8 @@ pub struct Theme {
     /// The now line and its triangle.
     pub now: Color32,
     pub metrics: Metrics,
+    /// The live score above the grid.
+    pub score: score::Theme,
 }
 
 /// Sizes, margins and gaps. The ones that hold text follow the text size.
@@ -117,6 +120,7 @@ impl Theme {
             },
             now: t.magenta(),
             metrics: Metrics::new(t),
+            score: t.into(),
         }
     }
 }

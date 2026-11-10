@@ -27,8 +27,6 @@ pub fn paint(p: &Painter, props: &Props, theme: &Theme, l: &Layout) {
 
 /// The played notes up to now, on the same time axis as the grid.
 ///
-/// `ScoreView` and `paint_fixed_lead` aren't migrated yet and still read the global
-/// theme.
 fn paint_score(p: &Painter, props: &Props, theme: &Theme, live: LiveScore, rect: Rect, l: &Layout) {
     p.rect_filled(rect, 0.0, theme.bg);
     // Whole bars in view, plus the one before for notes tied into them.
@@ -51,9 +49,9 @@ fn paint_score(p: &Painter, props: &Props, theme: &Theme, live: LiveScore, rect:
         layout: live.layout(),
         lead: None,
     }
-    .paint(p, rect);
+    .paint(p, rect, &theme.score);
     let key = live.scale.map(|s| score::KeySignature::of(&s));
-    paint_fixed_lead(p, rect, live.layout(), key);
+    paint_fixed_lead(p, rect, live.layout(), key, &theme.score);
     p.vline(
         l.axis.x(props.now),
         rect.y_range(),

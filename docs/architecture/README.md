@@ -50,7 +50,7 @@ What this means in practice:
 
 ## Debug environment variables
 
-Handled in `bass-gym/src/app.rs` and `main.rs`:
+Handled in `bass-gym/src/app/` (`mod.rs`, `screenshot.rs`) and `main.rs`:
 
 | Variable | Effect |
 |---|---|

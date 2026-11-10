@@ -3,11 +3,15 @@
 egui and eframe 0.36 with the `glow` backend, plus `egui-phosphor` icons (re-exported as
 `bg_ui::icons`). `bg-ui` re-exports `egui`. `egui_plot` and `egui_extras` aren't used.
 
-## App shell (`crates/bass-gym/src/app.rs`)
+## App shell (`crates/bass-gym/src/app/`)
 
 - `eframe::App::ui` draws the sidebar and a central panel with the tuner, preset bar,
   toolbar and a vertical ScrollArea. `exercise.et.ui(ui, &mut ectx)` runs inside that
   ScrollArea.
+- The shell is the root of the kit tree. The sidebar (`sidebar.rs`), the preset bar
+  (`presets/bar.rs`, a component; `presets::run` does its operations on the store) and
+  the preferences page list (`prefs.rs`) send `Msg`s, and `BassGymApp::update` carries
+  them out. `state.rs` is what survives a restart, and `theme.rs` the shell's theme root.
 - Preferences open in a separate viewport.
 - `persist_egui_memory` is false.
 
@@ -64,7 +68,7 @@ use the latter, with `choice_grid` (equal-width, centred selectables).
 taps live in egui temp memory until the exercise owns the toolbar's state.
 
 Shortcuts: Space starts / stops (`Toolbar::transport`) and plays / stops the review;
-M toggles monitoring (sidebar in `app.rs`). Both are ignored while a text field has
+M toggles monitoring (`app/sidebar.rs`). Both are ignored while a text field has
 the keyboard.
 
 ## Theme (`bg-ui/src/theme.rs`)
@@ -245,7 +249,7 @@ Files:
 
 To add a setting:
 1. Write a struct with `#[serde(default)]` and `Default`, add an id constant in
-   `pages/mod.rs`, and load it in `app.rs`.
+   `pages/mod.rs`, and load it in `app/mod.rs`.
 2. Add a section to a page in `crates/bass-gym/src/pages/`. The section is a view whose
    props are the settings struct and whose emission is the edited struct, built with
    `kit::edited`.

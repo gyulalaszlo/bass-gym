@@ -9,7 +9,7 @@ All of this is in `crates/bg-audio/src/` unless noted.
 | cpal input callback | `engine.rs::InputSink::process` | Real time |
 | cpal output callback | `output.rs::OutputState::process` | Real time |
 | `bg-analysis` worker | `worker.rs::run` | Plain thread polling every 2 ms, not real time |
-| UI | `engine.poll()` each frame from `app.rs` | Also frees old voices |
+| UI | `engine.poll()` each frame from `app/mod.rs` | Also frees old voices |
 
 ## Communication
 

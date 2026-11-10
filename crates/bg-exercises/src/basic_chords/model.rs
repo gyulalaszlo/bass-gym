@@ -4,8 +4,8 @@
 use bg_core::{GradeMode, ScoringThresholds};
 use bg_ui::recording::SessionCapture;
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::review::Review;
 use bg_ui::widgets::results::ResultsTab;
-use bg_ui::widgets::session_review::SessionReview;
 
 use super::accompaniment::SharedChords;
 use super::data::BasicChordsData;
@@ -50,7 +50,8 @@ pub struct Model {
     /// Why the last start failed.
     pub error: Option<String>,
     pub capture: SessionCapture,
-    /// The Score + Audio tab. Not a kit component yet (see `view/results.rs`).
-    pub review: Option<SessionReview>,
+    /// The Score + Audio tab: a sub-program whose messages and effects this exercise
+    /// routes (`Msg::Review`, `Effect::Review`).
+    pub review: Option<Review>,
     pub results_tab: ResultsTab,
 }

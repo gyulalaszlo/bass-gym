@@ -180,31 +180,48 @@ Culling relies on time-sorted vectors.
   after which results can't be reached.
 - `matcher.stats()` is recomputed every frame while open.
 
-## Session review (`bg-ui/src/widgets/session_review.rs`)
+## Session review (`bg-ui/src/views/review/`)
 
-The Score + Audio tab. `SessionReview` is owned by the exercise, so selection, markers
-and playback survive closing the dialog. It's built in `update_review` once
-`!session_running` and a recording has arrived, from a `ReviewInput` snapshot, and
-released with `has_results`.
+The Score + Audio tab, as a kit sub-program (see
+[ui-components.md](ui-components.md)): the exercise keeps the `Review` in its model, so
+selection, markers and playback survive closing the dialog. It's built from a
+`ReviewInput` snapshot (`Msg::ReviewReady`, sent by the exercise's `sync::review` once
+`!session_running` and the recording has arrived), and released with `has_results`.
+
+The exercise routes it:
+- wraps `review::Msg` in `Msg::Review` and calls `review::update`;
+- wraps `review::Effect` in `Effect::Review` and calls `review::run`;
+- calls `review::sync` before the dialog and sends `review::Msg::Tick` after it.
+
+Files:
+- `update.rs`: pure, with tests for playback, queueing and selection.
+- `effects.rs`: replay start / stop / release, the replay options, the export thread and
+  opening the folder.
+- `sync.rs`: the clock while a replay runs, and polling the export.
+- `view/`: controls, report row, score rows and the marker editor.
+- `theme.rs`: every colour and size.
 
 - Rows of whole bars: one shared `TimeAxis` per row for score and waveform. Staff
-  spacing is `ViewPrefs.results_score_size`, passed to `ui` each frame, and `bars_per_row`
-  scales with it.
+  spacing is `ViewPrefs.results_score_size`, passed in `review::Props` each frame, and
+  `bars_per_row` scales with it.
 - "Back to score" sets `reveal` to the editor view's centre; `rows` scrolls that row
-  into view on the next frame. A short last
-  row keeps the scale of full rows. Rows are culled with `is_rect_visible`.
+  into view and sends `Revealed`. A short last row keeps the scale of full rows. Rows
+  are culled with `is_rect_visible`.
 - `overlays` draws string noise (`Matcher.noise`) as faint dotted spans on the waveform.
 - Click the score to select a bar and play from there to the end of the session: from
   the recorded note under the click, or else the bar's start. Shift extends the selection
   and doesn't play. Click the waveform to open `MarkerEditor` around that time.
-- Stopping a replay isn't immediate, so a click during playback is `queued` and `tick`
+- Stopping a replay isn't immediate, so a click during playback is `queued`, and `Tick`
   starts it once the worker has stopped.
+- `MarkerEditor` isn't migrated: `view/editor.rs` runs it on copies of the markers and
+  `EditorState` (`kit::edited`) and sends `Msg::Editor` when they change.
 - The tab scrolls itself below its toolbar: `results_dialog` gives it a bounded `Ui`
   rather than the scroll area the Statistics tab gets.
-- Export runs `bg_report::export` on a thread and polls the result. `ReviewInput.settings`
-  comes from `report_settings`, taken when the session ended.
-- `tick` must run every frame: it stops a replay when the dialog closes and releases the
-  playback voice.
+- Export runs `bg_report::export` on a thread (`Effect::Export`), and `sync` polls the
+  result. `ReviewInput.settings` comes from `report_settings`, taken when the session
+  ended.
+- `sync` and `Tick` send messages only while a replay runs or the engine's running
+  state changes, so an idle review doesn't keep the app repainting.
 
 ## Settings and persistence
 

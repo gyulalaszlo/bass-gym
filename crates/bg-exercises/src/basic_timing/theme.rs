@@ -2,12 +2,13 @@
 
 use bg_ui::egui::Color32;
 use bg_ui::theme::Tokens;
-use bg_ui::views::beatgrid;
+use bg_ui::views::{beatgrid, review};
 
 use super::view::status;
 
 pub struct Theme {
     pub grid: beatgrid::Theme,
+    pub review: review::Theme,
     pub status: status::Theme,
     /// The "no audio output" warning.
     pub warning: Color32,
@@ -20,6 +21,7 @@ impl Theme {
     pub fn new(t: &Tokens) -> Self {
         Self {
             grid: beatgrid::Theme::new(t),
+            review: review::Theme::new(t),
             status: status::Theme::new(t),
             warning: t.amber(),
             meter_gap: 4.0,

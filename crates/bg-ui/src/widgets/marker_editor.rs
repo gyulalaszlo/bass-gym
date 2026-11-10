@@ -126,7 +126,7 @@ enum Gesture {
 }
 
 /// What the editor remembers between frames. Owned by whoever shows it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EditorState {
     pub view: WaveView,
     pub selected: Option<u64>,

@@ -4,8 +4,8 @@
 use bg_core::{ScoringThresholds, SessionConfig};
 use bg_ui::recording::SessionCapture;
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::review::Review;
 use bg_ui::widgets::results::ResultsTab;
-use bg_ui::widgets::session_review::SessionReview;
 use serde::{Deserialize, Serialize};
 
 use crate::timing_session::SharedTiming;
@@ -62,8 +62,8 @@ pub struct Model {
     /// The results dialog is open.
     pub show_results: bool,
     pub capture: SessionCapture,
-    /// The Score + Audio tab. Not a kit component yet: it owns its state and drives the
-    /// engine itself (see `view/results.rs`).
-    pub review: Option<SessionReview>,
+    /// The Score + Audio tab: a sub-program whose messages and effects this exercise
+    /// routes (`Msg::Review`, `Effect::Review`).
+    pub review: Option<Review>,
     pub results_tab: ResultsTab,
 }

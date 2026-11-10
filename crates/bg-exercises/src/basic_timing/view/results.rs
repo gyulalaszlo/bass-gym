@@ -1,24 +1,19 @@
 //! The results dialog: statistics, and the Score + Audio review.
-//!
-//! **Bridge** until the review is migrated (phase 4): `SessionReview` owns its state and
-//! drives the engine itself, so this region gets it mutably along with the engine.
-//! Everything else here only reads props and sends messages.
 
 use std::path::Path;
 
-use bg_audio::AudioEngine;
 use bg_ui::egui::Context;
-use bg_ui::kit::Emit;
+use bg_ui::kit::{self, Emit};
+use bg_ui::views::review::{self, ReviewView};
 use bg_ui::widgets::results::{ResultsTab, results, results_dialog};
-use bg_ui::widgets::session_review::SessionReview;
 
 use crate::basic_timing::msg::Msg;
 use crate::basic_timing::props;
+use crate::basic_timing::theme::Theme;
 
 pub fn results_region(
     p: &props::Results,
-    review: &mut Option<SessionReview>,
-    engine: &mut AudioEngine,
+    theme: &Theme,
     data_dir: Option<&Path>,
     ctx: &Context,
     out: &mut Emit<Msg>,
@@ -27,14 +22,23 @@ pub fn results_region(
     let mut tab = p.tab.unwrap_or_default();
     let tabs = p.tab.is_some().then_some(&mut tab);
     results_dialog(ctx, &mut open, "Results", tabs, |ui, tab| {
-        match (tab, review.as_mut(), &p.stats) {
-            (ResultsTab::Review, Some(r), _) => r.ui(ui, engine, data_dir, p.staff_spacing),
-            (_, _, Some(stats)) => results(ui, stats, &p.scoring, |_| {}),
+        match (tab, p.review, &p.stats) {
+            (ResultsTab::Review, Some(r), _) => {
+                let props = review::Props {
+                    review: r,
+                    data_dir,
+                    staff_spacing: p.staff_spacing,
+                };
+                let msgs = kit::show::<ReviewView>(ui, "review", &props, &theme.review);
+                out.extend_map(msgs, Msg::Review);
+            }
+            (_, _, Some(stats)) => results(ui, stats, p.scoring, |_| {}),
             _ => {}
         }
     });
-    if let Some(r) = review.as_mut() {
-        r.tick(engine, open);
+    if p.review.is_some_and(|r| r.is_playing()) {
+        // Ends the replay when the dialog closed or playback finished.
+        out.send(Msg::Review(review::Msg::Tick { dialog_open: open }));
     }
     if open != p.open {
         out.send(Msg::ResultsOpen(open));

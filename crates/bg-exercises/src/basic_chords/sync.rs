@@ -5,7 +5,7 @@ use bg_core::score::ScoreChord;
 use bg_ui::ExerciseCtx;
 use bg_ui::recording::RecordingPrefs;
 use bg_ui::view::ViewPrefs;
-use bg_ui::widgets::session_review::{ReviewInput, report_settings};
+use bg_ui::views::review::{self, ReviewInput, report_settings};
 use bg_ui::widgets::tuner::TunerPrefs;
 
 use super::ID;
@@ -68,7 +68,7 @@ pub fn review(m: &Model, ctx: &ExerciseCtx) -> Option<Msg> {
     let preset = serde_json::to_value(&m.data).unwrap_or_default();
     let settings = report_settings(ctx, preset);
     let shared = lock(&m.timing);
-    Some(Msg::Review(Box::new(ReviewInput {
+    Some(Msg::ReviewReady(Box::new(ReviewInput {
         bars: shared.bars.clone(),
         matcher: shared.matcher.clone(),
         chords,
@@ -78,4 +78,14 @@ pub fn review(m: &Model, ctx: &ExerciseCtx) -> Option<Msg> {
         exercise: ID.to_owned(),
         settings,
     })))
+}
+
+/// The review's own reading of the engine, before it shows.
+pub fn review_sync(m: &Model, ctx: &ExerciseCtx) -> Vec<Msg> {
+    m.review.as_ref().map_or_else(Vec::new, |r| {
+        review::sync(r, ctx.engine)
+            .into_iter()
+            .map(Msg::Review)
+            .collect()
+    })
 }

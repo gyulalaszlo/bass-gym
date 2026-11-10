@@ -227,17 +227,11 @@ impl ExerciseType for BasicChords {
         view::config::config(&props::config(&self.model), &theme, ui, &mut out);
         self.dispatch(ctx.engine, Some(ui.ctx()), out);
 
+        let msgs = sync::review_sync(&self.model, ctx);
+        self.dispatch(ctx.engine, Some(ui.ctx()), msgs);
         let mut out = Emit::new();
         let p = props::results(&self.model);
-        view::results::results_region(
-            &p,
-            &theme,
-            &mut self.model.review,
-            ctx.engine,
-            ctx.data_dir,
-            ui.ctx(),
-            &mut out,
-        );
+        view::results::results_region(&p, &theme, ctx.data_dir, ui.ctx(), &mut out);
         self.dispatch(ctx.engine, Some(ui.ctx()), out);
     }
 

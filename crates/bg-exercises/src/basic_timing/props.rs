@@ -4,6 +4,7 @@ use std::sync::MutexGuard;
 
 use bg_core::{BarPlan, Matcher, ScoringThresholds, SessionConfig, SessionStats};
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::review::Review;
 use bg_ui::widgets::performance::TimingMeter;
 use bg_ui::widgets::results::ResultsTab;
 
@@ -126,23 +127,24 @@ pub fn settings(m: &Model) -> Settings<'_> {
     }
 }
 
-/// Owned, not borrowed: the dialog's region also gets the review mutably.
-pub struct Results {
+pub struct Results<'a> {
     pub open: bool,
     /// The tab, when there's a review to show (otherwise there are no tabs).
     pub tab: Option<ResultsTab>,
     pub stats: Option<SessionStats>,
-    pub scoring: ScoringThresholds,
+    pub scoring: &'a ScoringThresholds,
+    pub review: Option<&'a Review>,
     pub staff_spacing: f32,
 }
 
-pub fn results(m: &Model) -> Results {
+pub fn results(m: &Model) -> Results<'_> {
     let open = m.show_results && m.has_results;
     Results {
         open,
         tab: m.review.is_some().then_some(m.results_tab),
         stats: open.then(|| lock(&m.shared).matcher.stats()),
-        scoring: m.frame.scoring.clone(),
+        scoring: &m.frame.scoring,
+        review: m.review.as_ref(),
         staff_spacing: m.frame.view.results_score_size,
     }
 }

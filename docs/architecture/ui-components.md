@@ -194,11 +194,21 @@ variant per thing it edits (`progression::Emission::ChordLength(..)`). The progr
 After a dispatch that handled messages, the exercise requests a repaint, because the
 views showed the state from before them.
 
+### Sub-programs
+
+A child with effects of its own, such as the session review (replay, export), can't be
+a component, because only a program runs effects. It's a **sub-program** instead:
+`model`, `msg`, `update`, `effects` and `sync` like a program, plus a view whose
+`Emission` is its own `Msg`. Its owner routes it, as Elm does with nested programs:
+`Msg::Review(review::Msg)` goes to `review::update`, `Effect::Review(review::Effect)`
+goes to `review::run`, and the owner calls `review::sync` before showing it. Here a
+child's `Msg` does pass through its parent, because the parent has to route its effects.
+
 Bridges, while children aren't migrated:
 - Widgets that edit in place (`session_toolbar`, `session_panel`) get a copy of the
   value. If they report a change, the copy is sent as a message.
-- `view/results.rs` gets the `SessionReview` mutably along with the engine, because the
-  review drives the engine itself. This goes when the review is migrated.
+- `views/review/view/editor.rs` runs `MarkerEditor`, which edits in place, on copies
+  (`kit::edited`).
 
 ## Testing
 
@@ -224,8 +234,10 @@ Done:
   over their slice of the data, with typed emissions built with `kit::field` and
   `kit::edited`. The strip, per-chord table and status are views with their own themes.
   `theme::FormTheme` is the shared look of settings sections.
+- Phase 4: the session review as a sub-program (`views/review/`). Its engine calls are
+  effects, and its view only reads. The marker editor is still bridged.
 
 Next:
-- session review and marker editor (engine calls become effects)
+- the marker editor (a component over markers its owner keeps)
 - preferences and the app shell
 - then the DSL

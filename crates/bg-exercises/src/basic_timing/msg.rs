@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use bg_audio::{Recording, SessionId};
 use bg_core::SessionConfig;
+use bg_ui::views::review::{self, ReviewInput};
 use bg_ui::widgets::results::ResultsTab;
-use bg_ui::widgets::session_review::ReviewInput;
 
 use super::model::{BasicTimingData, Frame};
 
@@ -16,7 +16,9 @@ pub enum Msg {
     /// The latest session's recording arrived.
     Recorded(Arc<Recording>),
     /// What the review needs, once the session has fully ended.
-    Review(Box<ReviewInput>),
+    ReviewReady(Box<ReviewInput>),
+    /// For the review (its own messages, routed here).
+    Review(review::Msg),
 
     // From the views.
     /// Start / stop was pressed.

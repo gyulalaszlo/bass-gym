@@ -1,8 +1,8 @@
 //! How Basic chords' model changes. Pure: no egui and no engine.
 
 use bg_ui::kit::Emit;
+use bg_ui::views::review::{self, Review};
 use bg_ui::widgets::results::ResultsTab;
-use bg_ui::widgets::session_review::SessionReview;
 
 use super::data::{BasicChordsData, resolve_progression};
 use super::effects::{Effect, Start};
@@ -60,9 +60,16 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
                 m.capture.set(r);
             }
         }
-        Msg::Review(input) => {
+        Msg::ReviewReady(input) => {
             if m.has_results && m.review.is_none() {
-                m.review = Some(SessionReview::new(*input));
+                m.review = Some(Review::new(*input));
+            }
+        }
+        Msg::Review(msg) => {
+            if let Some(r) = m.review.as_mut() {
+                let mut review_fx = Emit::new();
+                review::update(r, msg, &mut review_fx);
+                fx.extend_map(review_fx, Effect::Review);
             }
         }
         Msg::Transport => {

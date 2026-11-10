@@ -3,6 +3,7 @@
 use bg_audio::AudioEngine;
 use bg_core::{ScoringThresholds, SessionConfig};
 use bg_ui::kit::Emit;
+use bg_ui::views::review;
 
 use super::msg::Msg;
 use crate::timing_session::{SharedTiming, TimingSession};
@@ -10,6 +11,8 @@ use crate::timing_session::{SharedTiming, TimingSession};
 pub enum Effect {
     Start(Box<Start>),
     Stop,
+    /// The review's own effects, routed here.
+    Review(review::Effect),
 }
 
 /// A session to start, recorded.
@@ -28,5 +31,10 @@ pub fn run(effect: Effect, engine: &mut AudioEngine, out: &mut Emit<Msg>) {
             out.send(Msg::Started(id));
         }
         Effect::Stop => engine.stop_session(),
+        Effect::Review(e) => {
+            let mut review_out = Emit::new();
+            review::run(e, engine, &mut review_out);
+            out.extend_map(review_out, Msg::Review);
+        }
     }
 }

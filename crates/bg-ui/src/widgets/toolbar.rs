@@ -198,7 +198,7 @@ impl Toolbar<'_> {
         let ui = &mut *self.ui;
         let space = ui.input(|i| i.key_pressed(egui::Key::Space))
             && !ui.ctx().egui_wants_keyboard_input()
-            && !crate::widgets::results::modal_open(ui.ctx());
+            && !crate::views::results::modal_open(ui.ctx());
         let (text, color) = if running {
             (format!("{}  STOP", icons::STOP), theme::amber())
         } else {

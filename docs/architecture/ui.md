@@ -45,7 +45,7 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 
 1. A struct of borrowed data with `show(&self, ui, height_or_size)` (`Histogram`,
    `Keyboard`), a free fn (`accuracy_timeline`, `groove_editor`), or
-   painting into a given rect via `performance.rs::Indicator`.
+   painting into a given rect via `views/performance.rs::Indicator`.
 2. `ui.allocate_exact_size(...)`, then `ui.painter_at(rect)`, which clips to the rect.
 3. Local `x_of` / `y_of` closures for mapping.
 4. All colours from `theme::*`, tinted with `.gamma_multiply(a)`. Upper-case mono labels.
@@ -53,7 +53,7 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 6. Child buttons use `ui.new_child(UiBuilder::new().max_rect(..))`, because `Ui::put`
    moves the cursor back.
 7. Most interaction is click only (`groove_editor`). `marker_editor` shows drag gestures.
-8. `is_rect_visible` culling appears only in `performance.rs`.
+8. `is_rect_visible` culling appears in `views/performance.rs` and the review rows.
 
 `button.rs::selectable` and `selectable_value` work as tab-like primitives. Both take a
 `button::Theme` through `.theme(&t)`. `.color(c)` is short for
@@ -171,15 +171,18 @@ Culling relies on time-sorted vectors.
   on the first). The live score and the editor header have no lead; `paint_fixed_lead`
   covers their left end with the clef and key while notes scroll behind.
 
-## Results dialog (`bg-ui/src/widgets/results.rs`)
+## Results dialog (`bg-ui/src/views/results/`)
 
 - `results_dialog(ctx, open, title, add)` is an `egui::Modal` with a title, a vertical
   ScrollArea and a Close button. Width clamps to 320-960 pt.
 - It closes on Close, Space, Esc or a click outside. The Space check runs after `add`,
   so content can consume Space first, as `SessionReview` does for play / stop.
 - `modal_open` keeps the toolbar's Space-to-start from firing while it's open.
-- `results(ui, stats, th, tables)` draws summary groups, `accuracy_timeline`, three
-  histograms, the grade and tempo tables, and an exercise-specific `tables` closure.
+- `results_dialog(ctx, &theme.dialog, open, title, tab, add)` is the modal container.
+  The `Stats` view (`results::Props { stats, thresholds, tables }`) draws summary
+  groups, `accuracy_timeline` (`timeline.rs`), three `views::histogram`s, the grade and
+  tempo tables, and an exercise-specific `tables` callback. `block(ui, theme, ..)`
+  captions an exercise's table. All of it reads `results::Theme`.
 - It's called from each exercise's `view/results.rs`. Basic chords' closure adds "Per
   chord" (`view/per_chord.rs`, rows computed in `props.rs::per_chord`). Its HIT and IN
   CHORD columns hide when the preset scores no targets or no chord fit.

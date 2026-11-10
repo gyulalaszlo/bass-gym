@@ -2,13 +2,15 @@
 
 use bg_ui::egui::Color32;
 use bg_ui::theme::{FormTheme, GradeColors, Tokens};
-use bg_ui::views::{beatgrid, review};
+use bg_ui::views::{beatgrid, performance, results, review};
 
 use super::view::{per_chord, status, strip};
 
 pub struct Theme {
     pub grid: beatgrid::Theme,
     pub review: review::Theme,
+    pub results: results::Theme,
+    pub performance: performance::Theme,
     pub status: status::Theme,
     pub strip: strip::Theme,
     pub per_chord: per_chord::Theme,
@@ -41,6 +43,8 @@ impl Theme {
         Self {
             grid: beatgrid::Theme::new(t),
             review: review::Theme::new(t),
+            results: t.into(),
+            performance: t.into(),
             status: status::Theme::new(t),
             strip: strip::Theme::new(t),
             per_chord: per_chord::Theme::new(t),

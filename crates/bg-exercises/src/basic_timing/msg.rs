@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use bg_audio::{Recording, SessionId};
 use bg_core::SessionConfig;
+use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, ReviewInput};
-use bg_ui::widgets::results::ResultsTab;
 
 use super::model::{BasicTimingData, Frame};
 
@@ -39,5 +39,7 @@ pub enum Msg {
     FakeSession {
         recording: Arc<Recording>,
         open_results: bool,
+        /// On the Statistics tab rather than Score + Audio.
+        open_stats: bool,
     },
 }

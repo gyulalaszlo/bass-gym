@@ -4,8 +4,8 @@
 use bg_ui::egui::Ui;
 use bg_ui::kit;
 use bg_ui::views::beatgrid::{self, Beatgrid, LiveScore};
+use bg_ui::views::performance::{self, PerformanceStrip};
 use bg_ui::widgets::keyboard::Keyboard;
-use bg_ui::widgets::performance::performance_strip;
 
 use super::strip::{self, Strip};
 use crate::basic_chords::props;
@@ -42,7 +42,12 @@ pub fn live(p: &props::Live, theme: &Theme, ui: &mut Ui) {
     kit::show::<Strip>(ui, "strip", &strip, &theme.strip);
     ui.add_space(m.strip_gap);
 
-    performance_strip(ui, PERFORMANCE_HEIGHT, &[&p.meter]);
+    let indicators: [&dyn performance::Indicator; 1] = [&p.meter];
+    let strip = performance::Props {
+        height: PERFORMANCE_HEIGHT,
+        indicators: &indicators,
+    };
+    kit::show::<PerformanceStrip>(ui, "performance", &strip, &theme.performance);
     ui.add_space(m.meter_gap);
 
     let grid = beatgrid::Props {

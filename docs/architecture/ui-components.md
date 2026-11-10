@@ -247,6 +247,8 @@ Done:
 
 - Preference pages (`bass-gym/src/pages/`, and Basic chords' page): sections are views
   over their settings struct, and the page glue stores and applies changes.
+- The performance strip, histograms and results dialog (`views/performance.rs`,
+  `views/histogram.rs`, `views/results/`).
 - The app shell (`bass-gym/src/app/`): the sidebar, the preset bar (a component) and
   the preferences page list are views, and the root's `update` carries out their
   messages.
@@ -256,6 +258,7 @@ Still bridged or reading the global theme (migrate as they're touched):
   toolbar gives its owner the state.
 - `session_toolbar` / `session_panel` edit in place, and their callers pass a copy.
 - Display widgets still paint with `theme::*`: `ScoreView`, `Keyboard`, `tuner`,
-  `performance_strip`, `groove_editor`, histograms and the results dialog.
+  `groove_editor`, `waveform`, and the small helpers in `theme.rs` (`caption`,
+  `section`, `title_label`) and `controls.rs`.
 
 Next: the layout / wiring DSL.

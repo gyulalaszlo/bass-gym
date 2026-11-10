@@ -4,8 +4,8 @@
 use bg_core::{ScoringThresholds, SessionConfig};
 use bg_ui::recording::SessionCapture;
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
-use bg_ui::widgets::results::ResultsTab;
 use serde::{Deserialize, Serialize};
 
 use crate::timing_session::SharedTiming;

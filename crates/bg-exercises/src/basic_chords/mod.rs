@@ -255,6 +255,7 @@ impl ExerciseType for BasicChords {
             [Msg::FakeSession {
                 recording: Arc::new(recording),
                 open_results: fake_session::opens_results(),
+                open_stats: fake_session::opens_stats(),
                 seed: start.seed,
             }],
         );

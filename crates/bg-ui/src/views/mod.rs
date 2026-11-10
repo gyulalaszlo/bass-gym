@@ -3,6 +3,9 @@
 //! `update`) when they're big.
 
 pub mod beatgrid;
+pub mod histogram;
 pub mod marker_editor;
+pub mod performance;
+pub mod results;
 pub mod review;
 pub mod tap_tempo;

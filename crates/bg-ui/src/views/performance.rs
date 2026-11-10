@@ -2,10 +2,13 @@
 //! while looking at the instrument. It is a strip of [`Indicator`]s chosen by the
 //! exercise (e.g. timing now, chord-tone compatibility later), side by side.
 
-use bg_core::RecentTiming;
-use egui::{Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, vec2};
+use std::convert::Infallible;
 
-use crate::theme::{self, mono};
+use bg_core::RecentTiming;
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, vec2};
+
+use crate::kit::{Emit, View};
+use crate::theme::{GradeColors, Tokens};
 
 /// Black or white, whichever reads better on `fill`. Leans towards white: black text
 /// is only used on light fills (pale greens / ambers), where white would wash out.
@@ -26,24 +29,81 @@ fn text_on(fill: Color32) -> Color32 {
     }
 }
 
-/// One live indicator in the [`performance_strip`].
+/// One live indicator in the [`PerformanceStrip`]. It gets the strip's theme, which
+/// holds a theme for each kind of indicator.
 pub trait Indicator {
     /// Paints the indicator into `rect`.
-    fn show(&self, ui: &mut Ui, rect: Rect);
+    fn show(&self, ui: &mut Ui, rect: Rect, theme: &Theme);
 }
 
-/// Shows `indicators` side by side across the full width, `height` tall.
-pub fn performance_strip(ui: &mut Ui, height: f32, indicators: &[&dyn Indicator]) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    if indicators.is_empty() || !ui.is_rect_visible(rect) {
-        return;
+/// Indicators side by side across the full width. A tier-1 view.
+pub struct PerformanceStrip;
+
+pub struct Props<'a> {
+    pub height: f32,
+    pub indicators: &'a [&'a dyn Indicator],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Theme {
+    /// Between indicators.
+    pub gap: f32,
+    pub timing: TimingTheme,
+}
+
+/// How the [`TimingMeter`] looks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimingTheme {
+    pub grades: GradeColors,
+    /// The meter before any note, and the tolerance ticks and end labels.
+    pub idle: Color32,
+    pub zero_font: FontId,
+    pub label_font: FontId,
+    /// The last note's pill text is sized by the pill; this scales it with the text.
+    pub text_scale: f32,
+    pub margin: f32,
+    pub label_height: f32,
+}
+
+impl From<&Tokens> for Theme {
+    fn from(t: &Tokens) -> Self {
+        Self {
+            gap: 16.0,
+            timing: TimingTheme {
+                grades: GradeColors::new(t),
+                idle: t.dim(),
+                zero_font: t.mono(12.0),
+                label_font: t.mono(11.0),
+                text_scale: t.text_scale,
+                margin: 4.0,
+                label_height: 16.0,
+            },
+        }
     }
-    let gap = 16.0;
-    let n = indicators.len() as f32;
-    let w = (rect.width() - gap * (n - 1.0)) / n;
-    for (i, ind) in indicators.iter().enumerate() {
-        let left = rect.left() + i as f32 * (w + gap);
-        ind.show(ui, Rect::from_x_y_ranges(left..=left + w, rect.y_range()));
+}
+
+impl View for PerformanceStrip {
+    type Props<'a> = Props<'a>;
+    type Theme = Theme;
+    type Emission = Infallible;
+
+    fn view(p: &Props, theme: &Theme, ui: &mut Ui, _out: &mut Emit<Infallible>) {
+        let size = vec2(ui.available_width(), p.height);
+        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+        if p.indicators.is_empty() || !ui.is_rect_visible(rect) {
+            return;
+        }
+        let gap = theme.gap;
+        let n = p.indicators.len() as f32;
+        let w = (rect.width() - gap * (n - 1.0)) / n;
+        for (i, ind) in p.indicators.iter().enumerate() {
+            let left = rect.left() + i as f32 * (w + gap);
+            ind.show(
+                ui,
+                Rect::from_x_y_ranges(left..=left + w, rect.y_range()),
+                theme,
+            );
+        }
     }
 }
 
@@ -59,14 +119,14 @@ pub struct TimingMeter {
 }
 
 impl Indicator for TimingMeter {
-    fn show(&self, ui: &mut Ui, rect: Rect) {
+    fn show(&self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+        let t = &theme.timing;
         let p = ui.painter_at(rect);
         let last = self.recent.last;
-        let color = last.map_or(theme::dim(), |l| theme::grade_color(l.grade));
+        let color = last.map_or(t.idle, |l| t.grades.get(l.grade));
 
         // Pill on top, scale labels below; all within `rect`.
-        let margin = 4.0;
-        let label_h = 16.0;
+        let (margin, label_h) = (t.margin, t.label_height);
         let pill_h = (rect.height() - 2.0 * margin - label_h).clamp(16.0, 40.0);
         let (x0, x1) = (rect.left() + margin, rect.right() - margin);
         let cx = (x0 + x1) / 2.0;
@@ -82,7 +142,7 @@ impl Indicator for TimingMeter {
         }
         for ms in [self.good_ms, self.ok_ms] {
             for x in [x_of(-ms), x_of(ms)] {
-                p.vline(x, (y - 5.0)..=(y + 5.0), Stroke::new(1.0, theme::dim()));
+                p.vline(x, (y - 5.0)..=(y + 5.0), Stroke::new(1.0, t.idle));
             }
         }
         p.vline(
@@ -95,22 +155,22 @@ impl Indicator for TimingMeter {
             Pos2::new(cx, label_y),
             Align2::CENTER_TOP,
             "0",
-            mono(12.0),
+            t.zero_font.clone(),
             color,
         );
         p.text(
             Pos2::new(x0, label_y),
             Align2::LEFT_TOP,
             format!("EARLY {:.0}", -scale),
-            mono(11.0),
-            theme::dim(),
+            t.label_font.clone(),
+            t.idle,
         );
         p.text(
             Pos2::new(x1, label_y),
             Align2::RIGHT_TOP,
             format!("+{scale:.0} LATE"),
-            mono(11.0),
-            theme::dim(),
+            t.label_font.clone(),
+            t.idle,
         );
 
         // Recent spread.
@@ -130,7 +190,8 @@ impl Indicator for TimingMeter {
             None => ("MISS".to_owned(), cx, false),
         };
         let ink = text_on(color);
-        let galley = p.layout_no_wrap(text, mono(pill_h * 0.5), ink);
+        let font = FontId::monospace(pill_h * 0.5 * t.text_scale);
+        let galley = p.layout_no_wrap(text, font, ink);
         let w = (galley.size().x + pill_h * 0.5).max(pill_h);
         // Room for the off-scale arrow at either end.
         let x = x.clamp(x0 + w / 2.0 + 12.0, x1 - w / 2.0 - 12.0);

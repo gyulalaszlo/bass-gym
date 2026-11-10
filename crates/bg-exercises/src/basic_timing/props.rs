@@ -4,9 +4,9 @@ use std::sync::MutexGuard;
 
 use bg_core::{BarPlan, Matcher, ScoringThresholds, SessionConfig, SessionStats};
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::performance::TimingMeter;
+use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
-use bg_ui::widgets::performance::TimingMeter;
-use bg_ui::widgets::results::ResultsTab;
 
 use super::model::{Model, ViewOptions};
 use super::view::status::Status;

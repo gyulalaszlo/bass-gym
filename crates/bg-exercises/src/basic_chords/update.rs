@@ -1,8 +1,8 @@
 //! How Basic chords' model changes. Pure: no egui and no engine.
 
 use bg_ui::kit::Emit;
+use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, Review};
-use bg_ui::widgets::results::ResultsTab;
 
 use super::data::{BasicChordsData, resolve_progression};
 use super::effects::{Effect, Start};
@@ -133,12 +133,17 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
         Msg::FakeSession {
             recording,
             open_results,
+            open_stats,
             seed,
         } => {
             m.capture.set(recording);
             m.has_results = true;
             m.show_results = open_results;
-            m.results_tab = ResultsTab::Review;
+            m.results_tab = if open_stats {
+                ResultsTab::Stats
+            } else {
+                ResultsTab::Review
+            };
             m.run_seed = Some(seed);
         }
     }

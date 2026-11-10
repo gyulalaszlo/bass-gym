@@ -5,7 +5,7 @@
 use bg_ui::egui::Ui;
 use bg_ui::kit::{self, Emit};
 use bg_ui::views::beatgrid::{self, Beatgrid, LiveScore};
-use bg_ui::widgets::performance::performance_strip;
+use bg_ui::views::performance::{self, PerformanceStrip};
 use bg_ui::widgets::session_panel::session_panel;
 
 use crate::basic_timing::msg::Msg;
@@ -18,7 +18,12 @@ const LANE_HEIGHT: f32 = 102.0;
 
 pub fn live(p: &props::Main, theme: &Theme, ui: &mut Ui) {
     // Live performance, large, above the grid.
-    performance_strip(ui, PERFORMANCE_HEIGHT, &[&p.meter]);
+    let indicators: [&dyn performance::Indicator; 1] = [&p.meter];
+    let strip = performance::Props {
+        height: PERFORMANCE_HEIGHT,
+        indicators: &indicators,
+    };
+    kit::show::<PerformanceStrip>(ui, "performance", &strip, &theme.performance);
     ui.add_space(theme.meter_gap);
 
     let grid = beatgrid::Props {

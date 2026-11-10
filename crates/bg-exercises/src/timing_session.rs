@@ -377,8 +377,8 @@ pub fn timing_meter(
     now: f64,
     bars: u32,
     th: &ScoringThresholds,
-) -> bg_ui::widgets::performance::TimingMeter {
-    bg_ui::widgets::performance::TimingMeter {
+) -> bg_ui::views::performance::TimingMeter {
+    bg_ui::views::performance::TimingMeter {
         recent: if has_results {
             recent_timing(shared, now, bars)
         } else {

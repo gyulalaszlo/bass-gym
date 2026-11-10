@@ -22,6 +22,11 @@ pub fn opens_results() -> bool {
     std::env::var("BASS_GYM_FAKE_SESSION").as_deref() != Ok("grid")
 }
 
+/// `BASS_GYM_FAKE_SESSION=stats` opens the Statistics tab instead of Score + Audio.
+pub fn opens_stats() -> bool {
+    std::env::var("BASS_GYM_FAKE_SESSION").as_deref() == Ok("stats")
+}
+
 /// `base` shortened to a few bars, with a count-in.
 pub fn config(base: &SessionConfig) -> SessionConfig {
     SessionConfig {

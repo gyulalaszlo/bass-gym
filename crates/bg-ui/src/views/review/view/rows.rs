@@ -6,6 +6,11 @@ use bg_core::score::{self, KeySignature, ScoreBar};
 use egui::{Align2, Painter, Rangef, Rect, RichText, Sense, StrokeKind, Ui, vec2};
 
 use super::Props;
+
+/// Generated from `rows.layout.xml`.
+mod xml {
+    include!(concat!(env!("OUT_DIR"), "/layouts/rows.rs"));
+}
 use crate::kit::Emit;
 use crate::views::marker_editor::paint_marker;
 use crate::views::review::theme::Theme;
@@ -54,10 +59,16 @@ pub fn rows(p: &Props, theme: &Theme, ui: &mut Ui, playhead: Option<f64>, out: &
         let row_end = first.start + bar_len * per_row as f64;
         let left = rect.left() + lead;
         let axis = TimeAxis::new(Rangef::new(left, rect.right()), first.start, row_end);
-        let right = axis.x(last.end);
-        let staff = Rect::from_x_y_ranges(rect.left()..=right, rect.top()..=rect.top() + score_h);
-        let wave =
-            Rect::from_x_y_ranges(left..=right, (staff.bottom() + m.note_lane)..=rect.bottom());
+        let row = xml::layout(
+            rect,
+            &xml::ReviewRowInputs {
+                bars_width: axis.x(last.end) - rect.left(),
+                score_height: score_h,
+                note_lane: m.note_lane,
+                lead,
+            },
+        );
+        let (staff, wave) = (row.staff, row.wave);
         let painter = ui.painter_at(rect.expand2(vec2(0.0, 2.0)));
         paint_selection(&painter, p, theme, bars, axis, rect);
         ScoreView {

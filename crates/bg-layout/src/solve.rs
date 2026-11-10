@@ -49,6 +49,24 @@ pub fn solve(root: &Node, rect: Rect, inputs: &dyn Inputs, slots: &mut dyn Slots
     unknown
 }
 
+/// The visible children of a stack, with groups' children in their place.
+fn flatten<'a>(
+    children: &'a [Node],
+    inputs: &dyn Inputs,
+    unknown: &mut Unknown,
+    out: &mut Vec<&'a Node>,
+) {
+    for c in children {
+        if !visible(c, inputs, unknown) {
+            continue;
+        }
+        match &c.kind {
+            Kind::Group { children } => flatten(children, inputs, unknown, out),
+            _ => out.push(c),
+        }
+    }
+}
+
 fn place(n: &Node, rect: Rect, inputs: &dyn Inputs, slots: &mut dyn Slots, unknown: &mut Unknown) {
     if let Some(name) = &n.name
         && !slots.set(name, rect)
@@ -63,10 +81,8 @@ fn place(n: &Node, rect: Rect, inputs: &dyn Inputs, slots: &mut dyn Slots, unkno
     else {
         return;
     };
-    let shown: Vec<&Node> = children
-        .iter()
-        .filter(|c| visible(c, inputs, unknown))
-        .collect();
+    let mut shown = Vec::new();
+    flatten(children, inputs, unknown, &mut shown);
     let spacing = resolve(spacing, inputs, unknown);
     let (start, length) = match axis {
         Axis::Vertical => (rect.top(), rect.height()),
@@ -76,13 +92,17 @@ fn place(n: &Node, rect: Rect, inputs: &dyn Inputs, slots: &mut dyn Slots, unkno
         .iter()
         .map(|c| c.size.as_ref().map_or(0.0, |s| resolve(s, inputs, unknown)))
         .collect();
-    let weights: f32 = shown.iter().map(|c| c.grow).sum();
+    let grow: Vec<f32> = shown
+        .iter()
+        .map(|c| resolve(&c.grow, inputs, unknown))
+        .collect();
+    let weights: f32 = grow.iter().sum();
     let gaps = spacing * shown.len().saturating_sub(1) as f32;
     let free = (length - fixed.iter().sum::<f32>() - gaps).max(0.0);
     let mut at = start;
-    for (c, fixed) in shown.iter().zip(fixed) {
+    for ((c, fixed), grow) in shown.iter().zip(fixed).zip(grow) {
         let share = if weights > 0.0 {
-            free * c.grow / weights
+            free * grow / weights
         } else {
             0.0
         };
@@ -156,6 +176,34 @@ mod tests {
         assert_eq!((p["row"].top(), p["row"].bottom()), (90.0, 100.0));
         assert_eq!((p["l"].left(), p["l"].right()), (0.0, 30.0));
         assert_eq!((p["r"].left(), p["r"].right()), (30.0, 100.0));
+    }
+
+    #[test]
+    fn a_group_shows_and_hides_its_children_together() {
+        let l = parse(
+            r#"<layout name="T"><vstack>
+                 <group visible="band"><gap height="10"/><slot name="b" height="20"/></group>
+                 <slot name="rest" grow="1"/>
+               </vstack></layout>"#,
+        )
+        .unwrap();
+        let mut placed = Placed::default();
+        solve(
+            &l.root,
+            rect(),
+            &Map(HashMap::new(), [("band", true)].into()),
+            &mut placed,
+        );
+        assert_eq!((placed.0["b"].top(), placed.0["rest"].top()), (10.0, 30.0));
+        let mut placed = Placed::default();
+        solve(
+            &l.root,
+            rect(),
+            &Map(HashMap::new(), [("band", false)].into()),
+            &mut placed,
+        );
+        assert!(!placed.0.contains_key("b"));
+        assert_eq!(placed.0["rest"].top(), 0.0);
     }
 
     #[test]

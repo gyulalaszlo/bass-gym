@@ -14,7 +14,7 @@ use crate::theme::{Tokens, section};
 use crate::views::groove_editor::{self, GrooveEditor};
 use crate::widgets::button::selectable;
 use crate::widgets::controls::{checkbox, dropdown, dropdown_value, form_row, number_field};
-use crate::widgets::toolbar::{Chip, Gap, Toolbar};
+use crate::widgets::toolbar::{Chip, Item, Toolbar};
 
 /// How the session controls look.
 #[derive(Clone, Debug, PartialEq)]
@@ -57,38 +57,36 @@ pub fn session_toolbar(
 }
 
 fn toolbar_items(tb: &mut Toolbar, theme: &Theme, cfg: &mut SessionConfig) {
-    tb.tempo(&mut cfg.tempo, &mut cfg.ramp);
-    tb.gap(Gap::Small);
-    tb.time_sig(&mut cfg.time_sig);
-    tb.gap(Gap::Small);
-    tb.key(&mut cfg.key);
-    tb.gap(Gap::Large);
+    tb.at(Item::Tempo, |tb| tb.tempo(&mut cfg.tempo, &mut cfg.ramp));
+    tb.at(Item::TimeSig, |tb| tb.time_sig(&mut cfg.time_sig));
+    tb.at(Item::Key, |tb| tb.key(&mut cfg.key));
     let chips = practice_chips(cfg);
-    if !chips.is_empty() {
-        if tb.chips(&chips) {
-            tb.open_menu("practice_menu");
-        }
-        tb.gap(Gap::Small);
+    if !chips.is_empty() && tb.at(Item::Chips, |tb| tb.chips(&chips)) {
+        tb.open_menu("practice_menu");
     }
     let practice_on =
         cfg.ramp.enabled || cfg.gap.enabled || cfg.auto_stop.enabled || cfg.auto_stop.on_silence;
-    tb.menu(
-        "practice_menu",
-        icons::SLIDERS_HORIZONTAL,
-        "Practice options",
-        practice_on,
-        400.0,
-        |ui| practice_options(ui, theme, cfg),
-    );
-    tb.gap(Gap::Small);
-    tb.menu(
-        "click_menu",
-        icons::METRONOME,
-        "Click",
-        cfg.click.enabled || cfg.groove_click.enabled,
-        360.0,
-        |ui| click_options(ui, cfg),
-    );
+    tb.at(Item::Practice, |tb| {
+        tb.menu(
+            "practice_menu",
+            icons::SLIDERS_HORIZONTAL,
+            "Practice options",
+            practice_on,
+            400.0,
+            |ui| practice_options(ui, theme, cfg),
+        )
+    });
+    let click_on = cfg.click.enabled || cfg.groove_click.enabled;
+    tb.at(Item::Click, |tb| {
+        tb.menu(
+            "click_menu",
+            icons::METRONOME,
+            "Click",
+            click_on,
+            360.0,
+            |ui| click_options(ui, cfg),
+        )
+    });
 }
 
 /// The groove panel: the groove picker and its step editor. A tier-1 view emitting the

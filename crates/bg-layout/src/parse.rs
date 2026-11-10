@@ -50,11 +50,14 @@ fn node(e: &BytesStart) -> Result<Node, ParseError> {
             },
             "slot" => Kind::Slot,
             "gap" => Kind::Gap,
+            "group" => Kind::Group {
+                children: Vec::new(),
+            },
             other => return err(format!("unknown element <{other}>")),
         },
         name: None,
         size: None,
-        grow: 0.0,
+        grow: Size::Points(0.0),
         visible: None,
     };
     for a in e.attributes() {
@@ -72,12 +75,7 @@ fn node(e: &BytesStart) -> Result<Node, ParseError> {
                 n.name = Some(value);
             }
             "height" | "width" => n.size = Some(size(&value)),
-            "grow" => {
-                n.grow = value
-                    .trim()
-                    .parse()
-                    .map_err(|_| ParseError(format!("grow={value:?} isn't a number")))?
-            }
+            "grow" => n.grow = size(&value),
             "spacing" => match &mut n.kind {
                 Kind::Stack { spacing, .. } => *spacing = size(&value),
                 _ => return err(format!("<{tag}> has no spacing")),
@@ -98,12 +96,17 @@ fn node(e: &BytesStart) -> Result<Node, ParseError> {
             other => return err(format!("<{tag}> has no attribute {other:?}")),
         }
     }
-    if let Some(Size::Input(name)) = &n.size
-        && !is_ident(name)
+    for s in [&n.size, &Some(n.grow.clone())].into_iter().flatten() {
+        if let Size::Input(name) = s
+            && !is_ident(name)
+        {
+            return err(format!("{name:?} is neither a number nor an input name"));
+        }
+    }
+    if matches!(n.kind, Kind::Group { .. })
+        && (n.name.is_some() || n.size.is_some() || n.grow != Size::Points(0.0))
     {
-        return err(format!(
-            "size {name:?} is neither a number nor an input name"
-        ));
+        return err("a <group> only wraps: it takes `visible`, no name or size");
     }
     if matches!(n.kind, Kind::Slot) && n.name.is_none() {
         return err("a <slot> needs a name");
@@ -122,7 +125,7 @@ pub fn parse(xml: &str) -> Result<Layout, ParseError> {
     let push = |open: &mut Vec<Node>, root: &mut Option<Node>, n: Node| {
         match open.last_mut() {
             Some(Node {
-                kind: Kind::Stack { children, .. },
+                kind: Kind::Stack { children, .. } | Kind::Group { children },
                 ..
             }) => children.push(n),
             Some(_) => return err("only stacks have children"),
@@ -161,6 +164,9 @@ pub fn parse(xml: &str) -> Result<Layout, ParseError> {
     let Some(root) = root else {
         return err("the layout is empty");
     };
+    if matches!(root.kind, Kind::Group { .. }) {
+        return err("a <group> needs a stack around it");
+    }
     Ok(Layout { name, root })
 }
 
@@ -198,6 +204,25 @@ mod tests {
             })
         );
         assert_eq!(children[2].name.as_deref(), Some("row"));
+    }
+
+    #[test]
+    fn groups_wrap_children_and_take_only_visible() {
+        let l = parse(
+            r#"<layout name="G"><vstack>
+                 <group visible="on"><gap height="1"/><slot name="a" grow="weight"/></group>
+               </vstack></layout>"#,
+        )
+        .unwrap();
+        let Kind::Stack { children, .. } = &l.root.kind else {
+            panic!()
+        };
+        let Kind::Group { children: inner } = &children[0].kind else {
+            panic!()
+        };
+        assert_eq!(inner[1].grow, Size::Input("weight".into()));
+        assert!(parse(r#"<layout name="G"><vstack><group name="x"/></vstack></layout>"#).is_err());
+        assert!(parse(r#"<layout name="G"><group><slot name="a"/></group></layout>"#).is_err());
     }
 
     #[test]

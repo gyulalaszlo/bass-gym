@@ -220,7 +220,11 @@ A component's layout can be an XML file next to its code
     <slot name="staff" height="score_height" visible="show_score"/>
     <vstack name="grid" grow="1">
       <gap height="header" visible="!has_chords"/>
-      ...
+      <group visible="has_chords">
+        <gap height="band_top"/>
+        <slot name="chord_band" height="band_height"/>
+        <gap height="band_gap"/>
+      </group>
       <slot name="lane" grow="1"/>
       <gap height="footer"/>
     </vstack>
@@ -232,9 +236,12 @@ Elements:
 - `<vstack>` / `<hstack>` (with `spacing`).
 - `<slot name>` is a rect the component fills. A named stack is a slot too.
 - `<gap>` is empty space.
+- `<group>` is an invisible wrapper: its children belong to the stack around it, and its
+  `visible` applies to all of them, so related items show and hide together. It takes
+  no name or size.
 
-Along a stack, a child is `height` / `width` points (a number, or an input's name) plus a
-`grow` share of what's left. `visible="flag"` / `"!flag"` hides it: it takes no room and
+Along a stack, a child is `height` / `width` points plus a `grow` share of what's left,
+each a number or an input's name (the toolbar's gap weights come from its theme). `visible="flag"` / `"!flag"` hides it: it takes no room and
 its slot is `None`.
 
 The crate's `build.rs` (`bg_layout::codegen::build("src")`) generates
@@ -252,6 +259,14 @@ changes the generated types. Debug builds reload the file within a quarter of a 
 of a change. A reload that doesn't parse, or that names something the generated types
 don't have, is logged and the last good layout is kept. So sizes, order, gaps and
 visibility can be tuned while the app runs.
+
+Layouts so far:
+- `views/beatgrid/beatgrid.layout.xml`
+- `widgets/toolbar.layout.xml`: the exercise toolbar. Items take the width they measured
+  on the previous frame, placed with `Toolbar::at(Item::..)`. The very first frame is
+  drawn unseen, to measure.
+- `views/review/view/rows.layout.xml`
+- `views/marker_editor/marker_editor.layout.xml`
 
 The DSL only describes the layout tree. Wiring (props, messages, effects) stays in
 Rust, where the compiler checks it.

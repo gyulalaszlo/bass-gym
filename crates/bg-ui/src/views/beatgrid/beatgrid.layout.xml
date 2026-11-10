@@ -8,9 +8,12 @@
     <slot name="staff" height="score_height" visible="show_score"/>
     <vstack name="grid" grow="1">
       <gap height="header" visible="!has_chords"/>
-      <gap height="band_top" visible="has_chords"/>
-      <slot name="chord_band" height="band_height" visible="has_chords"/>
-      <gap height="band_gap" visible="has_chords"/>
+      <!-- The chord band, in the header's place when there are chords. -->
+      <group visible="has_chords">
+        <gap height="band_top"/>
+        <slot name="chord_band" height="band_height"/>
+        <gap height="band_gap"/>
+      </group>
       <slot name="lane" grow="1"/>
       <gap height="footer"/>
     </vstack>

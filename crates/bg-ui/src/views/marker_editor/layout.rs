@@ -3,6 +3,11 @@
 use egui::{Rangef, Rect, Ui};
 
 use super::Props;
+
+/// Generated from `marker_editor.layout.xml`.
+mod xml {
+    include!(concat!(env!("OUT_DIR"), "/layouts/marker_editor.rs"));
+}
 use super::state::{EditorState, Marker, WaveView};
 use super::theme::Theme;
 use crate::widgets::time_axis::TimeAxis;
@@ -35,18 +40,27 @@ pub struct Layout {
     pub rect: Rect,
     pub wave: Rect,
     pub header: Option<Rect>,
+    /// Under the waveform, for the labels.
+    pub labels: Rect,
     pub axis: TimeAxis,
 }
 
 /// `rect` holds a header of `header` points and labels `lane` points tall.
 pub fn layout(rect: Rect, header: f32, lane: f32, span_lane: f32, view: WaveView) -> Layout {
+    let slots = xml::layout(
+        rect,
+        &xml::MarkerEditorInputs {
+            header,
+            has_header: header > 0.0,
+            span_lane,
+            label_lane: lane,
+        },
+    );
     Layout {
         rect,
-        wave: Rect::from_x_y_ranges(
-            rect.x_range(),
-            (rect.top() + header + span_lane)..=(rect.bottom() - lane),
-        ),
-        header: (header > 0.0).then(|| rect.with_max_y(rect.top() + header)),
+        wave: slots.wave,
+        header: slots.header,
+        labels: slots.labels,
         axis: TimeAxis::new(rect.x_range(), view.start, view.end()),
     }
 }

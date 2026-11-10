@@ -1,0 +1,17 @@
+<!--
+  One row of the review: the score, then the waveform below it. Both end where the row's
+  bars end, so a short last row keeps the scale of the full ones; the waveform starts
+  after the clef and key (`lead`). Inputs come from rows.rs.
+-->
+<layout name="ReviewRow">
+  <hstack>
+    <vstack name="bars" width="bars_width">
+      <slot name="staff" height="score_height"/>
+      <gap height="note_lane"/>
+      <hstack grow="1">
+        <gap width="lead"/>
+        <slot name="wave" grow="1"/>
+      </hstack>
+    </vstack>
+  </hstack>
+</layout>

@@ -60,6 +60,11 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 `.theme(&Theme::colored(.., c))`. The
 preferences page list uses them; `.centred()` centres the text.
 
+The toolbar's arrangement is `widgets/toolbar.layout.xml`. Each item runs in its slot
+through `Toolbar::at(Item::Tempo, |tb| ..)`, and its width is measured for the next
+frame's layout. Menu open-state ids hang off the toolbar's root id, so the chips and the
+practice menu (in different slots) share one.
+
 Toolbar menus (`toolbar.rs`): `menu` is an icon button opening a tabbed panel, and
 `menu_labelled` the same with the current value as its label. Time signature and key
 use the latter, with `choice_grid` (equal-width, centred selectables).

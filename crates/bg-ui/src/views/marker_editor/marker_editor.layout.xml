@@ -1,0 +1,13 @@
+<!--
+  The marker editor: an optional header on the waveform's time axis (the review puts the
+  score there), room for span bars, the waveform, then the labels, whose lane grows with
+  the tallest label in view. Inputs come from layout.rs.
+-->
+<layout name="MarkerEditor">
+  <vstack>
+    <slot name="header" height="header" visible="has_header"/>
+    <gap height="span_lane"/>
+    <slot name="wave" grow="1"/>
+    <slot name="labels" height="label_lane"/>
+  </vstack>
+</layout>

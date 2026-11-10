@@ -1,0 +1,39 @@
+<!--
+  The Exercise Control Toolbar, left to right. Items take the width they measured on the
+  previous frame; gaps take their minimum (`small`, `medium`, `large`) plus a share of
+  the free width by weight, so the row always spans the full width. Inputs come from
+  the toolbar's theme and its measurements (toolbar.rs).
+-->
+<layout name="ExerciseToolbar">
+  <hstack>
+    <slot name="transport" width="transport"/>
+    <gap width="small" grow="small_share"/>
+    <slot name="results" width="results"/>
+
+    <!-- The live status, inside a large gap. -->
+    <hstack width="large" grow="large_share">
+      <gap width="medium"/>
+      <slot name="status" grow="1"/>
+      <gap width="medium"/>
+    </hstack>
+
+    <slot name="tap" width="tap"/>
+    <gap width="medium" grow="medium_share"/>
+    <slot name="tempo" width="tempo"/>
+    <gap width="small" grow="small_share"/>
+    <slot name="time_sig" width="time_sig"/>
+    <gap width="small" grow="small_share"/>
+    <slot name="key" width="key"/>
+    <gap width="large" grow="large_share"/>
+
+    <!-- Chips naming the active practice options, only when there are any. -->
+    <group visible="has_chips">
+      <slot name="chips" width="chips"/>
+      <gap width="small" grow="small_share"/>
+    </group>
+
+    <slot name="practice" width="practice"/>
+    <gap width="small" grow="small_share"/>
+    <slot name="click" width="click"/>
+  </hstack>
+</layout>

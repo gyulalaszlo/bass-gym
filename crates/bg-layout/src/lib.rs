@@ -16,8 +16,10 @@
 //! - `<vstack>` / `<hstack>` lay out their children top to bottom / left to right,
 //!   `spacing` apart. A named stack is a slot too.
 //! - `<slot name>` is a rect the component fills. `<gap>` is empty space.
-//! - Along the stack, a child is `height` / `width` points (a number or an input's name)
-//!   plus a `grow` share of what's left. Across it, it fills the stack.
+//! - `<group>` is an invisible wrapper: its children belong to the stack around it, and
+//!   its `visible` applies to all of them, so related items show and hide together.
+//! - Along the stack, a child is `height` / `width` points plus a `grow` share of what's
+//!   left (both a number or an input's name). Across it, it fills the stack.
 //! - `visible="flag"` (or `"!flag"`) hides a child: it takes no room and its slot is
 //!   `None`.
 //!
@@ -67,6 +69,10 @@ pub enum Kind {
     },
     Slot,
     Gap,
+    /// Children spliced into the enclosing stack.
+    Group {
+        children: Vec<Node>,
+    },
 }
 
 /// One element of the layout tree.
@@ -78,7 +84,7 @@ pub struct Node {
     /// Fixed size along the parent stack.
     pub size: Option<Size>,
     /// Share of the parent stack's free space.
-    pub grow: f32,
+    pub grow: Size,
     pub visible: Option<Condition>,
 }
 
@@ -99,7 +105,7 @@ impl Node {
     fn walk_inner(&self, hideable: bool, f: &mut impl FnMut(&Node, bool)) {
         let hideable = hideable || self.visible.is_some();
         f(self, hideable);
-        if let Kind::Stack { children, .. } = &self.kind {
+        if let Kind::Stack { children, .. } | Kind::Group { children } = &self.kind {
             for c in children {
                 c.walk_inner(hideable, f);
             }

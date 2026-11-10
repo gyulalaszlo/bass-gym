@@ -19,7 +19,7 @@ pub fn labels(
     out: &mut Emit<Msg>,
 ) {
     let t = &theme.label;
-    let (rect, top) = (l.rect, l.wave.bottom() + theme.metrics.label_gap);
+    let (rect, top) = (l.rect, l.labels.top() + theme.metrics.label_gap);
     for m in p.markers {
         let x = l.axis.x(m.time);
         if !rect.x_range().contains(x) {

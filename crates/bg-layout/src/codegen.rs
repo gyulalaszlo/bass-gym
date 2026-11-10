@@ -75,8 +75,10 @@ struct Names {
 fn names(root: &Node) -> Names {
     let mut n = Names::default();
     root.walk(&mut |node, hideable| {
-        if let Some(Size::Input(s)) = &node.size {
-            n.sizes.insert(s.clone(), ());
+        for size in [&node.size, &Some(node.grow.clone())].into_iter().flatten() {
+            if let Size::Input(s) = size {
+                n.sizes.insert(s.clone(), ());
+            }
         }
         if let Kind::Stack {
             spacing: Size::Input(s),
@@ -116,7 +118,11 @@ pub fn generate(layout: &Layout, path: &Path) -> String {
         let _ = writeln!(c, "    pub {f}: bool,");
     }
     let _ = writeln!(c, "}}\n");
-    let _ = writeln!(c, "impl ::bg_layout::Inputs for {name}Inputs {{");
+    // A layout without sizes or flags leaves a match with only its fallback.
+    let _ = writeln!(
+        c,
+        "#[allow(clippy::match_single_binding)]\nimpl ::bg_layout::Inputs for {name}Inputs {{"
+    );
     let _ = writeln!(
         c,
         "    fn size(&self, name: &str) -> Option<f32> {{\n        match name {{"

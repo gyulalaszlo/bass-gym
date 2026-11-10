@@ -2,13 +2,16 @@
 //! visible while the exercise scrolls. Exercises fill it through
 //! [`crate::ExerciseType::toolbar`] using the building blocks here, so every exercise
 //! shares the same look: start / stop, tempo, time signature, option menus and a live
-//! status. Items are separated by [`Gap`]s that share out the free width, so the
-//! toolbar always spans the full width with a balanced layout.
+//! status. Where everything goes is `toolbar.layout.xml`: items are placed in their
+//! slots with [`Toolbar::at`], and gaps share out the free width, so the toolbar always
+//! spans the full width with a balanced layout.
 //!
 //! A tier-0 container: its look is a [`Theme`] given to [`show_toolbar`] (the shell
 //! holds it), which every building block reads through the [`Toolbar`].
 
 use std::cell::Cell;
+
+use egui::UiBuilder;
 
 use bg_core::TimeSignature;
 use bg_core::harmony::{Mode, Scale};
@@ -26,8 +29,8 @@ pub struct Theme {
     /// The row, and its buttons.
     pub height: f32,
     pub button_height: f32,
-    /// Each [`Gap`]'s minimum width and its share of the free width (Small, Medium,
-    /// Large).
+    /// The small, medium and large gaps' minimum widths and their shares of the free
+    /// width (see `toolbar.layout.xml`).
     pub gaps: [(f32, f32); 3],
     /// Space between the items of a status shown in a gap.
     pub status_spacing: f32,
@@ -107,12 +110,6 @@ impl From<&Tokens> for Theme {
     }
 }
 
-impl Theme {
-    fn gap(&self, gap: Gap) -> (f32, f32) {
-        self.gaps[gap as usize]
-    }
-}
-
 /// A chip for [`Toolbar::chips`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chip {
@@ -123,76 +120,148 @@ pub struct Chip {
     pub tooltip: String,
 }
 
-/// Space between toolbar items. Each gap has a minimum width and takes a share of the
-/// free width in proportion to its weight.
+/// Generated from `toolbar.layout.xml`.
+mod xml {
+    include!(concat!(env!("OUT_DIR"), "/layouts/toolbar.rs"));
+}
+use xml::{ExerciseToolbarInputs, ExerciseToolbarSlots};
+
+/// A place in the toolbar (see `toolbar.layout.xml`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Gap {
-    Small,
-    Medium,
-    Large,
+pub enum Item {
+    Transport,
+    Results,
+    /// The live status, in the space between the results and the settings.
+    Status,
+    Tap,
+    Tempo,
+    TimeSig,
+    Key,
+    /// Shown only when there are chips; a frame late when they appear.
+    Chips,
+    Practice,
+    Click,
 }
 
-/// Gap bookkeeping for one frame.
-#[derive(Default)]
-struct GapTally {
-    /// Width taken by gaps so far.
-    width: Cell<f32>,
-    min: Cell<f32>,
-    weight: Cell<f32>,
+/// The items' widths, as measured on a frame (`None`: not shown).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Widths {
+    transport: f32,
+    results: f32,
+    tap: f32,
+    tempo: f32,
+    time_sig: f32,
+    key: f32,
+    chips: Option<f32>,
+    practice: f32,
+    click: f32,
 }
 
-/// Layout measured on the previous frame: items' width, sum of gap minimums and weights.
-#[derive(Clone, Copy, Default)]
-struct Measured {
-    items: f32,
-    min: f32,
-    weight: f32,
+impl Widths {
+    fn set(&mut self, item: Item, w: f32) {
+        match item {
+            Item::Transport => self.transport = w,
+            Item::Results => self.results = w,
+            Item::Status => {}
+            Item::Tap => self.tap = w,
+            Item::Tempo => self.tempo = w,
+            Item::TimeSig => self.time_sig = w,
+            Item::Key => self.key = w,
+            Item::Chips => self.chips = Some(w),
+            Item::Practice => self.practice = w,
+            Item::Click => self.click = w,
+        }
+    }
+
+    /// Close enough not to lay out again.
+    fn same(&self, o: &Widths) -> bool {
+        let close = |a: f32, b: f32| (a - b).abs() <= 0.5;
+        close(self.transport, o.transport)
+            && close(self.results, o.results)
+            && close(self.tap, o.tap)
+            && close(self.tempo, o.tempo)
+            && close(self.time_sig, o.time_sig)
+            && close(self.key, o.key)
+            && self.chips.is_some() == o.chips.is_some()
+            && close(self.chips.unwrap_or(0.0), o.chips.unwrap_or(0.0))
+            && close(self.practice, o.practice)
+            && close(self.click, o.click)
+    }
+
+    fn inputs(&self, t: &Theme) -> ExerciseToolbarInputs {
+        let [
+            (small, small_share),
+            (medium, medium_share),
+            (large, large_share),
+        ] = t.gaps;
+        ExerciseToolbarInputs {
+            transport: self.transport,
+            results: self.results,
+            tap: self.tap,
+            tempo: self.tempo,
+            time_sig: self.time_sig,
+            key: self.key,
+            chips: self.chips.unwrap_or(0.0),
+            has_chips: self.chips.is_some(),
+            practice: self.practice,
+            click: self.click,
+            small,
+            small_share,
+            medium,
+            medium_share,
+            large,
+            large_share,
+        }
+    }
+}
+
+fn slot(slots: &ExerciseToolbarSlots, item: Item) -> Option<Rect> {
+    match item {
+        Item::Transport => Some(slots.transport),
+        Item::Results => Some(slots.results),
+        Item::Status => Some(slots.status),
+        Item::Tap => Some(slots.tap),
+        Item::Tempo => Some(slots.tempo),
+        Item::TimeSig => Some(slots.time_sig),
+        Item::Key => Some(slots.key),
+        Item::Chips => slots.chips,
+        Item::Practice => Some(slots.practice),
+        Item::Click => Some(slots.click),
+    }
 }
 
 pub struct Toolbar<'a> {
     ui: &'a mut Ui,
     theme: &'a Theme,
-    tally: &'a GapTally,
-    /// Free width to share between the gaps (from the previous frame).
-    extra: f32,
-    weights: f32,
+    slots: &'a ExerciseToolbarSlots,
+    /// What this frame's items measured, for the next frame's layout.
+    measured: &'a Cell<Widths>,
+    /// Ids that must be the same wherever in the toolbar they're used (menus).
+    root: egui::Id,
+    /// Nothing is measured yet (the first frame): items are drawn unseen, to measure.
+    unmeasured: bool,
 }
 
 /// Shows the toolbar across the full width.
 pub fn show_toolbar<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Toolbar) -> R) -> R {
     let width = ui.available_width();
     let id = ui.id().with("exercise_toolbar");
-    let last: Measured = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-    let tally = GapTally::default();
-    let (r, now) = ui
-        .allocate_ui_with_layout(
-            vec2(width, theme.height),
-            Layout::left_to_right(Align::Center),
-            |ui| {
-                ui.set_min_size(vec2(width, theme.height));
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let left = ui.cursor().left();
-                let extra = (width - last.items - last.min).max(0.0);
-                let r = add(&mut Toolbar {
-                    ui,
-                    theme,
-                    tally: &tally,
-                    extra,
-                    weights: last.weight,
-                });
-                let used = ui.cursor().left() - left;
-                (
-                    r,
-                    Measured {
-                        items: used - tally.width.get(),
-                        min: tally.min.get(),
-                        weight: tally.weight.get(),
-                    },
-                )
-            },
-        )
-        .inner;
-    if (now.items - last.items).abs() > 0.5 || now.weight != last.weight || now.min != last.min {
+    let last: Option<Widths> = ui.data(|d| d.get_temp(id));
+    let unmeasured = last.is_none();
+    let last = last.unwrap_or_default();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, theme.height), egui::Sense::hover());
+    let slots = xml::layout(rect, &last.inputs(theme));
+    let measured = Cell::new(Widths::default());
+    let r = add(&mut Toolbar {
+        ui,
+        theme,
+        slots: &slots,
+        measured: &measured,
+        root: id,
+        unmeasured,
+    });
+    let now = measured.get();
+    if unmeasured || !now.same(&last) {
         ui.data_mut(|d| d.insert_temp(id, now));
         ui.ctx().request_repaint();
     }
@@ -205,69 +274,64 @@ impl Toolbar<'_> {
         self.theme
     }
 
-    fn gap_width(&self, gap: Gap) -> f32 {
-        let (min, weight) = self.theme.gap(gap);
-        let share = if self.weights > 0.0 {
-            self.extra * weight / self.weights
+    /// Shows `add` in `item`'s place, and measures it for the next frame. An item
+    /// without a place yet (chips that just appeared) is measured unseen.
+    pub fn at<R>(&mut self, item: Item, add: impl FnOnce(&mut Toolbar) -> R) -> R {
+        let place = slot(self.slots, item);
+        let rect = place.unwrap_or_else(|| {
+            Rect::from_min_size(self.ui.max_rect().min, vec2(0.0, self.theme.height))
+        });
+        let mut builder = UiBuilder::new()
+            .max_rect(rect)
+            .layout(Layout::left_to_right(Align::Center));
+        if place.is_none() || self.unmeasured {
+            builder = builder.invisible();
+        }
+        let mut child = self.ui.new_child(builder);
+        if item == Item::Status {
+            // The status is clipped to its space and never changes the layout.
+            child.set_clip_rect(rect.intersect(self.ui.clip_rect()));
+            child.spacing_mut().item_spacing.x = self.theme.status_spacing;
         } else {
-            0.0
-        };
-        min + share
+            child.spacing_mut().item_spacing.x = 0.0;
+        }
+        let r = add(&mut Toolbar {
+            ui: &mut child,
+            theme: self.theme,
+            slots: self.slots,
+            measured: self.measured,
+            root: self.root,
+            unmeasured: self.unmeasured,
+        });
+        let mut w = self.measured.get();
+        w.set(item, child.min_rect().width());
+        self.measured.set(w);
+        r
     }
 
-    fn tally(&self, gap: Gap, w: f32) {
-        let (min, weight) = self.theme.gap(gap);
-        let t = self.tally;
-        t.width.set(t.width.get() + w);
-        t.min.set(t.min.get() + min);
-        t.weight.set(t.weight.get() + weight);
-    }
-
-    /// Space between two items.
-    pub fn gap(&mut self, gap: Gap) {
-        let w = self.gap_width(gap);
-        self.ui.add_space(w);
-        self.tally(gap, w);
-    }
-
-    /// A gap that shows something in its space (left-aligned, clipped to the gap), e.g.
-    /// the live status. Its contents don't change the layout.
-    pub fn gap_with<R>(&mut self, gap: Gap, add: impl FnOnce(&mut Ui) -> R) -> R {
-        let w = self.gap_width(gap);
-        let (rect, _) = self
-            .ui
-            .allocate_exact_size(vec2(w, self.theme.height), egui::Sense::hover());
-        self.tally(gap, w);
-        let inner = rect.shrink2(vec2(self.theme.gap(Gap::Medium).0, 0.0));
-        let mut child = self.ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(inner)
-                .layout(Layout::left_to_right(Align::Center)),
-        );
-        child.set_clip_rect(inner.intersect(self.ui.clip_rect()));
-        child.spacing_mut().item_spacing.x = self.theme.status_spacing;
-        add(&mut child)
-    }
-
-    /// The underlying row, for exercise-specific controls.
+    /// The underlying `Ui` (an item's, inside [`Toolbar::at`]), for exercise-specific
+    /// controls.
     pub fn ui(&mut self) -> &mut Ui {
         self.ui
     }
 
     /// A group of items, enabled or not (e.g. settings are locked while a session runs).
     pub fn group<R>(&mut self, enabled: bool, add: impl FnOnce(&mut Toolbar) -> R) -> R {
-        let (theme, tally, extra, weights) = (self.theme, self.tally, self.extra, self.weights);
-        self.ui
-            .add_enabled_ui(enabled, |ui| {
-                add(&mut Toolbar {
-                    ui,
-                    theme,
-                    tally,
-                    extra,
-                    weights,
-                })
-            })
-            .inner
+        // Items are placed in their slots, so the group allocates nothing itself.
+        let mut ui = self
+            .ui
+            .new_child(UiBuilder::new().max_rect(self.ui.max_rect()));
+        if !enabled {
+            ui.disable();
+        }
+        add(&mut Toolbar {
+            ui: &mut ui,
+            theme: self.theme,
+            slots: self.slots,
+            measured: self.measured,
+            root: self.root,
+            unmeasured: self.unmeasured,
+        })
     }
 
     /// The boxed start / stop button. Also answers the Space key. Returns true when the
@@ -414,7 +478,7 @@ impl Toolbar<'_> {
 
     /// Opens the [`Toolbar::menu`] with this `id_salt` (call before drawing the menu).
     pub fn open_menu(&mut self, id_salt: &str) {
-        let id = self.ui.make_persistent_id(id_salt);
+        let id = self.root.with(id_salt);
         self.ui.data_mut(|d| d.insert_temp(id, true));
     }
 
@@ -512,7 +576,7 @@ impl Toolbar<'_> {
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<R> {
         let (ui, t) = (&mut *self.ui, self.theme);
-        let id = ui.make_persistent_id(id_salt);
+        let id = self.root.with(id_salt);
         let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
         let color = if !ui.is_enabled() {
             t.dim

@@ -1,7 +1,5 @@
 pub mod button;
 pub mod controls;
-pub mod groove_editor;
-pub mod keyboard;
 pub mod score;
 pub mod session_panel;
 pub mod time_axis;

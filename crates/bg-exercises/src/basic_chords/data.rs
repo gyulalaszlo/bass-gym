@@ -2,7 +2,7 @@
 
 use bg_core::harmony::{self, Chord};
 use bg_core::{BarPlan, Matcher, SessionConfig};
-use bg_ui::widgets::keyboard::KeyLabels;
+use bg_ui::views::keyboard::KeyLabels;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};

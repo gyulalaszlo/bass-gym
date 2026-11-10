@@ -43,8 +43,7 @@ aren't migrated yet.
 Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line in
 `widgets/mod.rs`.
 
-1. A struct of borrowed data with `show(&self, ui, height_or_size)` (`Histogram`,
-   `Keyboard`), a free fn (`accuracy_timeline`, `groove_editor`), or
+1. A free fn (`theme::section`, `tuner`), or
    painting into a given rect via `views/performance.rs::Indicator`.
 2. `ui.allocate_exact_size(...)`, then `ui.painter_at(rect)`, which clips to the rect.
 3. Local `x_of` / `y_of` closures for mapping.
@@ -52,7 +51,8 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 5. Hover details through `resp.on_hover_ui_at_pointer`.
 6. Child buttons use `ui.new_child(UiBuilder::new().max_rect(..))`, because `Ui::put`
    moves the cursor back.
-7. Most interaction is click only (`groove_editor`). `marker_editor` shows drag gestures.
+7. Most interaction is click only (`views/groove_editor.rs`). `views/marker_editor/` shows
+   drag gestures.
 8. `is_rect_visible` culling appears in `views/performance.rs` and the review rows.
 
 `button.rs::selectable` and `selectable_value` work as tab-like primitives. Both take a

@@ -2,7 +2,7 @@
 
 use bg_ui::egui::Color32;
 use bg_ui::theme::{FormTheme, GradeColors, Tokens};
-use bg_ui::views::{beatgrid, performance, results, review};
+use bg_ui::views::{beatgrid, keyboard, performance, results, review};
 
 use super::view::{per_chord, status, strip};
 
@@ -10,6 +10,7 @@ pub struct Theme {
     pub grid: beatgrid::Theme,
     pub review: review::Theme,
     pub results: results::Theme,
+    pub keyboard: keyboard::Theme,
     pub performance: performance::Theme,
     pub status: status::Theme,
     pub strip: strip::Theme,
@@ -44,6 +45,7 @@ impl Theme {
             grid: beatgrid::Theme::new(t),
             review: review::Theme::new(t),
             results: t.into(),
+            keyboard: t.into(),
             performance: t.into(),
             status: status::Theme::new(t),
             strip: strip::Theme::new(t),

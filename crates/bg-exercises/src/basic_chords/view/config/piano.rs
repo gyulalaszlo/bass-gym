@@ -5,9 +5,9 @@ use bg_core::harmony::{self, comp};
 use bg_ui::egui::{self, RichText, Ui};
 use bg_ui::kit::{Emit, View, edited, field};
 use bg_ui::theme::FormTheme;
+use bg_ui::views::keyboard::{self, KeyLabels};
 use bg_ui::widgets::button::selectable_value;
 use bg_ui::widgets::controls::{checkbox, dropdown, dropdown_value, slider_field};
-use bg_ui::widgets::keyboard::{self, KeyLabels};
 
 use crate::basic_chords::data::KeyboardOptions;
 

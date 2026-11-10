@@ -4,8 +4,8 @@
 use bg_ui::egui::Ui;
 use bg_ui::kit;
 use bg_ui::views::beatgrid::{self, Beatgrid, LiveScore};
+use bg_ui::views::keyboard::{self, Keyboard};
 use bg_ui::views::performance::{self, PerformanceStrip};
-use bg_ui::widgets::keyboard::Keyboard;
 
 use super::strip::{self, Strip};
 use crate::basic_chords::props;
@@ -20,19 +20,18 @@ pub fn live(p: &props::Live, theme: &Theme, ui: &mut Ui) {
     let m = &theme.metrics;
     ui.add_space(m.top_gap);
     let k = &p.keyboard;
-    // `Keyboard` isn't migrated yet: it reads the global theme for everything else.
     let bass = k.bass.map(|(midi, grade)| {
         let color = grade.map_or(theme.bass_unjudged, |g| theme.bass.get(g));
         (midi, color)
     });
-    Keyboard {
+    let props = keyboard::Props {
         keys: k.keys,
         active: &k.active,
         ghost: &k.ghost,
         bass,
         labels: k.labels,
-    }
-    .show(ui);
+    };
+    kit::show::<Keyboard>(ui, "keyboard", &props, &theme.keyboard);
     ui.add_space(m.keyboard_gap);
 
     let strip = strip::Props {

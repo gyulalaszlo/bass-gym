@@ -7,10 +7,11 @@ use bg_core::session::{ClickDensity, Span, StopCondition, TempoRamp, Trigger};
 use egui::{RichText, Slider, Ui};
 
 use crate::icons;
+use crate::kit;
 use crate::theme::{self, mono, section};
+use crate::views::groove_editor::{self, GrooveEditor};
 use crate::widgets::button::selectable;
 use crate::widgets::controls::{checkbox, dropdown, dropdown_value, form_row, number_field};
-use crate::widgets::groove_editor::groove_editor;
 use crate::widgets::toolbar::{Chip, Gap, Toolbar};
 
 /// Adds the session settings to the toolbar: tap, BPM, time signature and the practice
@@ -340,7 +341,15 @@ fn groove(ui: &mut Ui, cfg: &mut SessionConfig) {
         checkbox(ui, &mut cfg.score_length, "Score note length")
             .on_hover_text("Off: hold notes as long as you like");
     });
-    groove_editor(ui, &mut cfg.groove, cfg.time_sig);
+    // Not migrated: the panel edits in place, so it applies the editor's emission here.
+    let props = groove_editor::Props {
+        groove: &cfg.groove,
+        sig: cfg.time_sig,
+    };
+    let theme = groove_editor::Theme::from(&theme::tokens());
+    if let Some(g) = kit::show::<GrooveEditor>(ui, "groove", &props, &theme).pop() {
+        cfg.groove = g;
+    }
 }
 
 // ---------------------------------------------------------------------------------------

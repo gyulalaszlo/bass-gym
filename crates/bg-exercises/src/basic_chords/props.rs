@@ -9,10 +9,10 @@ use bg_core::score::ScoreChord;
 use bg_core::scoring::harmony_grade;
 use bg_core::{BarPlan, Grade, Matcher, ScoringThresholds, SessionConfig, SessionStats};
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::keyboard::KeyLabels;
 use bg_ui::views::performance::TimingMeter;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
-use bg_ui::widgets::keyboard::KeyLabels;
 
 use super::accompaniment::{ChordShared, lock_chords};
 use super::data::{BasicChordsData, resolve_progression};

@@ -3,7 +3,9 @@
 //! `update`) when they're big.
 
 pub mod beatgrid;
+pub mod groove_editor;
 pub mod histogram;
+pub mod keyboard;
 pub mod marker_editor;
 pub mod performance;
 pub mod results;

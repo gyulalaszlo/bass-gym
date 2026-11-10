@@ -6,6 +6,7 @@ use super::effects::Effect;
 use super::model::{Export, Review};
 use super::msg::Msg;
 use crate::kit::Emit;
+use crate::views::marker_editor::{self, Emission};
 
 /// Starts a replay of `from..to` with the current options.
 fn start(r: &Review, from: f64, to: f64, fx: &mut Emit<Effect>) {
@@ -103,11 +104,16 @@ pub fn update(r: &mut Review, msg: Msg, fx: &mut Emit<Effect>) {
             }
         }
         Msg::Revealed => r.reveal = None,
-        Msg::Editor(change) => {
-            if r.editor.is_some() {
-                r.markers = change.markers;
-                r.editor = Some(change.state);
-                r.next_marker = change.next_marker;
+        Msg::Editor(msg) => {
+            if let Some(editor) = r.editor.as_mut() {
+                let mut edits = Emit::new();
+                marker_editor::update(editor, msg, &mut edits);
+                for e in edits {
+                    if let Emission::Add(m) = &e {
+                        r.next_marker = r.next_marker.max(m.id);
+                    }
+                    marker_editor::apply(&mut r.markers, e);
+                }
             }
         }
         Msg::ReportTitle(t) => r.report_title = t,

@@ -6,7 +6,7 @@ use std::sync::mpsc::Receiver;
 use bg_audio::ReplayHandle;
 use bg_report::Exported;
 
-use crate::widgets::marker_editor::{EditorState, Marker};
+use crate::views::marker_editor;
 
 pub enum Msg {
     // From `sync` and the owner.
@@ -41,9 +41,8 @@ pub enum Msg {
     BackToScore,
     /// The score scrolled to the time asked for.
     Revealed,
-    /// The marker editor's markers and state after this frame (it edits in place, not
-    /// migrated yet: it gets copies).
-    Editor(Box<EditorChange>),
+    /// For the marker editor (its own messages, routed here).
+    Editor(marker_editor::Msg),
     ReportTitle(String),
     ReportNotes(String),
     /// Export the selected bars as a report into this data folder.
@@ -55,11 +54,4 @@ pub enum Msg {
     // From effects.
     ReplayStarted(ReplayHandle),
     ExportRunning(Receiver<Result<Exported, String>>),
-}
-
-#[derive(Clone, PartialEq)]
-pub struct EditorChange {
-    pub markers: Vec<Marker>,
-    pub state: EditorState,
-    pub next_marker: u64,
 }

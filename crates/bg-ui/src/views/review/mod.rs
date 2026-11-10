@@ -29,7 +29,7 @@ use std::sync::Arc;
 use crate::exercise::ExerciseCtx;
 use crate::settings::{ANALYSIS, AUDIO, SOUNDS};
 use crate::theme::{GradeColors, tokens};
-use crate::widgets::marker_editor::{Line, Marker};
+use crate::views::marker_editor::{Line, Marker};
 use crate::widgets::time_axis::TimeAxis;
 use crate::widgets::waveform::PeakSource;
 

@@ -204,11 +204,16 @@ a component, because only a program runs effects. It's a **sub-program** instead
 goes to `review::run`, and the owner calls `review::sync` before showing it. Here a
 child's `Msg` does pass through its parent, because the parent has to route its effects.
 
+The same goes for a component inside a program's view, since program views only read:
+the program shows it with the component's plain `view` function and routes its `Msg` to
+the component's `update`. That's why a component's `update` shouldn't need props when it
+can be avoided (the marker editor's doesn't). Emissions are then applied by the owner,
+e.g. `marker_editor::apply`.
+
 Bridges, while children aren't migrated:
 - Widgets that edit in place (`session_toolbar`, `session_panel`) get a copy of the
   value. If they report a change, the copy is sent as a message.
-- `views/review/view/editor.rs` runs `MarkerEditor`, which edits in place, on copies
-  (`kit::edited`).
+- (The marker editor used to be bridged like this. It's now a component.)
 
 ## Testing
 
@@ -218,7 +223,8 @@ Bridges, while children aren't migrated:
   `click`, `double_click`, `drag`, `type_text` and `wait`. The UI function is a
   `&mut dyn FnMut(&mut Ui)`; use `Cell` / `RefCell` for anything the test reads
   between calls (`kit/field.rs` tests).
-- `marker_editor.rs` still has its own older `Rig`.
+- To test a component the way its owner runs it, apply its messages and emissions each
+  frame (`views/marker_editor/tests.rs`).
 
 ## Migration status
 
@@ -235,9 +241,10 @@ Done:
   `kit::edited`. The strip, per-chord table and status are views with their own themes.
   `theme::FormTheme` is the shared look of settings sections.
 - Phase 4: the session review as a sub-program (`views/review/`). Its engine calls are
-  effects, and its view only reads. The marker editor is still bridged.
+  effects, and its view only reads.
+- The marker editor as a tier-2 component (`views/marker_editor/`), routed through the
+  review.
 
 Next:
-- the marker editor (a component over markers its owner keeps)
 - preferences and the app shell
 - then the DSL

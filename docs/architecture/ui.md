@@ -147,10 +147,15 @@ Culling relies on time-sorted vectors.
   extreme line metrics; font size is four staff spaces.
 - `widgets/waveform.rs` paints any `PeakSource` with auto vertical zoom and an optional
   log scale.
-- `widgets/marker_editor.rs::MarkerEditor` is generic: it takes a `PeakSource`, read-only
-  overlays, editable `Marker`s, a snap function and a `new_marker` closure, and holds no
-  session types. `add_remove: false` fixes the marker set, for loop points. The owner
-  keeps `EditorState`. It's the first widget using `Sense::drag`.
+- `views/marker_editor/` is a generic tier-2 component: it takes a `PeakSource`,
+  read-only overlays, the owner's `Marker`s, a snap function and a `new_marker` factory,
+  and holds no session types. `add_remove: false` fixes the marker set, for loop points.
+  The owner keeps `EditorState` and the markers. The editor emits `Add` / `Move` /
+  `Remove` / `Relabel`, which `apply` makes to a `Vec`. Its `update` needs no props, so
+  the review (a sub-program) routes its messages through `review::Msg::Editor`.
+- `input.rs` reads egui into a plain `Input`, and `interpret` (pure, tested) turns it into
+  messages, following the gesture and selection within the frame (a drag can start and
+  move in one). Keep `Response` calls outside `ui.input(..)`: both lock the context.
 - Editor drags work like Ableton: `WaveView::navigate` keeps the point where the drag
   began under the pointer while vertical movement zooms (down zooms in). Labels wrap and
   grow, and the area under the waveform grows with the tallest one in view.
@@ -246,6 +251,6 @@ set -> `ctx.engine.set_x()` pattern that `LatencyPage` uses.
 
 There are no snapshot tests. Use the `BASS_GYM_*` variables in
 [README.md](README.md) to take a screenshot. For interaction, `kit::Rig` runs UI code in a
-real `egui::Context` fed with input events (`marker_editor.rs` still has its own older
-`Rig`). Run the binary directly rather than through `cargo run` with `HOME` changed,
+real `egui::Context` fed with input events. `views/marker_editor/tests.rs` shows a
+harness that applies messages each frame as an owner would. Run the binary directly rather than through `cargo run` with `HOME` changed,
 because rustup reads its toolchain from `HOME`.

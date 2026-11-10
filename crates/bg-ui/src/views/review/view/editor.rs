@@ -1,20 +1,16 @@
-//! The marker editor around a time, with the score above the waveform.
-//!
-//! **Bridge**: `MarkerEditor` isn't migrated yet and edits markers and its state in
-//! place, so it works on copies, and any change is sent as [`Msg::Editor`].
+//! The marker editor around a time, with the score above the waveform. The editor's
+//! messages go through the review (`Msg::Editor`), which keeps its state and markers.
 
 use bg_core::score::KeySignature;
 use egui::{Painter, Rect, RichText, Ui};
 
 use super::Props;
 use crate::icons;
-use crate::kit::{Emit, edited};
-use crate::theme;
-use crate::views::review::msg::EditorChange;
+use crate::kit::Emit;
+use crate::views::marker_editor::{self, Header, Line, Marker};
 use crate::views::review::theme::Theme;
 use crate::views::review::{Msg, RecordingPeaks};
 use crate::widgets::button::button;
-use crate::widgets::marker_editor::{Header, Line, Marker, MarkerEditor};
 use crate::widgets::score::{ScoreView, StaffLayout, paint_fixed_lead};
 use crate::widgets::time_axis::TimeAxis;
 
@@ -60,42 +56,30 @@ pub fn editor(p: &Props, theme: &Theme, ui: &mut Ui, playhead: Option<f64>, out:
         .paint(painter, rect);
         paint_fixed_lead(painter, rect, layout, key);
     };
-    let before = EditorChange {
-        markers: r.markers.clone(),
-        state: state.clone(),
-        next_marker: r.next_marker,
+    let id = r.next_marker + 1;
+    let new_marker = |time| Marker {
+        id,
+        time,
+        end: None,
+        label: String::new(),
+        color: theme.new_marker,
+        line: Line::Solid,
     };
-    let change = edited(&before, |c| {
-        let next = &mut c.next_marker;
-        let mut new_marker = |time| {
-            *next += 1;
-            Marker {
-                id: *next,
-                time,
-                end: None,
-                label: String::new(),
-                // `MarkerEditor` still reads the global theme.
-                color: theme::cyan(),
-                line: Line::Solid,
-            }
-        };
-        MarkerEditor {
-            header: Some(Header {
-                height: layout.height(),
-                paint: &paint_score,
-            }),
-            source: &RecordingPeaks(&r.input.recording),
-            overlays: &r.overlays,
-            markers: &mut c.markers,
-            state: &mut c.state,
-            snap: &|t| t,
-            add_remove: true,
-            new_marker: &mut new_marker,
-            playhead,
-        }
-        .show(ui, theme.metrics.editor_height);
-    });
-    if let Some(c) = change {
-        out.send(Msg::Editor(Box::new(c)));
-    }
+    let props = marker_editor::Props {
+        header: Some(Header {
+            height: layout.height(),
+            paint: &paint_score,
+        }),
+        source: &RecordingPeaks(&r.input.recording),
+        overlays: &r.overlays,
+        markers: &r.markers,
+        snap: &|t| t,
+        add_remove: true,
+        new_marker: &new_marker,
+        playhead,
+        height: theme.metrics.editor_height,
+    };
+    let mut msgs = Emit::new();
+    marker_editor::view(state, &props, &theme.editor, ui, &mut msgs);
+    out.extend_map(msgs, Msg::Editor);
 }

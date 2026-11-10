@@ -7,9 +7,9 @@ use egui::{Align2, Painter, Rangef, Rect, RichText, Sense, StrokeKind, Ui, vec2}
 
 use super::Props;
 use crate::kit::Emit;
+use crate::views::marker_editor::paint_marker;
 use crate::views::review::theme::Theme;
 use crate::views::review::{Msg, RecordingPeaks, click_start};
-use crate::widgets::marker_editor::paint_marker;
 use crate::widgets::score::{Lead, ScoreView, lead_width};
 use crate::widgets::time_axis::TimeAxis;
 use crate::widgets::waveform::{self, WaveStyle};
@@ -148,11 +148,11 @@ fn paint_wave(
     for m in &r.overlays {
         let end = m.end.unwrap_or(m.time);
         if end >= from && m.time < to && m.label.is_empty() {
-            paint_marker(painter, axis, m, row, wave);
+            paint_marker(painter, &theme.editor.marker, axis, m, row, wave);
         }
     }
     for m in r.markers.iter().filter(|m| (from..to).contains(&m.time)) {
-        paint_marker(painter, axis, m, row, wave);
+        paint_marker(painter, &theme.editor.marker, axis, m, row, wave);
     }
 }
 

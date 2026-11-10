@@ -3,5 +3,6 @@
 //! `update`) when they're big.
 
 pub mod beatgrid;
+pub mod marker_editor;
 pub mod review;
 pub mod tap_tempo;

@@ -11,7 +11,7 @@ use bg_report::{Annotation, Exported, ReportInput};
 
 use super::{ReviewInput, overlays};
 use crate::theme;
-use crate::widgets::marker_editor::{EditorState, Line, Marker, WaveView};
+use crate::views::marker_editor::{EditorState, Line, Marker, WaveView};
 use crate::widgets::score::StaffLayout;
 
 /// Seconds shown either side of a click when opening the marker editor.

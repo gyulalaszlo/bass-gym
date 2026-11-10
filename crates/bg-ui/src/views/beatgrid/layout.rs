@@ -1,10 +1,18 @@
 //! Where everything in the beat grid goes. Pure: no painting and no input.
+//!
+//! The rects come from `beatgrid.layout.xml` (see `bg_layout`): this file fills in the
+//! inputs it names, and derives the time axis and the note lane's lines from its slots.
 
 use egui::{Rect, Vec2, vec2};
 
 use super::{Metrics, Props};
-use crate::kit::{Axis, Part, split};
 use crate::widgets::time_axis::TimeAxis;
+
+/// Generated from `beatgrid.layout.xml`.
+mod xml {
+    include!(concat!(env!("OUT_DIR"), "/layouts/beatgrid.rs"));
+}
+use xml::BeatgridInputs;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
@@ -57,35 +65,40 @@ fn bar_len(props: &Props) -> f64 {
         .map_or(2.0, |b| b.duration)
 }
 
+/// What `beatgrid.layout.xml` reads.
+fn inputs(props: &Props, m: &Metrics) -> BeatgridInputs {
+    let has_chords = !props.chords.is_empty();
+    let band_height = m.chord_band - 4.0;
+    BeatgridInputs {
+        score_height: score_height(props),
+        show_score: props.score.is_some(),
+        header: m.header,
+        has_chords,
+        band_top: m.chord_band_top,
+        band_height,
+        // So the lane starts below the header and band, as without the band's inset.
+        band_gap: m.header + m.chord_band - m.chord_band_top - band_height,
+        footer: m.footer,
+    }
+}
+
 pub fn layout(props: &Props, m: &Metrics, rect: Rect) -> Layout {
-    let [staff, grid] = split(
-        rect,
-        Axis::Vertical,
-        0.0,
-        [Part::fixed(score_height(props)), Part::free(1.0)],
-    );
+    let slots = xml::layout(rect, &inputs(props, m));
     let bar_len = bar_len(props);
     let behind = props.bars_behind * bar_len / props.zoom;
     let ahead = props.bars_ahead * bar_len / props.zoom;
     let (t0, t1) = (props.now - behind, props.now + ahead);
-    let band = chord_band(props, m);
-    let lane_top = grid.top() + m.header + band;
-    let lane_bottom = grid.bottom() - m.footer;
+    let (grid, lane) = (slots.grid, slots.lane);
     Layout {
-        staff: props.score.is_some().then_some(staff),
+        staff: slots.staff,
         grid,
         axis: TimeAxis::new(grid.x_range(), t0, t1),
         t0,
         t1,
-        chord_band: (band > 0.0).then(|| {
-            Rect::from_x_y_ranges(
-                grid.x_range(),
-                (grid.top() + m.chord_band_top)..=(grid.top() + m.chord_band_top + band - 4.0),
-            )
-        }),
-        lane_top,
-        lane_bottom,
-        mid: (lane_top + lane_bottom) / 2.0,
+        chord_band: slots.chord_band,
+        lane_top: lane.top(),
+        lane_bottom: lane.bottom(),
+        mid: lane.center().y,
     }
 }
 

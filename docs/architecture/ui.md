@@ -94,8 +94,9 @@ normal, cyan selectable / units, amber caution, red fault, magenta targets.
 
 ## Beatgrid (`bg-ui/src/views/beatgrid/`)
 
-A tier-1 kit view: `mod.rs` (props), `theme.rs`, `layout.rs` (pure, tested) and
-`paint.rs`.
+A tier-1 kit view: `mod.rs` (props), `theme.rs`, `layout.rs` (pure, tested),
+`beatgrid.layout.xml` (its rects, through the layout DSL: see
+[ui-components.md](ui-components.md)) and `paint.rs`.
 
 ```rust
 pub struct Props<'a> {

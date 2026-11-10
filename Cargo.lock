@@ -557,6 +557,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bg-layout"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "log",
+ "quick-xml",
+]
+
+[[package]]
 name = "bg-report"
 version = "0.1.0"
 dependencies = [
@@ -590,6 +599,7 @@ dependencies = [
  "bg-audio",
  "bg-core",
  "bg-dsp",
+ "bg-layout",
  "bg-report",
  "bg-sound",
  "eframe",

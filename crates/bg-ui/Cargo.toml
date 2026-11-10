@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bg-layout.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui-phosphor.workspace = true
@@ -18,3 +19,6 @@ serde_json.workspace = true
 toml.workspace = true
 anyhow.workspace = true
 log.workspace = true
+
+[build-dependencies]
+bg-layout.workspace = true

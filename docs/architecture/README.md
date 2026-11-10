@@ -20,7 +20,7 @@ every edit.
 
 Dependencies point one way:
 `bg-core` / `bg-dsp` -> `bg-sound` -> `bg-audio` -> `bg-report` -> `bg-ui` -> `bg-exercises`
--> `bass-gym`.
+-> `bass-gym`, with `bg-layout` (the layout DSL) under `bg-ui`.
 
 | Crate | Role | Depends on |
 |---|---|---|
@@ -29,7 +29,8 @@ Dependencies point one way:
 | `bg-sound` | `Voice` / `SoundSource` registry, synth voices, SF2 through `rustysynth` | bg-core |
 | `bg-audio` | cpal streams, `Clock`, output scheduler, analysis worker, `SessionLogic`, calibration | bg-core, bg-dsp, bg-sound, cpal, rtrb |
 | `bg-report` | Bug reports: WAV, JSON, MIDI and zip of a recording's region | bg-core, bg-audio, bg-sound |
-| `bg-ui` | Themes, `ExerciseType` / `PreferencePage` traits, `SettingsStore`, widgets | bg-core, bg-audio, bg-report |
+| `bg-layout` | The layout DSL: XML layout trees, their solver, hot reload, and the build-script code generator | egui, quick-xml |
+| `bg-ui` | Themes, the component kit, `ExerciseType` / `PreferencePage` traits, `SettingsStore`, views and widgets | bg-core, bg-audio, bg-report, bg-layout |
 | `bg-exercises` | Basic timing, Basic chords, `TimingSession`, `Accompaniment` | bg-core, bg-audio, bg-sound, bg-ui |
 | `bass-gym` | App shell, preference pages, directories | all of the above |
 | `sf2pack` | FLAC to SF2 packing tool | standalone (dev-dep of bg-sound) |

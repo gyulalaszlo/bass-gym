@@ -209,6 +209,53 @@ A shared toolbar section that edits a settings struct works on a copy and hands 
 the edited one (`session_panel::session_toolbar(tb, theme, cfg) -> Option<_>`), like a
 view's emission.
 
+## Layout DSL
+
+A component's layout can be an XML file next to its code
+(`views/beatgrid/beatgrid.layout.xml`):
+
+```xml
+<layout name="Beatgrid">
+  <vstack>
+    <slot name="staff" height="score_height" visible="show_score"/>
+    <vstack name="grid" grow="1">
+      <gap height="header" visible="!has_chords"/>
+      ...
+      <slot name="lane" grow="1"/>
+      <gap height="footer"/>
+    </vstack>
+  </vstack>
+</layout>
+```
+
+Elements:
+- `<vstack>` / `<hstack>` (with `spacing`).
+- `<slot name>` is a rect the component fills. A named stack is a slot too.
+- `<gap>` is empty space.
+
+Along a stack, a child is `height` / `width` points (a number, or an input's name) plus a
+`grow` share of what's left. `visible="flag"` / `"!flag"` hides it: it takes no room and
+its slot is `None`.
+
+The crate's `build.rs` (`bg_layout::codegen::build("src")`) generates
+`$OUT_DIR/layouts/<file>.rs`. It defines:
+- `<Name>Inputs`: every size (`f32`) and flag (`bool`) the file names;
+- `<Name>Slots`: a `Rect` per slot, or `Option<Rect>` when it can be hidden;
+- `fn layout(rect, &inputs) -> slots`.
+
+The view includes the file in a module of its own (`mod xml { include!(..) }`). Its
+`layout.rs` fills the inputs from its props and theme, and derives anything else from
+the slots.
+
+A file that doesn't parse fails the build, and a new name needs a rebuild because it
+changes the generated types. Debug builds reload the file within a quarter of a second
+of a change. A reload that doesn't parse, or that names something the generated types
+don't have, is logged and the last good layout is kept. So sizes, order, gaps and
+visibility can be tuned while the app runs.
+
+The DSL only describes the layout tree. Wiring (props, messages, effects) stays in
+Rust, where the compiler checks it.
+
 ## Testing
 
 - `layout.rs` and `update.rs` are pure, so test them directly (`beatgrid/layout.rs`,
@@ -261,5 +308,4 @@ Done:
 Tier-0 defaults: `button`, the controls and the small helpers in `theme.rs` (`caption`,
 `section`, `title_label`, `responsive_columns`) use the current tokens when no theme is
 given. That's the only global read left in painting code, by design.
-
-Next: the layout / wiring DSL.
+- The layout DSL (`crates/bg-layout`), piloted on the beat grid.

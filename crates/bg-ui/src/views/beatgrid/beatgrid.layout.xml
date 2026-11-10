@@ -1,0 +1,18 @@
+<!--
+  The beat grid: the live score above, then the grid with its header, chord band, note
+  lane and footer. Sizes come from `BeatgridInputs`, filled in by layout.rs from the
+  props and the theme's metrics. Debug builds reload this file when it changes.
+-->
+<layout name="Beatgrid">
+  <vstack>
+    <slot name="staff" height="score_height" visible="show_score"/>
+    <vstack name="grid" grow="1">
+      <gap height="header" visible="!has_chords"/>
+      <gap height="band_top" visible="has_chords"/>
+      <slot name="chord_band" height="band_height" visible="has_chords"/>
+      <gap height="band_gap" visible="has_chords"/>
+      <slot name="lane" grow="1"/>
+      <gap height="footer"/>
+    </vstack>
+  </vstack>
+</layout>

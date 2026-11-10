@@ -98,7 +98,7 @@ Latency has three layers:
 2. **Input:** `map_host_ns` maps the cpal capture time. On CoreAudio, capture is
    callback time minus buffer, device latency and safety offset.
 3. **Residual:** `AnalysisConfig.latency_ms`, subtracted in the worker's `t(sample)`.
-   It's measured by `calibration.rs::Calibration`, applied from `pages.rs`, and read on
+   It's measured by `calibration.rs::Calibration`, applied from `pages/latency.rs`, and read on
    each loop, so changes apply mid-session.
 
 The monitor path delay isn't compensated. Without host timestamps the fallback is
@@ -155,7 +155,7 @@ pub trait SessionLogic: Send {
 - **Stop:** three paths in the worker: Start replacing a session, `WorkerCmd::Stop`, and
   `tick` returning `Finished`. App exit sends Stop too.
 - The UI detects the end with `was_running && !running`.
-- Calibration uses the same Start path (`pages.rs`).
+- Calibration uses the same Start path (`pages/latency.rs`).
 
 **Rebuilds.** `AudioEngine::rebuild` stops the session and sends `SetInput(None)`, which
 drops `Analysis` and its `consumed` count. A new `OutputState` restarts `frames` at 0,

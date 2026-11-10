@@ -195,7 +195,7 @@ impl ExerciseType for BasicChords {
     }
 
     fn preference_pages(&self) -> Vec<Box<dyn PreferencePage>> {
-        vec![Box::new(BasicChordsPage)]
+        vec![Box::new(BasicChordsPage::default())]
     }
 
     /// The shell calls this first each frame, so it also runs `sync`.

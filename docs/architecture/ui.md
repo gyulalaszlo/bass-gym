@@ -234,7 +234,7 @@ Files:
   with one table per module id. `get<T>(id)` returns defaults if the table is missing or
   invalid. `set` bumps the revision. `flush` writes atomically, called from
   `refresh_settings` and `on_exit`.
-- Scoring tolerances are global (`pages.rs::ScoringPage`), but what is scored belongs to
+- Scoring tolerances are global (`pages/scoring.rs`), but what is scored belongs to
   the preset. Note length is a checkbox in the groove panel (`SessionConfig.score_length`).
   Basic chords' "Scoring" section has the target sources (groove, piano hits), chord
   fit and the checker.
@@ -243,9 +243,15 @@ Files:
 - Changing anything in `AudioConfig` reopens the devices, so unrelated settings should
   get their own table.
 
-To add a setting: a struct with `#[serde(default)]` and `Default`, an id constant in
-`pages.rs`, a load in `app.rs`, a section in a `PreferencePage`, then the get -> edit ->
-set -> `ctx.engine.set_x()` pattern that `LatencyPage` uses.
+To add a setting:
+1. Write a struct with `#[serde(default)]` and `Default`, add an id constant in
+   `pages/mod.rs`, and load it in `app.rs`.
+2. Add a section to a page in `crates/bass-gym/src/pages/`. The section is a view whose
+   props are the settings struct and whose emission is the edited struct, built with
+   `kit::edited`.
+3. In the page's `ui`, for each emission, `settings.set` it and make the engine call
+   that applies it (`ctx.engine.set_x()`), only when it changed. `pages/audio/mod.rs`
+   and `pages/latency.rs` are the examples with engine calls.
 
 ## Visual checks
 

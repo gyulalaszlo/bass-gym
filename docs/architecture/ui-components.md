@@ -245,6 +245,9 @@ Done:
 - The marker editor as a tier-2 component (`views/marker_editor/`), routed through the
   review.
 
+- Preference pages (`bass-gym/src/pages/`, and Basic chords' page): sections are views
+  over their settings struct, and the page glue stores and applies changes.
+
 Next:
-- preferences and the app shell
+- the app shell (`app.rs`, the preset bar, the sidebar)
 - then the DSL

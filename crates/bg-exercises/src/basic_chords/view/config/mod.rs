@@ -8,7 +8,7 @@ pub mod scoring;
 use bg_ui::egui::Ui;
 use bg_ui::kit::{self, Emit};
 use bg_ui::theme::{responsive_columns, section};
-use bg_ui::widgets::session_panel::session_panel;
+use bg_ui::widgets::session_panel::{self, SessionPanel};
 
 use crate::basic_chords::msg::Msg;
 use crate::basic_chords::props;
@@ -56,11 +56,10 @@ pub fn config(p: &props::Config, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>
         });
     });
     ui.add_space(theme.metrics.columns_gap);
-    // `session_panel` edits in place (not migrated yet): edit a copy, send it if changed.
-    let session = kit::edited(&d.session, |cfg| {
-        session_panel(ui, cfg, p.editable);
-    });
-    if let Some(cfg) = session {
-        out.send(Msg::Session(Box::new(cfg)));
-    }
+    let props = session_panel::Props {
+        cfg: &d.session,
+        enabled: p.editable,
+    };
+    let edits = kit::show::<SessionPanel>(ui, "session", &props, &theme.session);
+    out.extend_map(edits, |cfg| Msg::Session(Box::new(cfg)));
 }

@@ -6,6 +6,7 @@ use bg_audio::{Recording, SessionId};
 use bg_core::SessionConfig;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, ReviewInput};
+use bg_ui::views::tap_tempo;
 
 use super::data::BasicChordsData;
 use super::model::Frame;
@@ -28,6 +29,8 @@ pub enum Msg {
     OpenResults,
     /// The session settings were edited.
     Session(Box<SessionConfig>),
+    /// For the tap-tempo button (its own messages, routed here).
+    Tap(tap_tempo::Msg),
     Progression(progression::Emission),
     Piano(piano::Emission),
     Scoring(scoring::Emission),

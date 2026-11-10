@@ -1,8 +1,9 @@
 //! How Basic chords' model changes. Pure: no egui and no engine.
 
-use bg_ui::kit::Emit;
+use bg_ui::kit::{Component, Emit};
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, Review};
+use bg_ui::views::tap_tempo::{self, TapTempo};
 
 use super::data::{BasicChordsData, resolve_progression};
 use super::effects::{Effect, Start};
@@ -99,6 +100,13 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
             }
         }
         Msg::Session(cfg) => edit(m, |d| d.session = *cfg),
+        Msg::Tap(msg) => {
+            let mut out = Emit::new();
+            TapTempo::update(&mut m.tap, &(), msg, &mut out);
+            for tap_tempo::Emission::Tempo(bpm) in out {
+                edit(m, |d| d.session.tempo = bpm);
+            }
+        }
         Msg::Progression(e) => edit(m, |d| match e {
             progression::Emission::Progression(p) => d.progression = p,
             progression::Emission::ChordLength(l) => d.chord_length = l,

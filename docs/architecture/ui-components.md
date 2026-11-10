@@ -40,8 +40,9 @@ comes first, standing in for `self`.
 - **`Props<'a>`**: borrowed, read-only data for this frame. Its parent builds it.
 - **`Theme`**: how it looks. It's a separate argument, not a Props field (see Themes).
 - **`State`**: what the component remembers between frames. The parent stores it as a
-  named field, so it can be seen and tested. Don't hide it in `ctx.data`. The one
-  exception is `kit::mount_temp`, a migration bridge (see below).
+  named field, so it can be seen and tested. Don't hide it in `ctx.data`, except for
+  layout measurements and egui-owned popup state (the toolbar's gap widths and open
+  menus).
 - **`Msg`** goes *in*. It's private to the component: its view sends a `Msg` and its own
   `update` handles it. A parent never handles a child's `Msg`, or passes it down.
 - **`Emission`** goes *out*, to the parent. A view that never emits uses
@@ -78,12 +79,6 @@ on a copy of the value, and if the copy changed it sends a message with the new 
 field(ui, &props.bpm, out, Msg::Bpm, |ui, v| ui.add(number_field(v).range(20.0..=400.0)));
 field(ui, &props.click, out, Msg::Click, |ui, v| checkbox(ui, v, "Click"));
 ```
-
-### Migration bridge
-
-`kit::mount_temp` is `mount` with the state kept in egui temp memory. Use it only where
-the parent isn't migrated yet and so has nowhere to own the state. Today the only user is
-`Toolbar::tap`. Each one becomes a plain `mount` once its parent owns the state.
 
 ## Where files go
 
@@ -210,10 +205,9 @@ the component's `update`. That's why a component's `update` shouldn't need props
 can be avoided (the marker editor's doesn't). Emissions are then applied by the owner,
 e.g. `marker_editor::apply`.
 
-Bridges, while children aren't migrated:
-- Widgets that edit in place (`session_toolbar`, `session_panel`) get a copy of the
-  value. If they report a change, the copy is sent as a message.
-- (The marker editor used to be bridged like this. It's now a component.)
+A shared toolbar section that edits a settings struct works on a copy and hands back
+the edited one (`session_panel::session_toolbar(tb, theme, cfg) -> Option<_>`), like a
+view's emission.
 
 ## Testing
 
@@ -234,7 +228,7 @@ Done:
   - `Tokens` (spacing included)
   - `button::Theme`
   - `views::beatgrid` (tier 1)
-  - `views::tap_tempo` (tier 2, bridged through `mount_temp`)
+  - `views::tap_tempo` (tier 2; now routed by the exercises)
 - Phase 2: Basic timing as a tier-3 program (`kit::Program`)
 - Phase 3: Basic chords as a program. Its settings sections (`view/config/`) are views
   over their slice of the data, with typed emissions built with `kit::field` and
@@ -258,12 +252,14 @@ Done:
   the preferences page list are views, and the root's `update` carries out their
   messages.
 
-Still bridged or reading the global theme (migrate as they're touched):
-- The toolbar API (`widgets/toolbar.rs`): tap tempo lives in `kit::mount_temp` until the
-  toolbar gives its owner the state.
-- `session_toolbar` / `session_panel` edit in place, and their callers pass a copy.
-- Still painting with `theme::*`: the small helpers in `theme.rs` (`caption`, `section`, `title_label`)
-  and `controls.rs`. (`waveform::paint` takes its colour from the caller's
-  `WaveStyle`.)
+- The toolbar (`widgets/toolbar.rs`) takes a `toolbar::Theme` from the shell. The
+  session controls (`widgets/session_panel.rs`) have a theme, `session_toolbar` returns
+  the edited settings, and the groove panel is the `SessionPanel` view. Tap tempo's
+  state lives in each exercise's model, and its messages are routed (`Msg::Tap`).
+- The leaf controls (`controls.rs`) take a `controls::Theme` through `.theme(&t)`.
+
+Tier-0 defaults: `button`, the controls and the small helpers in `theme.rs` (`caption`,
+`section`, `title_label`, `responsive_columns`) use the current tokens when no theme is
+given. That's the only global read left in painting code, by design.
 
 Next: the layout / wiring DSL.

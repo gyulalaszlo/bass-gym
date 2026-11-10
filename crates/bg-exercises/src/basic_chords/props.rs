@@ -13,6 +13,7 @@ use bg_ui::views::keyboard::KeyLabels;
 use bg_ui::views::performance::TimingMeter;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
+use bg_ui::views::tap_tempo;
 
 use super::accompaniment::{ChordShared, lock_chords};
 use super::data::{BasicChordsData, resolve_progression};
@@ -27,6 +28,7 @@ const BASS_HOLD: f64 = 1.5;
 
 pub struct Toolbar<'a> {
     pub running: bool,
+    pub tap: &'a tap_tempo::State,
     pub has_results: bool,
     /// The chord now and next, while running.
     pub status: Option<ChordStatus>,
@@ -53,6 +55,7 @@ pub fn toolbar(m: &Model) -> Toolbar<'_> {
     });
     Toolbar {
         running: f.running,
+        tap: &m.tap,
         has_results: m.has_results,
         status,
         session: &m.data.session,

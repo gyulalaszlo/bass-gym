@@ -396,7 +396,7 @@ impl eframe::App for BassGymApp {
                         data_dir: self.data_dir.as_deref(),
                     };
                     // The Exercise Control Toolbar stays put; only the exercise area scrolls.
-                    show_toolbar(ui, |tb| slot.et.toolbar(tb, &mut ectx));
+                    show_toolbar(ui, &theme.toolbar, |tb| slot.et.toolbar(tb, &mut ectx));
                     slot.et.notices(ui, &mut ectx);
                     ui.separator();
                     egui::ScrollArea::vertical()

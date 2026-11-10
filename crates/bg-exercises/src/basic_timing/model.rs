@@ -6,6 +6,7 @@ use bg_ui::recording::SessionCapture;
 use bg_ui::view::ViewPrefs;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
+use bg_ui::views::tap_tempo;
 use serde::{Deserialize, Serialize};
 
 use crate::timing_session::SharedTiming;
@@ -66,4 +67,6 @@ pub struct Model {
     /// routes (`Msg::Review`, `Effect::Review`).
     pub review: Option<Review>,
     pub results_tab: ResultsTab,
+    /// The toolbar's tap-tempo button (its messages are routed: `Msg::Tap`).
+    pub tap: tap_tempo::State,
 }

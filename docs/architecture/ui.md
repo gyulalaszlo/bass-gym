@@ -64,8 +64,10 @@ Toolbar menus (`toolbar.rs`): `menu` is an icon button opening a tabbed panel, a
 `menu_labelled` the same with the current value as its label. Time signature and key
 use the latter, with `choice_grid` (equal-width, centred selectables).
 
-`Toolbar::tap` mounts `views::tap_tempo::TapTempo` through `kit::mount_temp`, so its
-taps live in egui temp memory until the exercise owns the toolbar's state.
+The toolbar's look is a `toolbar::Theme` the shell passes to `show_toolbar`; building
+blocks read it through `Toolbar::theme`. Tap tempo isn't one of them: each exercise
+keeps a `tap_tempo::State` in its model, shows `TapTempo::view` in its toolbar region
+and routes `Msg::Tap` to `TapTempo::update`.
 
 Shortcuts: Space starts / stops (`Toolbar::transport`) and plays / stops the review;
 M toggles monitoring (`app/sidebar.rs`). Both are ignored while a text field has

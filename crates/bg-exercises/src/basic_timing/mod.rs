@@ -161,7 +161,7 @@ impl ExerciseType for BasicTiming {
         // settings.
         view::main::live(&props::main(&self.model), &theme, ui);
         let mut out = Emit::new();
-        view::main::settings(&props::settings(&self.model), ui, &mut out);
+        view::main::settings(&props::settings(&self.model), &theme, ui, &mut out);
         self.dispatch(ctx.engine, Some(ui.ctx()), out);
 
         let msgs = sync::review_sync(&self.model, ctx);

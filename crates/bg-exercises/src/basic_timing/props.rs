@@ -7,6 +7,7 @@ use bg_ui::view::ViewPrefs;
 use bg_ui::views::performance::TimingMeter;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
+use bg_ui::views::tap_tempo;
 
 use super::model::{Model, ViewOptions};
 use super::view::status::Status;
@@ -14,6 +15,7 @@ use crate::timing_session::{TimingShared, last_time, lock, preview, timing_meter
 
 pub struct Toolbar<'a> {
     pub running: bool,
+    pub tap: &'a tap_tempo::State,
     pub has_results: bool,
     pub status: Status,
     pub session: &'a SessionConfig,
@@ -30,6 +32,7 @@ pub fn toolbar(m: &Model) -> Toolbar<'_> {
     };
     Toolbar {
         running: f.running,
+        tap: &m.tap,
         has_results: m.has_results,
         status,
         session: &m.data.session,

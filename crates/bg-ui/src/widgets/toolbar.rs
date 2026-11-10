@@ -4,28 +4,114 @@
 //! shares the same look: start / stop, tempo, time signature, option menus and a live
 //! status. Items are separated by [`Gap`]s that share out the free width, so the
 //! toolbar always spans the full width with a balanced layout.
+//!
+//! A tier-0 container: its look is a [`Theme`] given to [`show_toolbar`] (the shell
+//! holds it), which every building block reads through the [`Toolbar`].
 
 use std::cell::Cell;
 
 use bg_core::TimeSignature;
 use bg_core::harmony::{Mode, Scale};
 use bg_core::session::TempoRamp;
-use egui::{Align, Layout, Pos2, Rect, RichText, Shape, Ui, vec2};
+use egui::{Align, Color32, FontId, Layout, Pos2, Rect, RichText, Shape, Stroke, Ui, Vec2, vec2};
 
-use crate::kit;
-use crate::views::tap_tempo::{self, TapTempo};
+use crate::icons;
+use crate::theme::{Tokens, caption};
 use crate::widgets::button::{button, selectable};
 use crate::widgets::controls::{self, number_field};
-use crate::{icons, theme};
 
-/// Height of the toolbar row.
-pub const TOOLBAR_HEIGHT: f32 = 48.0;
+/// How the toolbar looks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Theme {
+    /// The row, and its buttons.
+    pub height: f32,
+    pub button_height: f32,
+    /// Each [`Gap`]'s minimum width and its share of the free width (Small, Medium,
+    /// Large).
+    pub gaps: [(f32, f32); 3],
+    /// Space between the items of a status shown in a gap.
+    pub status_spacing: f32,
+    pub start: Color32,
+    pub stop: Color32,
+    pub transport_font: FontId,
+    pub transport_width: f32,
+    pub results_font: FontId,
+    pub bpm_font: FontId,
+    pub ramp_font: FontId,
+    pub ramp_icon_font: FontId,
+    pub ramp_icon: Color32,
+    pub summary_font: FontId,
+    pub summary: Color32,
+    /// Secondary marks (the ramp's arrow) and disabled items.
+    pub dim: Color32,
+    pub chip_font: FontId,
+    pub chip: Color32,
+    pub chip_padding: Vec2,
+    pub chip_gap: f32,
+    /// A chip's fill strength, at rest and hovered.
+    pub chip_fill: (f32, f32),
+    /// Menu buttons: normal, active (an option is on), hovered; their caret, and the
+    /// font of a menu's value label.
+    pub menu: Color32,
+    pub menu_active: Color32,
+    pub menu_hover: Color32,
+    pub menu_icon_font: FontId,
+    pub menu_label_font: FontId,
+    pub menu_padding: f32,
+    pub sheet_fill: Color32,
+    pub sheet_line: Stroke,
+    pub sheet_margin: i8,
+    /// Equal-width choices in a menu: gap and height; and the gap above a caption.
+    pub choice_gap: f32,
+    pub choice_height: f32,
+    pub caption_gap: f32,
+}
 
-/// Horizontal padding around a menu button's icon (and its tab when open).
-const MENU_PADDING: f32 = 12.0;
+impl From<&Tokens> for Theme {
+    fn from(t: &Tokens) -> Self {
+        Self {
+            height: 48.0,
+            button_height: 36.0,
+            gaps: [(8.0, 1.0), (16.0, 2.0), (24.0, 6.0)],
+            status_spacing: 10.0,
+            start: t.green(),
+            stop: t.amber(),
+            transport_font: FontId::proportional(16.0),
+            transport_width: 118.0,
+            results_font: FontId::proportional(18.0),
+            bpm_font: t.mono(28.0),
+            ramp_font: t.mono(20.0),
+            ramp_icon_font: t.prop(13.0),
+            ramp_icon: t.green(),
+            summary_font: t.mono(13.0),
+            summary: t.text(),
+            dim: t.dim(),
+            chip_font: t.mono(12.0),
+            chip: t.amber(),
+            chip_padding: vec2(12.0, 8.0),
+            chip_gap: 4.0,
+            chip_fill: (0.1, 0.22),
+            menu: t.cyan(),
+            menu_active: t.green(),
+            menu_hover: t.text(),
+            menu_icon_font: FontId::proportional(20.0),
+            menu_label_font: t.mono(20.0),
+            menu_padding: 12.0,
+            sheet_fill: t.panel(),
+            sheet_line: Stroke::new(1.0, t.line()),
+            sheet_margin: 14,
+            choice_gap: 6.0,
+            choice_height: 32.0,
+            caption_gap: 10.0,
+        }
+    }
+}
 
-/// Height of the buttons in the toolbar.
-pub const BUTTON_HEIGHT: f32 = 36.0;
+impl Theme {
+    fn gap(&self, gap: Gap) -> (f32, f32) {
+        self.gaps[gap as usize]
+    }
+}
 
 /// A chip for [`Toolbar::chips`].
 #[derive(Clone, Debug, PartialEq)]
@@ -44,24 +130,6 @@ pub enum Gap {
     Small,
     Medium,
     Large,
-}
-
-impl Gap {
-    fn min(self) -> f32 {
-        match self {
-            Gap::Small => 8.0,
-            Gap::Medium => 16.0,
-            Gap::Large => 24.0,
-        }
-    }
-
-    fn weight(self) -> f32 {
-        match self {
-            Gap::Small => 1.0,
-            Gap::Medium => 2.0,
-            Gap::Large => 6.0,
-        }
-    }
 }
 
 /// Gap bookkeeping for one frame.
@@ -83,6 +151,7 @@ struct Measured {
 
 pub struct Toolbar<'a> {
     ui: &'a mut Ui,
+    theme: &'a Theme,
     tally: &'a GapTally,
     /// Free width to share between the gaps (from the previous frame).
     extra: f32,
@@ -90,22 +159,23 @@ pub struct Toolbar<'a> {
 }
 
 /// Shows the toolbar across the full width.
-pub fn show_toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Toolbar) -> R) -> R {
+pub fn show_toolbar<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Toolbar) -> R) -> R {
     let width = ui.available_width();
     let id = ui.id().with("exercise_toolbar");
     let last: Measured = ui.data(|d| d.get_temp(id)).unwrap_or_default();
     let tally = GapTally::default();
     let (r, now) = ui
         .allocate_ui_with_layout(
-            vec2(width, TOOLBAR_HEIGHT),
+            vec2(width, theme.height),
             Layout::left_to_right(Align::Center),
             |ui| {
-                ui.set_min_size(vec2(width, TOOLBAR_HEIGHT));
+                ui.set_min_size(vec2(width, theme.height));
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let left = ui.cursor().left();
                 let extra = (width - last.items - last.min).max(0.0);
                 let r = add(&mut Toolbar {
                     ui,
+                    theme,
                     tally: &tally,
                     extra,
                     weights: last.weight,
@@ -130,20 +200,27 @@ pub fn show_toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Toolbar) -> R) -> R {
 }
 
 impl Toolbar<'_> {
+    /// The toolbar's look, for building blocks added from outside.
+    pub fn theme(&self) -> &Theme {
+        self.theme
+    }
+
     fn gap_width(&self, gap: Gap) -> f32 {
+        let (min, weight) = self.theme.gap(gap);
         let share = if self.weights > 0.0 {
-            self.extra * gap.weight() / self.weights
+            self.extra * weight / self.weights
         } else {
             0.0
         };
-        gap.min() + share
+        min + share
     }
 
     fn tally(&self, gap: Gap, w: f32) {
+        let (min, weight) = self.theme.gap(gap);
         let t = self.tally;
         t.width.set(t.width.get() + w);
-        t.min.set(t.min.get() + gap.min());
-        t.weight.set(t.weight.get() + gap.weight());
+        t.min.set(t.min.get() + min);
+        t.weight.set(t.weight.get() + weight);
     }
 
     /// Space between two items.
@@ -159,16 +236,16 @@ impl Toolbar<'_> {
         let w = self.gap_width(gap);
         let (rect, _) = self
             .ui
-            .allocate_exact_size(vec2(w, TOOLBAR_HEIGHT), egui::Sense::hover());
+            .allocate_exact_size(vec2(w, self.theme.height), egui::Sense::hover());
         self.tally(gap, w);
-        let inner = rect.shrink2(vec2(Gap::Medium.min(), 0.0));
+        let inner = rect.shrink2(vec2(self.theme.gap(Gap::Medium).0, 0.0));
         let mut child = self.ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(inner)
                 .layout(Layout::left_to_right(Align::Center)),
         );
         child.set_clip_rect(inner.intersect(self.ui.clip_rect()));
-        child.spacing_mut().item_spacing.x = 10.0;
+        child.spacing_mut().item_spacing.x = self.theme.status_spacing;
         add(&mut child)
     }
 
@@ -179,11 +256,12 @@ impl Toolbar<'_> {
 
     /// A group of items, enabled or not (e.g. settings are locked while a session runs).
     pub fn group<R>(&mut self, enabled: bool, add: impl FnOnce(&mut Toolbar) -> R) -> R {
-        let (tally, extra, weights) = (self.tally, self.extra, self.weights);
+        let (theme, tally, extra, weights) = (self.theme, self.tally, self.extra, self.weights);
         self.ui
             .add_enabled_ui(enabled, |ui| {
                 add(&mut Toolbar {
                     ui,
+                    theme,
                     tally,
                     extra,
                     weights,
@@ -195,22 +273,22 @@ impl Toolbar<'_> {
     /// The boxed start / stop button. Also answers the Space key. Returns true when the
     /// session should start or stop.
     pub fn transport(&mut self, running: bool) -> bool {
-        let ui = &mut *self.ui;
+        let (ui, t) = (&mut *self.ui, self.theme);
         let space = ui.input(|i| i.key_pressed(egui::Key::Space))
             && !ui.ctx().egui_wants_keyboard_input()
             && !crate::views::results::modal_open(ui.ctx());
         let (text, color) = if running {
-            (format!("{}  STOP", icons::STOP), theme::amber())
+            (format!("{}  STOP", icons::STOP), t.stop)
         } else {
-            (format!("{}  START", icons::PLAY), theme::green())
+            (format!("{}  START", icons::PLAY), t.start)
         };
         let clicked = ui
             .add(
                 button(text)
                     .color(color)
                     .strong()
-                    .font(egui::FontId::proportional(16.0))
-                    .min_size([118.0, BUTTON_HEIGHT]),
+                    .font(t.transport_font.clone())
+                    .min_size([t.transport_width, t.button_height]),
             )
             .on_hover_text("Space: start / stop")
             .clicked();
@@ -220,12 +298,12 @@ impl Toolbar<'_> {
     /// A small button that (re)opens the last session's results; disabled while there
     /// are none. Returns true when clicked.
     pub fn results_button(&mut self, available: bool) -> bool {
-        let ui = &mut *self.ui;
+        let (ui, t) = (&mut *self.ui, self.theme);
         ui.add_enabled_ui(available, |ui| {
             ui.add(
                 button(icons::CHART_BAR)
-                    .font(egui::FontId::proportional(18.0))
-                    .min_size([BUTTON_HEIGHT, BUTTON_HEIGHT]),
+                    .font(t.results_font.clone())
+                    .min_size([t.button_height, t.button_height]),
             )
             .on_hover_text("Results of the last session")
             .on_disabled_hover_text("No results yet: run a session")
@@ -234,22 +312,10 @@ impl Toolbar<'_> {
         .inner
     }
 
-    /// The boxed tap-tempo button ([`TapTempo`]). Sets `bpm` once tapped at least 3
-    /// times.
-    pub fn tap(&mut self, bpm: &mut f32) -> bool {
-        let theme = tap_tempo::Theme::new(&theme::tokens()).with_height(BUTTON_HEIGHT);
-        // Bridge until the exercise owns the toolbar's state (see `kit::mount_temp`).
-        let out = kit::mount_temp::<TapTempo>(self.ui, "tap_tempo", &(), &theme);
-        let before = *bpm;
-        for tap_tempo::Emission::Tempo(t) in out {
-            *bpm = t;
-        }
-        *bpm != before
-    }
-
     /// − [large BPM readout] bpm +. The field steps by 5 with ↑ / ↓, the buttons by 1.
     pub fn bpm(&mut self, bpm: &mut f32) -> bool {
         let before = *bpm;
+        let font = self.theme.bpm_font.clone();
         self.ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.add(
@@ -258,7 +324,7 @@ impl Toolbar<'_> {
                     .step(5.0)
                     .drag_step(1.0)
                     .decimals(0)
-                    .font(theme::mono(28.0))
+                    .font(font)
                     .suffix("bpm")
                     .id_salt("toolbar_bpm"),
             )
@@ -275,36 +341,41 @@ impl Toolbar<'_> {
         }
         let before = (*bpm, ramp.target);
         let summary = crate::widgets::session_panel::ramp_summary(*bpm, ramp);
+        let t = self.theme;
         self.ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 3.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                fn field<'a>(v: &'a mut f32, salt: &str) -> controls::NumberField<'a, f32> {
+                fn field<'a>(
+                    v: &'a mut f32,
+                    font: &FontId,
+                    salt: &str,
+                ) -> controls::NumberField<'a, f32> {
                     number_field(v)
                         .range(20.0..=400.0)
                         .step(5.0)
                         .drag_step(1.0)
                         .decimals(0)
-                        .font(theme::mono(20.0))
+                        .font(font.clone())
                         .id_salt(salt.to_owned())
                 }
-                ui.add(field(bpm, "toolbar_bpm"))
+                ui.add(field(bpm, &t.ramp_font, "toolbar_bpm"))
                     .on_hover_text("Start tempo: drag up / down, or click to type");
-                ui.label(RichText::new(icons::ARROW_RIGHT).color(theme::dim()));
-                ui.add(field(&mut ramp.target, "toolbar_bpm_target").suffix("bpm"))
+                ui.label(RichText::new(icons::ARROW_RIGHT).color(t.dim));
+                ui.add(field(&mut ramp.target, &t.ramp_font, "toolbar_bpm_target").suffix("bpm"))
                     .on_hover_text("Target tempo of the ramp");
             });
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.label(
                     RichText::new(icons::TRAY_ARROW_UP)
-                        .font(theme::prop(13.0))
-                        .color(theme::green()),
+                        .font(t.ramp_icon_font.clone())
+                        .color(t.ramp_icon),
                 );
                 ui.label(
                     RichText::new(summary)
-                        .font(theme::mono(13.0))
-                        .color(theme::text()),
+                        .font(t.summary_font.clone())
+                        .color(t.summary),
                 );
             });
         });
@@ -314,27 +385,24 @@ impl Toolbar<'_> {
     /// Compact chips naming active options (icon + short label, full text on hover).
     /// Returns true when one was clicked.
     pub fn chips(&mut self, chips: &[Chip]) -> bool {
-        let ui = &mut *self.ui;
+        let (ui, t) = (&mut *self.ui, self.theme);
         let mut clicked = false;
         for (i, c) in chips.iter().enumerate() {
             if i > 0 {
-                ui.add_space(4.0);
+                ui.add_space(t.chip_gap);
             }
-            let color = if ui.is_enabled() {
-                theme::amber()
-            } else {
-                theme::dim()
-            };
+            let color = if ui.is_enabled() { t.chip } else { t.dim };
             let galley = ui.painter().layout_no_wrap(
                 format!("{} {}", c.icon, c.label),
-                theme::mono(12.0),
+                t.chip_font.clone(),
                 color,
             );
-            let size = galley.size() + vec2(12.0, 8.0);
+            let size = galley.size() + t.chip_padding;
             let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
             let resp = resp.on_hover_text(&c.tooltip);
             if ui.is_rect_visible(rect) {
-                let fill = color.gamma_multiply(if resp.hovered() { 0.22 } else { 0.1 });
+                let (rest, hovered) = t.chip_fill;
+                let fill = color.gamma_multiply(if resp.hovered() { hovered } else { rest });
                 ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
                 ui.painter()
                     .galley(rect.center() - galley.size() / 2.0, galley, color);
@@ -363,7 +431,11 @@ impl Toolbar<'_> {
             (12, 8),
         ];
         let before = *sig;
-        let label = (format!("{}/{}", sig.num, sig.den), theme::mono(20.0));
+        let t = self.theme.clone();
+        let label = (
+            format!("{}/{}", sig.num, sig.den),
+            t.menu_label_font.clone(),
+        );
         self.menu_labelled(
             "toolbar_time_sig",
             label,
@@ -371,14 +443,14 @@ impl Toolbar<'_> {
             false,
             300.0,
             |ui| {
-                theme::caption(ui, "Common");
+                caption(ui, "Common");
                 let items: Vec<_> = COMMON
                     .iter()
                     .map(|&(n, d)| (TimeSignature { num: n, den: d }, format!("{n}/{d}")))
                     .collect();
-                choice_grid(ui, "ts_common", 4, &items, sig);
-                ui.add_space(10.0);
-                theme::caption(ui, "Custom");
+                choice_grid(ui, &t, "ts_common", 4, &items, sig);
+                ui.add_space(t.caption_gap);
+                caption(ui, "Custom");
                 ui.horizontal(|ui| {
                     ui.add(number_field(&mut sig.num).range(1..=15).id_salt("ts_num"));
                     ui.label("/");
@@ -397,16 +469,17 @@ impl Toolbar<'_> {
             "C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B",
         ];
         let before = *key;
-        let label = (key.short_name(), theme::mono(20.0));
+        let t = self.theme.clone();
+        let label = (key.short_name(), t.menu_label_font.clone());
         let tip = "Key: sets the score's key signature (and the chords in Basic chords)";
         self.menu_labelled("toolbar_key", label, tip, false, 340.0, |ui| {
-            theme::caption(ui, "Tonic");
+            caption(ui, "Tonic");
             let roots: Vec<_> = (0..12u8).zip(ROOTS.map(String::from)).collect();
-            choice_grid(ui, "key_roots", 4, &roots, &mut key.root);
-            ui.add_space(10.0);
-            theme::caption(ui, "Mode");
+            choice_grid(ui, &t, "key_roots", 4, &roots, &mut key.root);
+            ui.add_space(t.caption_gap);
+            caption(ui, "Mode");
             let modes: Vec<_> = Mode::ALL.map(|m| (m, m.label().to_owned())).into();
-            choice_grid(ui, "key_modes", 2, &modes, &mut key.mode);
+            choice_grid(ui, &t, "key_modes", 2, &modes, &mut key.mode);
         });
         *key != before
     }
@@ -423,7 +496,7 @@ impl Toolbar<'_> {
         width: f32,
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<R> {
-        let label = (icon.to_owned(), egui::FontId::proportional(20.0));
+        let label = (icon.to_owned(), self.theme.menu_icon_font.clone());
         self.menu_labelled(id_salt, label, tooltip, active, width, add)
     }
 
@@ -438,15 +511,15 @@ impl Toolbar<'_> {
         width: f32,
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<R> {
-        let ui = &mut *self.ui;
+        let (ui, t) = (&mut *self.ui, self.theme);
         let id = ui.make_persistent_id(id_salt);
         let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
         let color = if !ui.is_enabled() {
-            theme::dim()
+            t.dim
         } else if active {
-            theme::green()
+            t.menu_active
         } else {
-            theme::cyan()
+            t.menu
         };
         // Drawn by hand so the label has a fixed horizontal margin (it becomes the tab).
         let ctx = ui.ctx().clone();
@@ -462,19 +535,19 @@ impl Toolbar<'_> {
             job.append(
                 &format!(" {}", icons::CARET_DOWN),
                 0.0,
-                format(egui::FontId::proportional(20.0)),
+                format(t.menu_icon_font.clone()),
             );
             ctx.fonts_mut(|f| f.layout_job(job))
         };
         let galley = label(color);
         let (rect, resp) = ui.allocate_exact_size(
-            vec2(galley.size().x + 2.0 * MENU_PADDING, BUTTON_HEIGHT),
+            vec2(galley.size().x + 2.0 * t.menu_padding, t.button_height),
             egui::Sense::click(),
         );
         let resp = resp.on_hover_text(tooltip);
         if ui.is_rect_visible(rect) {
             let galley = if resp.hovered() && ui.is_enabled() {
-                label(theme::text())
+                label(t.menu_hover)
             } else {
                 galley.clone()
             };
@@ -504,7 +577,7 @@ impl Toolbar<'_> {
             .align_alternatives(&[egui::RectAlign::BOTTOM_START])
             .gap(0.0)
             .width(width)
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(14)))
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(t.sheet_margin)))
             .show(|ui| {
                 // Placeholder for the sheet, painted under the contents once its size is known.
                 let sheet = ui.ctx().layer_painter(ui.layer_id()).add(Shape::Noop);
@@ -516,7 +589,7 @@ impl Toolbar<'_> {
         let (sheet, sizing, r) = inner.inner;
         if !sizing {
             let painter = ui.ctx().layer_painter(inner.response.layer_id);
-            let (fill, stroke) = (theme::panel(), egui::Stroke::new(1.0, theme::line()));
+            let (fill, stroke) = (t.sheet_fill, t.sheet_line);
             let p = inner.response.rect;
             let outline = sheet_outline(p, tab);
             painter.set(
@@ -543,19 +616,20 @@ impl Toolbar<'_> {
 /// the one clicked.
 fn choice_grid<T: PartialEq + Copy>(
     ui: &mut Ui,
+    theme: &Theme,
     id_salt: &str,
     cols: usize,
     items: &[(T, String)],
     value: &mut T,
 ) {
-    const GAP: f32 = 6.0;
+    let gap = theme.choice_gap;
     let cols = cols.max(1);
-    let w = (ui.available_width() - GAP * (cols - 1) as f32) / cols as f32;
-    egui::Grid::new(id_salt).spacing([GAP, GAP]).show(ui, |ui| {
+    let w = (ui.available_width() - gap * (cols - 1) as f32) / cols as f32;
+    egui::Grid::new(id_salt).spacing([gap, gap]).show(ui, |ui| {
         for (i, (v, name)) in items.iter().enumerate() {
             let item = selectable(*value == *v, name.as_str())
                 .centred()
-                .min_size([w, 32.0]);
+                .min_size([w, theme.choice_height]);
             if ui.add(item).clicked() {
                 *value = *v;
             }

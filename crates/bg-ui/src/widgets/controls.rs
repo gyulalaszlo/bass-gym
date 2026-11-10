@@ -1,5 +1,8 @@
 //! The basic form controls: no boxes, just a dotted underline that marks a value as
 //! editable (text, number and dropdown fields), and a plain square checkbox.
+//!
+//! Tier-0 widgets. Their look is a [`Theme`]: the builders take one with `.theme(&t)`,
+//! and everything else uses [`Theme::current`] (the current tokens).
 
 use egui::emath::Numeric;
 use egui::{
@@ -7,16 +10,69 @@ use egui::{
     Widget, WidgetText, vec2,
 };
 
+use crate::icons;
+use crate::theme::{self, Tokens};
 use crate::widgets::button::selectable;
-use crate::{icons, theme};
+
+/// How the controls look.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Theme {
+    /// An editable value, and its underline.
+    pub value: egui::Color32,
+    /// Disabled values, and how faint a disabled underline is.
+    pub disabled: egui::Color32,
+    pub disabled_line: f32,
+    /// A checkbox's or form row's label.
+    pub label: egui::Color32,
+    /// Units after a value, and a form row's icon.
+    pub unit: egui::Color32,
+    /// The dotted leader of a form row.
+    pub leader: egui::Color32,
+}
+
+impl From<&Tokens> for Theme {
+    fn from(t: &Tokens) -> Self {
+        Self {
+            value: t.cyan(),
+            disabled: t.dim(),
+            disabled_line: 0.6,
+            label: t.text(),
+            unit: t.dim(),
+            leader: t.grid(),
+        }
+    }
+}
+
+impl Theme {
+    /// The controls' look for the current tokens.
+    pub fn current() -> Self {
+        Self::from(&theme::tokens())
+    }
+
+    fn value_color(&self, ui: &Ui) -> egui::Color32 {
+        if ui.is_enabled() {
+            self.value
+        } else {
+            self.disabled
+        }
+    }
+
+    fn label_color(&self, ui: &Ui) -> egui::Color32 {
+        if ui.is_enabled() {
+            self.label
+        } else {
+            self.disabled
+        }
+    }
+}
 
 /// The underline under an editable value: dotted at rest, solid while hovered or edited.
-fn underline(ui: &Ui, rect: Rect, active: bool) {
+fn underline(ui: &Ui, t: &Theme, rect: Rect, active: bool) {
     let y = rect.bottom() + 1.0;
     let color = if !ui.is_enabled() {
-        theme::dim().gamma_multiply(0.6)
+        t.disabled.gamma_multiply(t.disabled_line)
     } else {
-        theme::cyan()
+        t.value
     };
     if active {
         ui.painter()
@@ -34,29 +90,18 @@ fn clear_changed(mut r: Response) -> Response {
     r
 }
 
-fn value_color(ui: &Ui) -> egui::Color32 {
-    if ui.is_enabled() {
-        theme::cyan()
-    } else {
-        theme::dim()
-    }
-}
-
 // ---------------------------------------------------------------------------------------
 // Checkbox
 
 /// A square checkbox (an X when on) with an optional label; the label toggles it too.
 pub fn checkbox(ui: &mut Ui, value: &mut bool, label: impl Into<WidgetText>) -> Response {
-    Checkbox {
-        value,
-        label: label.into(),
-    }
-    .ui(ui)
+    Checkbox::new(value, label).ui(ui)
 }
 
 pub struct Checkbox<'a> {
     value: &'a mut bool,
     label: WidgetText,
+    theme: Option<Theme>,
 }
 
 impl Checkbox<'_> {
@@ -64,12 +109,19 @@ impl Checkbox<'_> {
         Checkbox {
             value,
             label: label.into(),
+            theme: None,
         }
+    }
+
+    pub fn theme(mut self, t: &Theme) -> Self {
+        self.theme = Some(*t);
+        self
     }
 }
 
 impl Widget for Checkbox<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
+        let t = self.theme.unwrap_or_else(Theme::current);
         let box_size = (ui.text_style_height(&egui::TextStyle::Body) * 0.8).round();
         let gap = 8.0;
         let galley = (!self.label.is_empty()).then(|| {
@@ -92,7 +144,7 @@ impl Widget for Checkbox<'_> {
                 Pos2::new(rect.left() + box_size / 2.0, rect.center().y),
                 vec2(box_size, box_size),
             );
-            let color = value_color(ui);
+            let color = t.value_color(ui);
             let width = if resp.hovered() { 2.0 } else { 1.5 };
             let p = ui.painter();
             p.rect_stroke(b, 0.0, Stroke::new(width, color), StrokeKind::Inside);
@@ -103,11 +155,7 @@ impl Widget for Checkbox<'_> {
                 p.line_segment([i.left_bottom(), i.right_top()], s);
             }
             if let Some(g) = galley {
-                let text_color = if ui.is_enabled() {
-                    theme::text()
-                } else {
-                    theme::dim()
-                };
+                let text_color = t.label_color(ui);
                 p.galley(
                     Pos2::new(b.right() + gap, rect.center().y - g.size().y / 2.0),
                     g,
@@ -132,6 +180,7 @@ pub struct TextField<'a> {
     align: Align,
     font: Option<FontId>,
     hint: Option<String>,
+    theme: Option<Theme>,
 }
 
 pub fn text_field(text: &mut String) -> TextField<'_> {
@@ -141,10 +190,16 @@ pub fn text_field(text: &mut String) -> TextField<'_> {
         align: Align::Min,
         font: None,
         hint: None,
+        theme: None,
     }
 }
 
 impl TextField<'_> {
+    pub fn theme(mut self, t: &Theme) -> Self {
+        self.theme = Some(*t);
+        self
+    }
+
     pub fn width(mut self, w: f32) -> Self {
         self.width = Some(w);
         self
@@ -165,11 +220,12 @@ impl TextField<'_> {
 
 impl Widget for TextField<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
+        let t = self.theme.unwrap_or_else(Theme::current);
         let mut te = egui::TextEdit::singleline(self.text)
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::symmetric(1, 1))
             .horizontal_align(self.align)
-            .text_color(value_color(ui))
+            .text_color(t.value_color(ui))
             .desired_width(self.width.unwrap_or(160.0));
         if let Some(f) = self.font {
             te = te.font(f);
@@ -178,7 +234,7 @@ impl Widget for TextField<'_> {
             te = te.hint_text(h);
         }
         let r = ui.add(te);
-        underline(ui, r.rect, r.has_focus() || r.hovered());
+        underline(ui, &t, r.rect, r.has_focus() || r.hovered());
         r
     }
 }
@@ -205,6 +261,7 @@ pub struct NumberField<'a, T: Numeric> {
     width: Option<f32>,
     align: Align,
     id: Option<Id>,
+    theme: Option<Theme>,
 }
 
 pub fn number_field<T: Numeric>(value: &mut T) -> NumberField<'_, T> {
@@ -220,10 +277,16 @@ pub fn number_field<T: Numeric>(value: &mut T) -> NumberField<'_, T> {
         width: None,
         align: Align::Center,
         id: None,
+        theme: None,
     }
 }
 
 impl<T: Numeric> NumberField<'_, T> {
+    pub fn theme(mut self, t: &Theme) -> Self {
+        self.theme = Some(*t);
+        self
+    }
+
     pub fn range(mut self, r: std::ops::RangeInclusive<T>) -> Self {
         self.min = r.start().to_f64();
         self.max = r.end().to_f64();
@@ -280,6 +343,7 @@ impl<T: Numeric> NumberField<'_, T> {
 
 impl<T: Numeric> Widget for NumberField<'_, T> {
     fn ui(self, ui: &mut Ui) -> Response {
+        let t = self.theme.unwrap_or_else(Theme::current);
         let id = self
             .id
             .map_or_else(|| ui.next_auto_id(), |i| ui.make_persistent_id(i));
@@ -355,10 +419,10 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                         .margin(egui::Margin::symmetric(1, 1))
                         .horizontal_align(self.align)
                         .font(font.clone())
-                        .text_color(value_color(ui))
+                        .text_color(t.value_color(ui))
                         .desired_width(width + MARGIN),
                 );
-                underline(ui, r.rect, r.has_focus() || r.hovered());
+                underline(ui, &t, r.rect, r.has_focus() || r.hovered());
                 r
             } else {
                 // Not editing: the value as a drag handle (same size as the text edit).
@@ -370,7 +434,7 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                 if ui.is_rect_visible(rect) {
                     let galley =
                         ui.painter()
-                            .layout_no_wrap(buf.clone(), font.clone(), value_color(ui));
+                            .layout_no_wrap(buf.clone(), font.clone(), t.value_color(ui));
                     let x = match self.align {
                         Align::Min => rect.left() + 1.0,
                         Align::Center => rect.center().x - galley.size().x / 2.0,
@@ -378,13 +442,13 @@ impl<T: Numeric> Widget for NumberField<'_, T> {
                     };
                     let y = rect.center().y - galley.size().y / 2.0;
                     ui.painter()
-                        .galley(Pos2::new(x, y), galley, value_color(ui));
+                        .galley(Pos2::new(x, y), galley, t.value_color(ui));
                 }
-                underline(ui, rect, r.hovered() || r.dragged());
+                underline(ui, &t, rect, r.hovered() || r.dragged());
                 r.on_hover_cursor(egui::CursorIcon::ResizeVertical)
             };
             if let Some(s) = &self.suffix {
-                let rt = egui::RichText::new(s).color(theme::dim());
+                let rt = egui::RichText::new(s).color(t.unit);
                 ui.label(rt.font(font));
             }
             r
@@ -466,7 +530,8 @@ fn dropdown_field(ui: &mut Ui, id: Id, text: WidgetText, min_width: f32) -> Resp
     let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
     let resp = ui.interact(rect, id, Sense::click());
     if ui.is_rect_visible(rect) {
-        let color = value_color(ui);
+        let t = Theme::current();
+        let color = t.value_color(ui);
         let text_rect = Rect::from_min_size(
             Pos2::new(rect.left(), rect.center().y - galley.size().y / 2.0),
             galley.size(),
@@ -483,6 +548,7 @@ fn dropdown_field(ui: &mut Ui, id: Id, text: WidgetText, min_width: f32) -> Resp
         let line = Rect::from_x_y_ranges(rect.x_range(), text_rect.y_range());
         underline(
             ui,
+            &t,
             line,
             resp.hovered()
                 || egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp)),
@@ -578,11 +644,8 @@ pub fn right_aligned<R>(
 pub fn form_row<R>(ui: &mut Ui, icon: &str, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        let text_color = if ui.is_enabled() {
-            theme::text()
-        } else {
-            theme::dim()
-        };
+        let t = Theme::current();
+        let text_color = t.label_color(ui);
         let icon_w = ui.text_style_height(&egui::TextStyle::Body) * 1.2;
         let (ir, _) =
             ui.allocate_exact_size(vec2(icon_w, ui.spacing().interact_size.y), Sense::hover());
@@ -592,7 +655,7 @@ pub fn form_row<R>(ui: &mut Ui, icon: &str, label: &str, add: impl FnOnce(&mut U
                 egui::Align2::CENTER_CENTER,
                 icon,
                 egui::TextStyle::Body.resolve(ui.style()),
-                theme::dim(),
+                t.unit,
             );
         }
         let l = ui.label(egui::RichText::new(label).color(text_color));
@@ -602,7 +665,7 @@ pub fn form_row<R>(ui: &mut Ui, icon: &str, label: &str, add: impl FnOnce(&mut U
             let y = l.rect.center().y + 3.0;
             ui.painter().extend(Shape::dotted_line(
                 &[Pos2::new(x0, y), Pos2::new(x1, y)],
-                theme::grid(),
+                t.leader,
                 4.0,
                 0.75,
             ));
@@ -624,6 +687,7 @@ pub struct SliderField<'a, T: Numeric> {
     decimals: Option<usize>,
     suffix: Option<String>,
     logarithmic: bool,
+    theme: Option<Theme>,
 }
 
 pub fn slider_field<T: Numeric>(
@@ -637,10 +701,15 @@ pub fn slider_field<T: Numeric>(
         decimals: None,
         suffix: None,
         logarithmic: false,
+        theme: None,
     }
 }
 
 impl<T: Numeric> SliderField<'_, T> {
+    pub fn theme(mut self, t: &Theme) -> Self {
+        self.theme = Some(*t);
+        self
+    }
     /// A logarithmic slider: finer at the low end of the range.
     pub fn logarithmic(mut self) -> Self {
         self.logarithmic = true;
@@ -687,6 +756,7 @@ impl<T: Numeric> Widget for SliderField<'_, T> {
             }
             let r = ui.add(slider);
             let mut field = number_field(self.value)
+                .theme(&self.theme.unwrap_or_else(Theme::current))
                 .range(self.range)
                 .step(step)
                 .decimals(decimals)

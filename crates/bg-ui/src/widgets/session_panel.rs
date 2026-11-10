@@ -1,25 +1,62 @@
 //! The shared session controls of every timing exercise: the toolbar part (tempo, time
-//! signature, practice options and click menus) and the groove panel.
+//! signature, practice options and click menus) and the groove panel ([`SessionPanel`],
+//! a view). Both work on a copy of the settings and hand back the edited one; tap tempo
+//! is the exercise's own (its state lives in the exercise's model).
 
 use bg_core::SessionConfig;
 use bg_core::groove::builtin_grooves;
 use bg_core::session::{ClickDensity, Span, StopCondition, TempoRamp, Trigger};
-use egui::{RichText, Slider, Ui};
+use egui::{Color32, FontId, RichText, Slider, Ui};
 
 use crate::icons;
-use crate::kit;
-use crate::theme::{self, mono, section};
+use crate::kit::{self, Emit, View};
+use crate::theme::{Tokens, section};
 use crate::views::groove_editor::{self, GrooveEditor};
 use crate::widgets::button::selectable;
 use crate::widgets::controls::{checkbox, dropdown, dropdown_value, form_row, number_field};
 use crate::widgets::toolbar::{Chip, Gap, Toolbar};
 
-/// Adds the session settings to the toolbar: tap, BPM, time signature and the practice
-/// options and click menus, with their gaps. Returns true if anything changed.
-pub fn session_toolbar(tb: &mut Toolbar, cfg: &mut SessionConfig) -> bool {
-    let before = cfg.clone();
-    tb.tap(&mut cfg.tempo);
-    tb.gap(Gap::Medium);
+/// How the session controls look.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Theme {
+    /// An option's icon, and its title and description.
+    pub icon: Color32,
+    pub heading: Color32,
+    /// Hints next to controls.
+    pub note: Color32,
+    /// The groove's size next to its name.
+    pub info_font: FontId,
+    pub info: Color32,
+    pub spacing: f32,
+    pub groove: groove_editor::Theme,
+}
+
+impl From<&Tokens> for Theme {
+    fn from(t: &Tokens) -> Self {
+        Self {
+            icon: t.dim(),
+            heading: t.text(),
+            note: t.dim(),
+            info_font: t.mono(13.0),
+            info: t.dim(),
+            spacing: 6.0,
+            groove: t.into(),
+        }
+    }
+}
+
+/// Adds the session settings to the toolbar: BPM, time signature and the practice
+/// options and click menus, with their gaps. Returns the edited settings if anything
+/// changed.
+pub fn session_toolbar(
+    tb: &mut Toolbar,
+    theme: &Theme,
+    cfg: &SessionConfig,
+) -> Option<SessionConfig> {
+    kit::edited(cfg, |cfg| toolbar_items(tb, theme, cfg))
+}
+
+fn toolbar_items(tb: &mut Toolbar, theme: &Theme, cfg: &mut SessionConfig) {
     tb.tempo(&mut cfg.tempo, &mut cfg.ramp);
     tb.gap(Gap::Small);
     tb.time_sig(&mut cfg.time_sig);
@@ -41,7 +78,7 @@ pub fn session_toolbar(tb: &mut Toolbar, cfg: &mut SessionConfig) -> bool {
         "Practice options",
         practice_on,
         400.0,
-        |ui| practice_options(ui, cfg),
+        |ui| practice_options(ui, theme, cfg),
     );
     tb.gap(Gap::Small);
     tb.menu(
@@ -52,14 +89,32 @@ pub fn session_toolbar(tb: &mut Toolbar, cfg: &mut SessionConfig) -> bool {
         360.0,
         |ui| click_options(ui, cfg),
     );
-    *cfg != before
 }
 
-/// The groove panel (picker and step editor). Returns true if anything changed.
-pub fn session_panel(ui: &mut Ui, cfg: &mut SessionConfig, enabled: bool) -> bool {
-    let before = cfg.clone();
-    ui.add_enabled_ui(enabled, |ui| section(ui, "Groove", |ui| groove(ui, cfg)));
-    *cfg != before
+/// The groove panel: the groove picker and its step editor. A tier-1 view emitting the
+/// edited settings.
+pub struct SessionPanel;
+
+pub struct Props<'a> {
+    pub cfg: &'a SessionConfig,
+    pub enabled: bool,
+}
+
+impl View for SessionPanel {
+    type Props<'a> = Props<'a>;
+    type Theme = Theme;
+    type Emission = SessionConfig;
+
+    fn view(p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<SessionConfig>) {
+        let edit = kit::edited(p.cfg, |cfg| {
+            ui.add_enabled_ui(p.enabled, |ui| {
+                section(ui, "Groove", |ui| groove(ui, theme, cfg))
+            });
+        });
+        if let Some(cfg) = edit {
+            out.send(cfg);
+        }
+    }
 }
 
 fn click_options(ui: &mut Ui, cfg: &mut SessionConfig) {
@@ -126,18 +181,18 @@ fn click_options(ui: &mut Ui, cfg: &mut SessionConfig) {
 }
 
 /// An option heading: checkbox, icon, underlined title and a short description.
-fn option_heading(ui: &mut Ui, enabled: &mut bool, icon: &str, title: &str, desc: &str) {
+fn option_heading(ui: &mut Ui, t: &Theme, enabled: &mut bool, icon: &str, title: &str, desc: &str) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.spacing_mut().item_spacing.x = t.spacing;
         checkbox(ui, enabled, "");
-        ui.label(RichText::new(icon).color(theme::dim()));
-        let r = ui.label(RichText::new(format!("{title}:")).color(theme::text()));
+        ui.label(RichText::new(icon).color(t.icon));
+        let r = ui.label(RichText::new(format!("{title}:")).color(t.heading));
         ui.painter().hline(
             r.rect.x_range(),
             r.rect.bottom(),
-            egui::Stroke::new(1.0, theme::text()),
+            egui::Stroke::new(1.0, t.heading),
         );
-        ui.label(RichText::new(desc).color(theme::text()));
+        ui.label(RichText::new(desc).color(t.heading));
     });
 }
 
@@ -151,10 +206,11 @@ fn option_body(ui: &mut Ui, enabled: bool, add: impl FnOnce(&mut Ui)) {
     });
 }
 
-fn practice_options(ui: &mut Ui, cfg: &mut SessionConfig) {
+fn practice_options(ui: &mut Ui, t: &Theme, cfg: &mut SessionConfig) {
     let r = &mut cfg.ramp;
     option_heading(
         ui,
+        t,
         &mut r.enabled,
         icons::TRAY_ARROW_UP,
         "Tempo ramp",
@@ -189,6 +245,7 @@ fn practice_options(ui: &mut Ui, cfg: &mut SessionConfig) {
     let g = &mut cfg.gap;
     option_heading(
         ui,
+        t,
         &mut g.enabled,
         icons::SPEAKER_SLASH,
         "Click gaps",
@@ -209,6 +266,7 @@ fn practice_options(ui: &mut Ui, cfg: &mut SessionConfig) {
     let a = &mut cfg.auto_stop;
     option_heading(
         ui,
+        t,
         &mut a.enabled,
         icons::STOP_CIRCLE,
         "Auto stop",
@@ -220,7 +278,7 @@ fn practice_options(ui: &mut Ui, cfg: &mut SessionConfig) {
             if ui.radio(!is_ramp, "").clicked() && is_ramp {
                 a.when = StopCondition::Trigger(Trigger::After(Span::Bars(64)));
             }
-            trigger_label_editor(ui, a);
+            trigger_label_editor(ui, t, a);
         });
         ui.horizontal(|ui| {
             if ui.radio(is_ramp, "").clicked() && !is_ramp {
@@ -237,6 +295,7 @@ fn practice_options(ui: &mut Ui, cfg: &mut SessionConfig) {
     let mut on = a.on_silence;
     option_heading(
         ui,
+        t,
         &mut on,
         icons::HAND_PALM,
         "Stop on silence",
@@ -252,11 +311,11 @@ fn practice_options(ui: &mut Ui, cfg: &mut SessionConfig) {
     });
 }
 
-fn trigger_label_editor(ui: &mut Ui, a: &mut bg_core::session::AutoStop) {
+fn trigger_label_editor(ui: &mut Ui, t: &Theme, a: &mut bg_core::session::AutoStop) {
     match &mut a.when {
         StopCondition::Trigger(t) => trigger_editor(ui, "stop_trigger", t),
         StopCondition::RampDone { .. } => {
-            ui.label(RichText::new("after a time or on success").color(theme::dim()));
+            ui.label(RichText::new("after a time or on success").color(t.note));
         }
     }
 }
@@ -318,7 +377,7 @@ fn trigger_editor(ui: &mut Ui, id: &str, trigger: &mut Trigger) {
     }
 }
 
-fn groove(ui: &mut Ui, cfg: &mut SessionConfig) {
+fn groove(ui: &mut Ui, t: &Theme, cfg: &mut SessionConfig) {
     ui.horizontal_wrapped(|ui| {
         dropdown(ui, "groove_pick", RichText::new(&cfg.groove.name), |ui| {
             for g in builtin_grooves(cfg.time_sig) {
@@ -335,19 +394,18 @@ fn groove(ui: &mut Ui, cfg: &mut SessionConfig) {
                 cfg.groove.bars,
                 if cfg.groove.bars > 1 { "s" } else { "" }
             ))
-            .font(mono(13.0))
-            .color(theme::dim()),
+            .font(t.info_font.clone())
+            .color(t.info),
         );
         checkbox(ui, &mut cfg.score_length, "Score note length")
             .on_hover_text("Off: hold notes as long as you like");
     });
-    // Not migrated: the panel edits in place, so it applies the editor's emission here.
+    // The panel edits a copy of the settings, so it applies the editor's emission here.
     let props = groove_editor::Props {
         groove: &cfg.groove,
         sig: cfg.time_sig,
     };
-    let theme = groove_editor::Theme::from(&theme::tokens());
-    if let Some(g) = kit::show::<GrooveEditor>(ui, "groove", &props, &theme).pop() {
+    if let Some(g) = kit::show::<GrooveEditor>(ui, "groove", &props, &t.groove).pop() {
         cfg.groove = g;
     }
 }

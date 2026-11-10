@@ -17,7 +17,7 @@ mod split;
 mod theme_cache;
 mod view;
 
-pub use component::{Component, mount, mount_temp};
+pub use component::{Component, mount};
 pub use emit::Emit;
 pub use field::{edited, field};
 pub use program::{Program, dispatch};

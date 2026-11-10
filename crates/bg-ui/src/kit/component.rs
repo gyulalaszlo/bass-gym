@@ -63,23 +63,3 @@ pub fn mount<C: Component>(
     }
     out.into_vec()
 }
-
-/// **Migration bridge**: [`mount`] with the state kept in egui's temp memory under `id`,
-/// for components whose parent isn't migrated yet and so has nowhere to own the state.
-/// Each call site should become a plain [`mount`] once its parent owns the state.
-pub fn mount_temp<C>(
-    ui: &mut Ui,
-    id: impl Hash + Debug,
-    props: &C::Props<'_>,
-    theme: &C::Theme,
-) -> Vec<C::Emission>
-where
-    C: Component,
-    C::State: Clone + Send + Sync + 'static,
-{
-    let key = ui.id().with(&id).with("kit::mount_temp");
-    let mut state: C::State = ui.data_mut(|d| d.get_temp(key)).unwrap_or_default();
-    let out = mount::<C>(ui, id, &mut state, props, theme);
-    ui.data_mut(|d| d.insert_temp(key, state));
-    out
-}

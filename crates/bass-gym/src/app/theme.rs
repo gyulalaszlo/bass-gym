@@ -4,6 +4,7 @@ use bg_ui::egui::{Color32, Stroke};
 use bg_ui::theme::Tokens;
 
 use bg_ui::views::tuner;
+use bg_ui::widgets::toolbar;
 
 use super::{prefs, sidebar};
 use crate::presets::bar;
@@ -13,6 +14,8 @@ pub struct Theme {
     pub prefs: prefs::Theme,
     pub presets: bar::Theme,
     pub tuner: tuner::Theme,
+    /// The exercise control toolbar the shell gives each exercise.
+    pub toolbar: toolbar::Theme,
     pub sidebar_fill: Color32,
     pub sidebar_frame: Stroke,
     pub sidebar_width: f32,
@@ -31,6 +34,7 @@ impl From<&Tokens> for Theme {
             prefs: t.into(),
             presets: t.into(),
             tuner: t.into(),
+            toolbar: t.into(),
             sidebar_fill: t.bg(),
             sidebar_frame: Stroke::new(1.0, t.grid()),
             sidebar_width: 240.0,

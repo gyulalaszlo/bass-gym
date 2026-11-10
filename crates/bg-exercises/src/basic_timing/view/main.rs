@@ -6,7 +6,7 @@ use bg_ui::egui::Ui;
 use bg_ui::kit::{self, Emit};
 use bg_ui::views::beatgrid::{self, Beatgrid, LiveScore};
 use bg_ui::views::performance::{self, PerformanceStrip};
-use bg_ui::widgets::session_panel::session_panel;
+use bg_ui::widgets::session_panel::{self, SessionPanel};
 
 use crate::basic_timing::msg::Msg;
 use crate::basic_timing::props;
@@ -50,10 +50,11 @@ pub fn live(p: &props::Main, theme: &Theme, ui: &mut Ui) {
     ui.add_space(theme.grid_gap);
 }
 
-pub fn settings(p: &props::Settings, ui: &mut Ui, out: &mut Emit<Msg>) {
-    // `session_panel` edits in place (not migrated yet): edit a copy, send it if changed.
-    let mut cfg = p.session.clone();
-    if session_panel(ui, &mut cfg, p.editable) {
-        out.send(Msg::Session(Box::new(cfg)));
-    }
+pub fn settings(p: &props::Settings, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
+    let props = session_panel::Props {
+        cfg: p.session,
+        enabled: p.editable,
+    };
+    let edits = kit::show::<SessionPanel>(ui, "session", &props, &theme.session);
+    out.extend_map(edits, |cfg| Msg::Session(Box::new(cfg)));
 }

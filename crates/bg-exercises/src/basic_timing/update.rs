@@ -1,8 +1,9 @@
 //! How Basic timing's model changes. Pure: no egui and no engine.
 
-use bg_ui::kit::Emit;
+use bg_ui::kit::{Component, Emit};
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, Review};
+use bg_ui::views::tap_tempo::{self, TapTempo};
 
 use super::effects::{Effect, Start};
 use super::model::Model;
@@ -61,6 +62,17 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
         Msg::OpenResults => {
             if m.has_results && !m.frame.running {
                 m.show_results = true;
+            }
+        }
+        Msg::Tap(msg) => {
+            let mut out = Emit::new();
+            TapTempo::update(&mut m.tap, &(), msg, &mut out);
+            for tap_tempo::Emission::Tempo(bpm) in out {
+                let cfg = bg_core::SessionConfig {
+                    tempo: bpm,
+                    ..m.data.session.clone()
+                };
+                update(m, Msg::Session(Box::new(cfg)), fx);
             }
         }
         Msg::Session(cfg) => {

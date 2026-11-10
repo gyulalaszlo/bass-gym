@@ -12,6 +12,8 @@ use bg_core::harmony::{Mode, Scale};
 use bg_core::session::TempoRamp;
 use egui::{Align, Layout, Pos2, Rect, RichText, Shape, Ui, vec2};
 
+use crate::kit;
+use crate::views::tap_tempo::{self, TapTempo};
 use crate::widgets::button::{button, selectable};
 use crate::widgets::controls::{self, number_field};
 use crate::{icons, theme};
@@ -232,19 +234,20 @@ impl Toolbar<'_> {
         .inner
     }
 
-    /// The boxed tap-tempo button. Sets `bpm` once tapped at least 3 times.
+    /// The boxed tap-tempo button ([`TapTempo`]). Sets `bpm` once tapped at least 3
+    /// times.
     pub fn tap(&mut self, bpm: &mut f32) -> bool {
-        let ui = &mut *self.ui;
-        let r = ui
-            .add(button(format!("{} TAP", icons::HAND_TAP)).min_size([88.0, BUTTON_HEIGHT]))
-            .on_hover_text("Tap at least 3 times in tempo");
-        if r.clicked()
-            && let Some(t) = tap_tempo(ui)
-        {
-            *bpm = t.round().clamp(20.0, 400.0);
-            return true;
+        let props = tap_tempo::Props {
+            height: BUTTON_HEIGHT,
+        };
+        let theme = tap_tempo::Theme::new(&theme::tokens());
+        // Bridge until the exercise owns the toolbar's state (see `kit::mount_temp`).
+        let out = kit::mount_temp::<TapTempo>(self.ui, "tap_tempo", &props, &theme);
+        let before = *bpm;
+        for tap_tempo::Emission::Tempo(t) in out {
+            *bpm = t;
         }
-        false
+        *bpm != before
     }
 
     /// − [large BPM readout] bpm +. The field steps by 5 with ↑ / ↓, the buttons by 1.
@@ -564,22 +567,6 @@ fn choice_grid<T: PartialEq + Copy>(
             }
         }
     });
-}
-
-fn tap_tempo(ui: &Ui) -> Option<f32> {
-    let id = egui::Id::new("tap_tempo");
-    let now = ui.input(|i| i.time);
-    let mut taps: Vec<f64> = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
-    if taps.last().is_some_and(|&t| now - t > 2.0) {
-        taps.clear();
-    }
-    taps.push(now);
-    if taps.len() > 8 {
-        taps.remove(0);
-    }
-    ui.data_mut(|d| d.insert_temp(id, taps.clone()));
-    (taps.len() >= 3)
-        .then(|| 60.0 * (taps.len() - 1) as f32 / (taps[taps.len() - 1] - taps[0]) as f32)
 }
 
 /// Outline of a panel with a tab on its top edge (the tab sits on the panel, flush with

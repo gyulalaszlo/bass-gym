@@ -3,11 +3,13 @@
 
 pub mod exercise;
 pub mod folder;
+pub mod kit;
 pub mod prefs;
 pub mod recording;
 pub mod settings;
 pub mod theme;
 pub mod view;
+pub mod views;
 pub mod widgets;
 
 pub use egui;

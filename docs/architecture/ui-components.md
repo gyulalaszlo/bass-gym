@@ -1,0 +1,169 @@
+# UI components
+
+How UI code is structured: the component kit (`bg-ui/src/kit/`), its tiers, where files
+go, and how themes work. The UI is being migrated to this a piece at a time. Code that
+isn't migrated yet follows the older conventions in [ui.md](ui.md).
+
+The goal: for every component it should be clear what data it uses, and layout,
+painting, input and state changes should be kept apart. The component tree should be
+built the same way everywhere, so that a layout / wiring DSL can target it later.
+
+## Tiers
+
+Pick the lowest tier that works. Most components don't need state.
+
+| Tier | What | Contract | Lives in |
+|---|---|---|---|
+| 0 Widget | Leaf control | `impl egui::Widget`, returns a `Response` | `widgets/` |
+| 1 View | Display plus input, no state | `Props` + `Theme` in, `Emission` out | `views/` |
+| 2 Component | A view with owned `State` and its own `update` | `State`, `Props`, `Theme`, `Msg` in, `Emission` out | `views/` |
+| 3 Program | A screen: model, sync, update, effects | not built yet (migration phase 2) | the exercise's folder |
+
+```rust
+pub trait View {
+    type Props<'a>; type Theme; type Emission;
+    fn view(props: &Self::Props<'_>, theme: &Self::Theme, ui: &mut Ui, out: &mut Emit<Self::Emission>);
+}
+
+pub trait Component {
+    type State: Default; type Props<'a>; type Theme; type Msg; type Emission;
+    fn view(state: &Self::State, props: &Self::Props<'_>, theme: &Self::Theme, ui: &mut Ui, msg: &mut Emit<Self::Msg>);
+    fn update(state: &mut Self::State, props: &Self::Props<'_>, msg: Self::Msg, out: &mut Emit<Self::Emission>);
+}
+```
+
+Arguments always come in the order state, props, theme, then msg / ui, then out. State
+comes first, standing in for `self`.
+
+## The data a component uses
+
+- **`Props<'a>`**: borrowed, read-only data for this frame. Its parent builds it.
+- **`Theme`**: how it looks. It's a separate argument, not a Props field (see Themes).
+- **`State`**: what the component remembers between frames. The parent stores it as a
+  named field, so it can be seen and tested. Don't hide it in `ctx.data`. The one
+  exception is `kit::mount_temp`, a migration bridge (see below).
+- **`Msg`** goes *in*. It's private to the component: its view sends a `Msg` and its own
+  `update` handles it. A parent never handles a child's `Msg`, or passes it down.
+- **`Emission`** goes *out*, to the parent. A view that never emits uses
+  `std::convert::Infallible`.
+
+`view` only reads. It reports changes as messages and never writes data or calls the
+engine.
+
+## Building the tree
+
+```rust
+// in the parent's view
+let out_grid = kit::show::<Beatgrid>(ui, "grid", &grid_props, &theme.grid);
+let out_tap = kit::mount::<TapTempo>(ui, "tap", &mut state.tap, &tap_props, &theme.tap);
+out.extend_map(out_tap, Msg::Tap);
+
+// in the parent's update: the child's Emission arrives in one of the parent's Msgs
+Msg::Tap(tap_tempo::Emission::Tempo(bpm)) => model.bpm = bpm,
+```
+
+- `show` runs a view in its own id scope and returns its emissions.
+- `mount` also runs the component's `update` on its messages straight away, so its state
+  is current when `mount` returns, and the parent only sees emissions. It requests a
+  repaint when there were messages.
+- Every child appears once in the parent's view and once in the parent's `Msg`.
+  Visibility is an ordinary `if` around the one `show` / `mount` call.
+
+### Forms
+
+`kit::field` lets form code stay short without writing in place. It runs the widget
+on a copy of the value, and if the copy changed it sends a message with the new value:
+
+```rust
+field(ui, &props.bpm, out, Msg::Bpm, |ui, v| ui.add(number_field(v).range(20.0..=400.0)));
+field(ui, &props.click, out, Msg::Click, |ui, v| checkbox(ui, v, "Click"));
+```
+
+### Migration bridge
+
+`kit::mount_temp` is `mount` with the state kept in egui temp memory. Use it only where
+the parent isn't migrated yet and so has nowhere to own the state. Today the only user is
+`Toolbar::tap`. Each one becomes a plain `mount` once its parent owns the state.
+
+## Where files go
+
+The path tells you the role.
+
+```
+bg-ui/src/
+  kit/                 the framework: emit, view, component, field, split, theme_cache, rig
+  widgets/             tier 0 leaf controls (and code not migrated yet)
+  views/               tier 1 and 2
+    tap_tempo.rs       a small component: one file
+    beatgrid/          a big one: one folder with fixed file names
+      mod.rs           Props, State, Msg, Emission, the trait impl (wiring only)
+      theme.rs         Theme and its constructors
+      layout.rs        pure: fn layout(&Props, Rect) -> Layout, with tests
+      paint.rs         drawing only: reads props, theme and layout
+      input.rs         egui responses -> Msg (when interactive)
+      update.rs        pure state changes (tier 2)
+```
+
+If a file name is missing, the component doesn't have that part. For example, the
+beatgrid has no `input.rs` because nothing in it is interactive.
+
+Layout helpers: `kit::split(rect, Axis, gap, [Part; N]) -> [Rect; N]`. Fixed sizes are
+taken first, and the rest is shared by weight. `Part::NONE` is for a hidden part.
+
+## Themes
+
+There are two layers.
+
+1. **`theme::Tokens`** are the global design tokens: the palette (5 presets plus custom),
+   the text scale and the button look. They come from the display preferences, so they
+   have to be global. `theme::tokens()` reads the current ones. Only Theme constructors
+   use them.
+2. **A `Theme` per component** is a plain struct in its own file, built from `&Tokens`.
+   A parent's theme holds its children's themes, so the parent decides how each group of
+   children looks:
+
+```rust
+pub struct Theme { pub white_key: button::Theme, pub black_key: button::Theme }
+impl Theme {
+    pub fn new(t: &Tokens) -> Self {
+        Self { white_key: button::Theme::normal(t), black_key: button::Theme::colored(t, t.text()) }
+    }
+}
+impl From<&Tokens> for Theme { fn from(t: &Tokens) -> Self { Self::new(t) } }
+```
+
+- The owner of a theme tree's root keeps a `kit::ThemeCache<Theme>` field. Its `get()`
+  rebuilds the theme only when the tokens change. It has a `Default` for themes with
+  `From<&Tokens>`. The two exercises hold one for their beat grid.
+- Painters read only their `Theme`. A `theme::green()` call in migrated paint code is a
+  bug. Children that aren't migrated yet, such as `ScoreView` inside the beat grid,
+  still read the globals.
+- Shared sub-themes go in `theme.rs`. So far that's `GradeColors`.
+- Leaf widgets take a theme through a builder, e.g. `button(..).theme(&t)`, where `t` is
+  a `button::Theme`. Without one they use the default for the current tokens.
+
+## Testing
+
+- `layout.rs` and `update.rs` are pure, so test them directly (`beatgrid/layout.rs`,
+  `tap_tempo.rs`).
+- For interaction, `kit::Rig` runs UI code in a real `egui::Context`. It has `frame`,
+  `click`, `double_click`, `drag`, `type_text` and `wait`. The UI function is a
+  `&mut dyn FnMut(&mut Ui)`; use `Cell` / `RefCell` for anything the test reads
+  between calls (`kit/field.rs` tests).
+- `marker_editor.rs` still has its own older `Rig`.
+
+## Migration status
+
+Done (phase 1):
+- `kit`
+- `Tokens`
+- `button::Theme`
+- `views::beatgrid` (tier 1)
+- `views::tap_tempo` (tier 2, bridged through `mount_temp`)
+
+Next:
+- tier 3 `Program` on Basic timing (model, sync, props, update, effects, view)
+- Basic chords
+- session review and marker editor (engine calls become effects)
+- preferences and the app shell
+- then the DSL

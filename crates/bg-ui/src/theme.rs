@@ -3,8 +3,15 @@
 //! for meaning (green = normal values, cyan = selectable / units, amber = caution,
 //! red = fault, magenta = targets).
 //!
-//! The palette is runtime-configurable ([`ThemePrefs`]); widgets read colours through
-//! the accessor functions (`theme::green()`, ...), so a theme change applies everywhere.
+//! The palette is runtime-configurable ([`ThemePrefs`]). There are two layers:
+//!
+//! - [`Tokens`]: the global design tokens (palette, text scale, button look), read with
+//!   [`tokens`]. Component `Theme` constructors read these, and painters don't.
+//! - A `Theme` struct per component, built from `&Tokens` and handed down by its parent
+//!   (see `docs/architecture/ui-components.md`).
+//!
+//! Code that isn't migrated yet still reads the free accessors (`theme::green()`, ...),
+//! which read the same globals, so a theme change still applies everywhere.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
@@ -262,33 +269,157 @@ pub fn button_rounding() -> f32 {
 
 /// The dim resting fill of a button drawn in `color` (also its text colour on hover).
 pub fn button_fill(color: Color32) -> Color32 {
-    let t = f32::from_bits(BUTTON_TINT.load(Ordering::Relaxed));
-    let base = palette().button_base.0;
-    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-    Color32::from_rgb(
-        mix(base[0], color.r()),
-        mix(base[1], color.g()),
-        mix(base[2], color.b()),
-    )
+    tokens().button_fill(color)
 }
 
 pub fn grade_color(g: Grade) -> Color32 {
-    match g {
-        Grade::Good => green(),
-        Grade::Ok => amber(),
-        Grade::Poor => red(),
-        Grade::Missed => red().gamma_multiply(0.5),
-    }
+    tokens().grade_color(g)
 }
 
 /// Monospaced font for values, scaled by the text-size preference.
 pub fn mono(size: f32) -> FontId {
-    FontId::new(size * text_scale(), FontFamily::Monospace)
+    tokens().mono(size)
 }
 
 /// Text-scaled proportional font (icons live in this family).
 pub fn prop(size: f32) -> FontId {
-    FontId::new(size * text_scale(), FontFamily::Proportional)
+    tokens().prop(size)
+}
+
+// ---------------------------------------------------------------------------------------
+// Tokens
+
+/// The global design tokens: everything the user's display preferences decide. Component
+/// themes are built from these, and rebuilt when they change (see `kit::ThemeCache`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tokens {
+    pub palette: Palette,
+    /// Text size multiplier.
+    pub text_scale: f32,
+    /// Corner radius of buttons.
+    pub button_rounding: f32,
+    /// How much of a button's colour goes into its resting fill.
+    pub button_tint: f32,
+}
+
+impl Default for Tokens {
+    fn default() -> Self {
+        Self {
+            palette: ECAM,
+            text_scale: 1.0,
+            button_rounding: 4.0,
+            button_tint: 0.15,
+        }
+    }
+}
+
+/// The tokens currently applied (see [`apply`]).
+pub fn tokens() -> Tokens {
+    Tokens {
+        palette: palette(),
+        text_scale: text_scale(),
+        button_rounding: button_rounding(),
+        button_tint: f32::from_bits(BUTTON_TINT.load(Ordering::Relaxed)),
+    }
+}
+
+impl Tokens {
+    pub fn bg(&self) -> Color32 {
+        self.palette.bg.color()
+    }
+    pub fn panel(&self) -> Color32 {
+        self.palette.panel.color()
+    }
+    pub fn raised(&self) -> Color32 {
+        self.palette.raised.color()
+    }
+    pub fn line(&self) -> Color32 {
+        self.palette.line.color()
+    }
+    pub fn grid(&self) -> Color32 {
+        self.palette.grid.color()
+    }
+    pub fn dim(&self) -> Color32 {
+        self.palette.dim.color()
+    }
+    pub fn text(&self) -> Color32 {
+        self.palette.text.color()
+    }
+    /// Normal / good / active values.
+    pub fn green(&self) -> Color32 {
+        self.palette.green.color()
+    }
+    /// Caution.
+    pub fn amber(&self) -> Color32 {
+        self.palette.amber.color()
+    }
+    /// Warning / fault.
+    pub fn red(&self) -> Color32 {
+        self.palette.red.color()
+    }
+    /// Selectable / interactive items and units.
+    pub fn cyan(&self) -> Color32 {
+        self.palette.cyan.color()
+    }
+    /// Targets.
+    pub fn magenta(&self) -> Color32 {
+        self.palette.magenta.color()
+    }
+
+    /// Monospaced font for values, scaled by the text-size preference.
+    pub fn mono(&self, size: f32) -> FontId {
+        FontId::new(size * self.text_scale, FontFamily::Monospace)
+    }
+
+    /// Text-scaled proportional font (icons live in this family).
+    pub fn prop(&self, size: f32) -> FontId {
+        FontId::new(size * self.text_scale, FontFamily::Proportional)
+    }
+
+    /// The dim resting fill of a button drawn in `color` (also its text colour on hover).
+    pub fn button_fill(&self, color: Color32) -> Color32 {
+        let t = self.button_tint;
+        let base = self.palette.button_base.0;
+        let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+        Color32::from_rgb(
+            mix(base[0], color.r()),
+            mix(base[1], color.g()),
+            mix(base[2], color.b()),
+        )
+    }
+
+    pub fn grade_color(&self, g: Grade) -> Color32 {
+        GradeColors::new(self).get(g)
+    }
+}
+
+/// The colour of each [`Grade`]: a small theme shared by everything that shows grades.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradeColors {
+    pub good: Color32,
+    pub ok: Color32,
+    pub poor: Color32,
+    pub missed: Color32,
+}
+
+impl GradeColors {
+    pub fn new(t: &Tokens) -> Self {
+        Self {
+            good: t.green(),
+            ok: t.amber(),
+            poor: t.red(),
+            missed: t.red().gamma_multiply(0.5),
+        }
+    }
+
+    pub fn get(&self, g: Grade) -> Color32 {
+        match g {
+            Grade::Good => self.good,
+            Grade::Ok => self.ok,
+            Grade::Poor => self.poor,
+            Grade::Missed => self.missed,
+        }
+    }
 }
 
 /// Applies the theme: palette, fonts, text sizes and widget visuals. Call when the

@@ -3,11 +3,12 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use bg_core::SessionConfig;
 use bg_core::preset::{PresetError, PresetSchema};
+use bg_core::{BarPlan, Matcher, SessionConfig};
+use bg_ui::kit::{self, ThemeCache};
 use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
-use bg_ui::widgets::beatgrid::{Beatgrid, LiveScore};
+use bg_ui::views::beatgrid::{self, Beatgrid, LiveScore};
 use bg_ui::widgets::performance::performance_strip;
 use bg_ui::widgets::results::{ResultsTab, results, results_dialog};
 use bg_ui::widgets::session_panel::{session_panel, session_toolbar};
@@ -60,6 +61,7 @@ pub struct BasicTiming {
     capture: SessionCapture,
     review: Option<SessionReview>,
     results_tab: ResultsTab,
+    grid_theme: ThemeCache<beatgrid::Theme>,
 }
 
 impl PresetSchema for BasicTiming {
@@ -194,33 +196,28 @@ impl ExerciseType for BasicTiming {
             a4: ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
             size: prefs.score_size,
         });
+        let grid_theme = self.grid_theme.get();
+        let grid = |ui: &mut egui::Ui, now, bars: &[BarPlan], matcher: &Matcher| {
+            let props = beatgrid::Props {
+                now,
+                bars,
+                matcher,
+                steps_per_beat: steps,
+                bars_behind: view.bars_behind,
+                bars_ahead: view.bars_ahead,
+                chords: &[],
+                score,
+                height: 150.0,
+                zoom: prefs.zoom_factor(),
+            };
+            kit::show::<Beatgrid>(ui, "grid", &props, &grid_theme);
+        };
         if self.has_results {
             let s = lock(&self.shared);
-            Beatgrid {
-                now,
-                bars: &s.bars,
-                matcher: &s.matcher,
-                steps_per_beat: steps,
-                bars_behind: view.bars_behind,
-                bars_ahead: view.bars_ahead,
-                chords: &[],
-                score,
-            }
-            .show(ui, 150.0, prefs.zoom_factor());
+            grid(ui, now, &s.bars, &s.matcher);
         } else {
             let (bars, matcher) = preview(&self.data.session);
-            let now = bars.first().map_or(0.0, |b| b.start);
-            Beatgrid {
-                now,
-                bars: &bars,
-                matcher: &matcher,
-                steps_per_beat: steps,
-                bars_behind: view.bars_behind,
-                bars_ahead: view.bars_ahead,
-                chords: &[],
-                score,
-            }
-            .show(ui, 150.0, prefs.zoom_factor());
+            grid(ui, bars.first().map_or(0.0, |b| b.start), &bars, &matcher);
         }
         if running {
             ui.ctx().request_repaint();

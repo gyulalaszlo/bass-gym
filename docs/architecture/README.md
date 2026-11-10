@@ -10,6 +10,7 @@ doc disagrees with the code, the code wins: fix the doc in the same commit.
 |---|---|---|
 | [audio.md](audio.md) | Threads, rings, capture, mix, clock, latency, session lifecycle, scheduling, note detection | `e0091e1` |
 | [ui.md](ui.md) | App shell, widget conventions, theme, beatgrid, results dialog, settings, presets | `e0091e1` |
+| [ui-components.md](ui-components.md) | Component kit: tiers, Props / State / Msg / Emission, file layout, themes, testing, migration status | `(new)` |
 | [data-model.md](data-model.md) | Plans, scoring, chords, what survives a session, time bases | `e0091e1` |
 
 Update the "last verified" commit when you re-check a doc against the code, not on
@@ -68,7 +69,7 @@ untouched: the fake session changes the exercise's session settings.
 - Additive config changes need only `#[serde(default)]`. Preset restructures need a
   `current_version` bump plus `migrate_step`.
 - Keep logic in pure functions outside painters, because that's what's easiest to test.
-  Interaction can be tested too: see `Rig` in `marker_editor.rs`.
+  Interaction can be tested too, with `kit::Rig` (see `ui-components.md`).
 - Tests: `#[cfg(test)]` modules, plus offline end-to-end tests in
   `crates/bg-exercises/tests/` (`pipeline.rs`, `basic_chords.rs`). These synthesise a
   `pluck`, run it through `NoteDetector` and `TimingSession` using `SessionIo::offline`,

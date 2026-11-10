@@ -32,11 +32,15 @@ pub struct ExerciseCtx<'a> {
 
 ## Painter conventions
 
+New and migrated UI code uses the component kit: see
+[ui-components.md](ui-components.md). The conventions below are for the widgets that
+aren't migrated yet.
+
 Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line in
 `widgets/mod.rs`.
 
-1. A struct of borrowed data with `show(&self, ui, height_or_size)` (`Beatgrid`,
-   `Histogram`, `Keyboard`), a free fn (`accuracy_timeline`, `groove_editor`), or
+1. A struct of borrowed data with `show(&self, ui, height_or_size)` (`Histogram`,
+   `Keyboard`), a free fn (`accuracy_timeline`, `groove_editor`), or
    painting into a given rect via `performance.rs::Indicator`.
 2. `ui.allocate_exact_size(...)`, then `ui.painter_at(rect)`, which clips to the rect.
 3. Local `x_of` / `y_of` closures for mapping.
@@ -47,12 +51,17 @@ Widgets live one per module in `bg-ui/src/widgets/`, each with a `pub mod` line 
 7. Most interaction is click only (`groove_editor`). `marker_editor` shows drag gestures.
 8. `is_rect_visible` culling appears only in `performance.rs`.
 
-`button.rs::selectable` and `selectable_value` work as tab-like primitives. The
+`button.rs::selectable` and `selectable_value` work as tab-like primitives. Both take a
+`button::Theme` through `.theme(&t)`. `.color(c)` is short for
+`.theme(&Theme::colored(.., c))`. The
 preferences page list uses them; `.centred()` centres the text.
 
 Toolbar menus (`toolbar.rs`): `menu` is an icon button opening a tabbed panel, and
 `menu_labelled` the same with the current value as its label. Time signature and key
 use the latter, with `choice_grid` (equal-width, centred selectables).
+
+`Toolbar::tap` mounts `views::tap_tempo::TapTempo` through `kit::mount_temp`, so its
+taps live in egui temp memory until the exercise owns the toolbar's state.
 
 Shortcuts: Space starts / stops (`Toolbar::transport`) and plays / stops the review;
 M toggles monitoring (sidebar in `app.rs`). Both are ignored while a text field has
@@ -64,37 +73,43 @@ The style is ECAM (Airbus cockpit display). Colour is reserved for meaning: gree
 normal, cyan selectable / units, amber caution, red fault, magenta targets.
 
 - `Palette`: `bg, panel, raised, line, grid, dim, text, green, amber, red, cyan,
-  magenta, button_base`. Read through free functions such as `theme::green()`, backed
-  by a global `RwLock<Palette>`.
+  magenta, button_base`. Backed by a global `RwLock<Palette>`.
+- `Tokens` (`theme::tokens()`) holds the palette plus text scale, button rounding and
+  tint. Component themes are built from it (see [ui-components.md](ui-components.md)).
+  Code that isn't migrated reads the free functions such as `theme::green()`, which
+  read the same globals.
+- `GradeColors` is the shared grade sub-theme.
 - There are 5 presets. `Day` is light, so painters can't assume a black background.
-- `theme::grade_color(Grade)`: Good green, Ok amber, Poor red, Missed red at 0.5.
+- `theme::grade_color(Grade)` / `GradeColors::get`: Good green, Ok amber, Poor red,
+  Missed red at 0.5.
 - `mono(size)` and `prop(size)` apply the text scale. Helpers: `caption`, `section`,
   `responsive_columns`, `title_label`.
 - Fonts are set in `theme::apply`, which is where any bundled font is registered.
 
-## Beatgrid (`bg-ui/src/widgets/beatgrid.rs`)
+## Beatgrid (`bg-ui/src/views/beatgrid/`)
+
+A tier-1 kit view: `mod.rs` (props), `theme.rs`, `layout.rs` (pure, tested) and
+`paint.rs`.
 
 ```rust
-pub struct Beatgrid<'a> {
+pub struct Props<'a> {
     pub now: f64, pub bars: &'a [BarPlan], pub matcher: &'a Matcher,
     pub steps_per_beat: u32, pub bars_behind: f64, pub bars_ahead: f64,
     pub chords: &'a [(f64, f64, String)], pub score: Option<LiveScore<'a>>,
+    pub height: f32, pub zoom: f64,
 }
 ```
 
-- `show(ui, height, zoom)`. Heights are 150 in Basic timing and 180 in Basic chords.
+- `kit::show::<Beatgrid>(ui, "grid", &props, &theme)`. The theme comes from a
+  `ThemeCache<beatgrid::Theme>` on the exercise. Heights are 150 in Basic timing and
+  180 in Basic chords.
 - Zoom: `view.rs::ZOOM_STEPS = [0.5, 0.75, 1.0, 1.5, 2.0]`, default index 2, stored in
   `ViewPrefs.grid_zoom` and set in the Display preferences. The step divides the visible
   span.
-- The mapping is linear in seconds, so a tempo change alters bar widths on screen:
-
-```rust
-let behind = self.bars_behind * bar_len / zoom;
-let ahead  = self.bars_ahead  * bar_len / zoom;
-let x_now  = rect.left() + rect.width() * (behind / (behind + ahead)) as f32;
-let pps    = rect.width() as f64 / (behind + ahead);
-let x_of   = |t: f64| x_now + ((t - self.now) * pps) as f32;
-```
+- The mapping is linear in seconds, so a tempo change alters bar widths on screen.
+`layout.rs::layout` gives the visible span `t0 = now - behind`, `t1 = now + ahead`
+(`behind = bars_behind * bar_len / zoom`, and likewise ahead) and one `TimeAxis` over it,
+shared by the grid and the score.
 
 `score: Some(LiveScore)` adds a staff above the grid on the same axis, built each frame
 from the bars in view with `until = now`. `LiveScore::layout` has a fixed range so the
@@ -106,8 +121,8 @@ Results score has its own `.results_score_size`.
 `now` with `x_now` fixed, and the exercise calls `request_repaint()` while running.
 After a session `now = last_time(...)`, and before one a `preview()` is shown.
 
-Draw order:
-1. Background and frame.
+Draw order (`paint.rs`, one function per step):
+1. The live score, if shown. Then the grid's background and frame.
 2. Per visible bar: count-in fill, bar number and BPM, "CLICK OFF" band if muted, solid
    bar line.
 3. Dashed beat and sub-step lines. These are the grid, not expected notes.
@@ -211,5 +226,7 @@ set -> `ctx.engine.set_x()` pattern that `LatencyPage` uses.
 ## Visual checks
 
 There are no snapshot tests. Use the `BASS_GYM_*` variables in
-[README.md](README.md) to take a screenshot. For interaction, `marker_editor.rs`'s `Rig`
-test helper runs a widget in a real `egui::Context` fed with input events.
+[README.md](README.md) to take a screenshot. For interaction, `kit::Rig` runs UI code in a
+real `egui::Context` fed with input events (`marker_editor.rs` still has its own older
+`Rig`). Run the binary directly rather than through `cargo run` with `HOME` changed,
+because rustup reads its toolchain from `HOME`.

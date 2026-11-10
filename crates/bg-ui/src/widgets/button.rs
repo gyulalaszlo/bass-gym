@@ -5,6 +5,10 @@
 //! shows just its text at rest, the regular dim button when hovered, and the flipped
 //! (hovered-button) look when selected. Sizes never depend on the state, so hovering
 //! never moves the layout.
+//!
+//! The look comes from a [`Theme`] (`.theme(&t)`); without one, a button uses
+//! [`Theme::normal`] for the current tokens, and `.color(c)` is short for
+//! `.theme(&Theme::colored(.., c))`.
 
 use std::sync::Arc;
 
@@ -13,12 +17,41 @@ use egui::{
     WidgetInfo, WidgetText, WidgetType,
 };
 
-use crate::theme;
+use crate::theme::{self, Tokens};
 
-/// Text, colour and size shared by [`Button`] and [`Selectable`].
+/// How a [`Button`] or [`Selectable`] looks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Theme {
+    /// Text at rest; the fill when hovered or selected.
+    pub color: Color32,
+    /// The dim resting fill; the text when hovered or selected.
+    pub fill: Color32,
+    /// Text when disabled.
+    pub disabled_text: Color32,
+    pub rounding: f32,
+}
+
+impl Theme {
+    /// The usual button: in the selectable colour (cyan).
+    pub fn normal(t: &Tokens) -> Self {
+        Self::colored(t, t.cyan())
+    }
+
+    /// A button in `color`, with the fill the tokens give that colour.
+    pub fn colored(t: &Tokens, color: Color32) -> Self {
+        Self {
+            color,
+            fill: t.button_fill(color),
+            disabled_text: t.dim(),
+            rounding: t.button_rounding,
+        }
+    }
+}
+
+/// Text, theme and size shared by [`Button`] and [`Selectable`].
 struct Look {
     text: String,
-    color: Option<Color32>,
+    theme: Option<Theme>,
     font: Option<FontId>,
     strong: bool,
     small: bool,
@@ -31,7 +64,7 @@ impl Look {
     fn new(text: String) -> Self {
         Self {
             text,
-            color: None,
+            theme: None,
             font: None,
             strong: false,
             small: false,
@@ -40,8 +73,9 @@ impl Look {
         }
     }
 
-    fn color(&self) -> Color32 {
-        self.color.unwrap_or_else(theme::cyan)
+    fn theme(&self) -> Theme {
+        self.theme
+            .unwrap_or_else(|| Theme::normal(&theme::tokens()))
     }
 
     /// Lays out the text and allocates the widget. With `fill_width` the item takes the
@@ -88,6 +122,7 @@ impl Look {
         galley: Arc<Galley>,
         fill: Option<Color32>,
         text: Color32,
+        rounding: f32,
         centred: bool,
     ) {
         if !ui.is_rect_visible(rect) {
@@ -95,7 +130,7 @@ impl Look {
         }
         let p = ui.painter();
         if let Some(fill) = fill {
-            p.rect_filled(rect, theme::button_rounding(), fill);
+            p.rect_filled(rect, rounding, fill);
         }
         let y = rect.center().y - galley.size().y / 2.0;
         let x = if centred {
@@ -109,9 +144,14 @@ impl Look {
 
 macro_rules! look_builders {
     () => {
-        /// The colour (default: [`theme::cyan`]).
+        /// The look (default: [`Theme::normal`]).
+        pub fn theme(mut self, t: &Theme) -> Self {
+            self.look.theme = Some(*t);
+            self
+        }
+        /// Short for `.theme(&Theme::colored(&theme::tokens(), c))`.
         pub fn color(mut self, c: Color32) -> Self {
-            self.look.color = Some(c);
+            self.look.theme = Some(Theme::colored(&theme::tokens(), c));
             self
         }
         pub fn font(mut self, f: FontId) -> Self {
@@ -167,16 +207,16 @@ impl Button {
 impl Widget for Button {
     fn ui(self, ui: &mut Ui) -> Response {
         let (rect, resp, galley) = self.look.allocate(ui, false);
-        let color = self.look.color();
-        let base = theme::button_fill(color);
+        let t = self.look.theme();
+        let (color, base) = (t.color, t.fill);
         let (fill, text) = if !ui.is_enabled() {
-            (base.gamma_multiply(0.5), theme::dim())
+            (base.gamma_multiply(0.5), t.disabled_text)
         } else if resp.hovered() || resp.is_pointer_button_down_on() {
             (color, base)
         } else {
             (base, color)
         };
-        Look::paint(ui, rect, galley, Some(fill), text, true);
+        Look::paint(ui, rect, galley, Some(fill), text, t.rounding, true);
         pointer_cursor(ui, &resp);
         resp.widget_info(|| {
             WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &self.look.text)
@@ -210,17 +250,17 @@ impl Selectable {
 impl Widget for Selectable {
     fn ui(self, ui: &mut Ui) -> Response {
         let (rect, resp, galley) = self.look.allocate(ui, true);
-        let color = self.look.color();
-        let base = theme::button_fill(color);
+        let t = self.look.theme();
+        let (color, base) = (t.color, t.fill);
         let hovered = resp.hovered() || resp.is_pointer_button_down_on();
         let (fill, text) = match (ui.is_enabled(), self.selected) {
-            (false, true) => (Some(base), theme::dim()),
-            (false, false) => (None, theme::dim()),
+            (false, true) => (Some(base), t.disabled_text),
+            (false, false) => (None, t.disabled_text),
             (true, true) => (Some(color), base),
             (true, false) if hovered => (Some(base), color),
             (true, false) => (None, color),
         };
-        Look::paint(ui, rect, galley, fill, text, self.look.centred);
+        Look::paint(ui, rect, galley, fill, text, t.rounding, self.look.centred);
         pointer_cursor(ui, &resp);
         resp.widget_info(|| {
             WidgetInfo::selected(

@@ -14,9 +14,10 @@ use bg_core::preset::{PresetError, PresetSchema};
 use bg_core::score::ScoreChord;
 use bg_core::scoring::harmony_grade;
 use bg_core::{Grade, SessionConfig};
+use bg_ui::kit::{self, ThemeCache};
 use bg_ui::recording::{RecordingPrefs, SessionCapture};
 use bg_ui::view::ViewPrefs;
-use bg_ui::widgets::beatgrid::{Beatgrid, LiveScore};
+use bg_ui::views::beatgrid::{self, Beatgrid, LiveScore};
 use bg_ui::widgets::button::{button, selectable_value};
 use bg_ui::widgets::controls::{checkbox, dropdown, number_field, text_field};
 use bg_ui::widgets::keyboard::{self, KeyLabels, Keyboard};
@@ -286,6 +287,7 @@ pub struct BasicChords {
     capture: SessionCapture,
     review: Option<SessionReview>,
     results_tab: ResultsTab,
+    grid_theme: ThemeCache<beatgrid::Theme>,
 }
 
 impl PresetSchema for BasicChords {
@@ -474,11 +476,13 @@ impl ExerciseType for BasicChords {
         );
         performance_strip(ui, PERFORMANCE_HEIGHT, &[&meter]);
         ui.add_space(4.0);
+        let grid_theme = self.grid_theme.get();
         self.grid(
             ui,
             now,
             &prefs,
             ctx.settings.get::<TunerPrefs>(TunerPrefs::ID).a4,
+            &grid_theme,
         );
         if running {
             ui.ctx().request_repaint();
@@ -844,10 +848,20 @@ impl BasicChords {
             });
     }
 
-    fn grid(&self, ui: &mut egui::Ui, now: f64, prefs: &ViewPrefs, a4: f32) {
+    fn grid(
+        &self,
+        ui: &mut egui::Ui,
+        now: f64,
+        prefs: &ViewPrefs,
+        a4: f32,
+        theme: &beatgrid::Theme,
+    ) {
         let steps = self.data.session.groove.steps_per_beat;
         let (show_score, size) = (prefs.show_score, prefs.score_size);
         let zoom = prefs.zoom_factor();
+        let show = |ui: &mut egui::Ui, props: beatgrid::Props| {
+            kit::show::<Beatgrid>(ui, "grid", &props, theme);
+        };
         let live = |chords| {
             show_score.then_some(LiveScore {
                 chords,
@@ -874,17 +888,21 @@ impl BasicChords {
                     })
                     .unzip();
             let t = lock(&self.timing);
-            Beatgrid {
-                now,
-                bars: &t.bars,
-                matcher: &t.matcher,
-                steps_per_beat: steps,
-                bars_behind: 1.0,
-                bars_ahead: 2.0,
-                chords: &labels,
-                score: live(&chords),
-            }
-            .show(ui, 180.0, zoom);
+            show(
+                ui,
+                beatgrid::Props {
+                    now,
+                    bars: &t.bars,
+                    matcher: &t.matcher,
+                    steps_per_beat: steps,
+                    bars_behind: 1.0,
+                    bars_ahead: 2.0,
+                    chords: &labels,
+                    score: live(&chords),
+                    height: 180.0,
+                    zoom,
+                },
+            );
         } else {
             let d = &self.data;
             let bars_per_chord = d.chord_length.bars();
@@ -905,18 +923,21 @@ impl BasicChords {
                     })
                     .collect()
             };
-            let now = bars.first().map_or(0.0, |b| b.start);
-            Beatgrid {
-                now,
-                bars: &bars,
-                matcher: &matcher,
-                steps_per_beat: steps,
-                bars_behind: 1.0,
-                bars_ahead: 2.0,
-                chords: &labels,
-                score: live(&[]),
-            }
-            .show(ui, 180.0, zoom);
+            show(
+                ui,
+                beatgrid::Props {
+                    now: bars.first().map_or(0.0, |b| b.start),
+                    bars: &bars,
+                    matcher: &matcher,
+                    steps_per_beat: steps,
+                    bars_behind: 1.0,
+                    bars_ahead: 2.0,
+                    chords: &labels,
+                    score: live(&[]),
+                    height: 180.0,
+                    zoom,
+                },
+            );
         }
     }
 

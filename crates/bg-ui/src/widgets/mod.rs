@@ -1,4 +1,3 @@
-pub mod beatgrid;
 pub mod button;
 pub mod controls;
 pub mod groove_editor;

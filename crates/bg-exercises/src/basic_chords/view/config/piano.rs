@@ -1,10 +1,10 @@
-//! The Piano section: how the simulated player comps, and the keyboard display. A
-//! tier-1 view.
+//! The Piano menu: how the simulated player comps, how it sounds, and the keyboard
+//! display, as three captioned blocks. A tier-1 view.
 
 use bg_core::harmony::{self, comp};
 use bg_ui::egui::{self, RichText, Ui};
 use bg_ui::kit::{Emit, View, edited, field};
-use bg_ui::theme::FormTheme;
+use bg_ui::theme::{FormTheme, caption};
 use bg_ui::views::keyboard::{self, KeyLabels};
 use bg_ui::widgets::button::selectable_value;
 use bg_ui::widgets::controls::{checkbox, dropdown, dropdown_value, slider_field};
@@ -83,7 +83,8 @@ impl View for Piano {
 
     fn view(p: &Props, theme: &FormTheme, ui: &mut Ui, out: &mut Emit<Emission>) {
         let note = |text: &str| RichText::new(text).small().color(theme.note);
-        egui::Grid::new("bc_piano")
+        caption(ui, "Comping");
+        egui::Grid::new("bc_piano_comp")
             .num_columns(2)
             .spacing(theme.grid_spacing)
             .show(ui, |ui| {
@@ -137,7 +138,14 @@ impl View for Piano {
                 percent(ui, p.humanize, 100.0, 5.0, out, Emission::Humanize)
                     .on_hover_text("Small random changes in timing, chord rolls and dynamics");
                 ui.end_row();
+            });
 
+        ui.add_space(theme.group_gap);
+        caption(ui, "Sound");
+        egui::Grid::new("bc_piano_sound")
+            .num_columns(2)
+            .spacing(theme.grid_spacing)
+            .show(ui, |ui| {
                 ui.label("Volume");
                 field(ui, &p.piano_volume, out, Emission::PianoVolume, |ui, v| {
                     ui.add(egui::Slider::new(v, 0.0..=1.0).show_value(false))
@@ -160,29 +168,35 @@ impl View for Piano {
                 ui.end_row();
             });
         ui.add_space(theme.group_gap);
+        caption(ui, "Display");
         let k = p.keyboard;
         let keyboard = edited(k, |k| {
-            egui::Grid::new("bc_keyboard")
-                .num_columns(2)
-                .spacing(theme.grid_spacing)
-                .show(ui, |ui| {
-                    ui.label("Keyboard");
-                    dropdown(ui, "bc_keys", format!("{} keys", k.keys), |ui| {
-                        for (n, _, _) in keyboard::SIZES {
-                            selectable_value(ui, &mut k.keys, n, format!("{n} keys"));
-                        }
+            checkbox(ui, &mut k.visible, "Show the keyboard");
+            ui.add_enabled_ui(k.visible, |ui| {
+                egui::Grid::new("bc_piano_keyboard")
+                    .num_columns(2)
+                    .spacing(theme.grid_spacing)
+                    .show(ui, |ui| {
+                        ui.label("Keyboard");
+                        dropdown(ui, "bc_keys", format!("{} keys", k.keys), |ui| {
+                            for (n, _, _) in keyboard::SIZES {
+                                selectable_value(ui, &mut k.keys, n, format!("{n} keys"));
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Key labels");
+                        dropdown(ui, "bc_labels", k.labels.label(), |ui| {
+                            for l in KeyLabels::ALL {
+                                selectable_value(ui, &mut k.labels, l, l.label());
+                            }
+                        });
+                        ui.end_row();
                     });
-                    ui.end_row();
-                    ui.label("Key labels");
-                    dropdown(ui, "bc_labels", k.labels.label(), |ui| {
-                        for l in KeyLabels::ALL {
-                            selectable_value(ui, &mut k.labels, l, l.label());
-                        }
-                    });
-                    ui.end_row();
-                });
-            checkbox(ui, &mut k.ghost_next, "Outline the next chord");
-            checkbox(ui, &mut k.show_bass, "Show my bass note");
+                checkbox(ui, &mut k.ghost_next, "Outline the next chord");
+                checkbox(ui, &mut k.show_bass, "Show my bass note");
+            });
+            // Also hides them in the strip and the status, so it works without the
+            // keyboard too.
             checkbox(
                 ui,
                 &mut k.hide_chord_names,

@@ -33,6 +33,36 @@ pub struct Toolbar<'a> {
     /// The chord now and next, while running.
     pub status: Option<ChordStatus>,
     pub session: &'a SessionConfig,
+    /// For the progression and piano menus.
+    pub data: &'a BasicChordsData,
+    /// Seed of the last started session, if any.
+    pub run_seed: Option<u64>,
+    /// The progression menu's label: its numerals.
+    pub progression_label: String,
+}
+
+/// Most numerals the progression menu's label shows.
+const LABEL_NUMERALS: usize = 6;
+
+/// The progression menu's label: the numerals of the shown progression, cut short
+/// after a few. Not the numerals while chord names are hidden, so it gives nothing away.
+pub fn progression_label(chords: &[Chord], hide: bool) -> String {
+    if hide {
+        return "Chords".into();
+    }
+    if chords.is_empty() {
+        return "?".into();
+    }
+    let mut label = chords
+        .iter()
+        .take(LABEL_NUMERALS)
+        .map(Chord::roman)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if chords.len() > LABEL_NUMERALS {
+        label.push_str(" …");
+    }
+    label
 }
 
 pub fn toolbar(m: &Model) -> Toolbar<'_> {
@@ -59,6 +89,12 @@ pub fn toolbar(m: &Model) -> Toolbar<'_> {
         has_results: m.has_results,
         status,
         session: &m.data.session,
+        data: &m.data,
+        run_seed: m.run_seed,
+        progression_label: progression_label(
+            &shown_progression(m),
+            m.data.keyboard.hide_chord_names,
+        ),
     }
 }
 
@@ -76,6 +112,8 @@ pub fn notices(m: &Model) -> Notices<'_> {
 
 /// What the keyboard shows.
 pub struct Keyboard {
+    /// Shown at all.
+    pub visible: bool,
     pub keys: u32,
     pub labels: KeyLabels,
     /// Sounding notes.
@@ -185,6 +223,7 @@ fn keyboard(m: &Model, now: f64) -> Keyboard {
         })
         .flatten();
     Keyboard {
+        visible: opts.visible,
         keys: opts.keys,
         labels: opts.labels,
         active,
@@ -281,14 +320,12 @@ pub fn live(m: &Model) -> Live<'_> {
 /// The settings panels.
 pub struct Config<'a> {
     pub data: &'a BasicChordsData,
-    pub run_seed: Option<u64>,
     pub editable: bool,
 }
 
 pub fn config(m: &Model) -> Config<'_> {
     Config {
         data: &m.data,
-        run_seed: m.run_seed,
         editable: !m.frame.running,
     }
 }

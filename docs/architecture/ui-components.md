@@ -264,7 +264,8 @@ Layouts so far:
 - `views/beatgrid/beatgrid.layout.xml`
 - `widgets/toolbar.layout.xml`: the exercise toolbar. Items take the width they measured
   on the previous frame, placed with `Toolbar::at(Item::..)`. The very first frame is
-  drawn unseen, to measure.
+  drawn unseen, to measure. The `progression`, `piano` and `chips` slots are in
+  `visible` groups and show only when filled.
 - `views/review/view/rows.layout.xml`
 - `views/marker_editor/marker_editor.layout.xml`
 

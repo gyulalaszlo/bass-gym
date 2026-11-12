@@ -69,6 +69,13 @@ Toolbar menus (`toolbar.rs`): `menu` is an icon button opening a tabbed panel, a
 `menu_labelled` the same with the current value as its label. Time signature and key
 use the latter, with `choice_grid` (equal-width, centred selectables).
 
+Two slots belong to the exercise and hide when it doesn't fill them, like the chips:
+`progression` (next to the key) and `piano` (between the key and the practice options).
+Basic chords puts its Progression menu (labelled with the numerals,
+`props.rs::progression_label`) and Piano menu (Comping / Sound / Display, including
+`KeyboardOptions.visible`) there, so its settings area keeps only Scoring and the
+groove panel. More settings will move to the toolbar the same way.
+
 The toolbar's look is a `toolbar::Theme` the shell passes to `show_toolbar`; building
 blocks read it through `Toolbar::theme`. Tap tempo isn't one of them: each exercise
 keeps a `tap_tempo::State` in its model, shows `TapTempo::view` in its toolbar region

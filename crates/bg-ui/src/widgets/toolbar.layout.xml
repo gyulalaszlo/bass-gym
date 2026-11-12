@@ -24,7 +24,17 @@
     <slot name="time_sig" width="time_sig"/>
     <gap width="small" grow="small_share"/>
     <slot name="key" width="key"/>
+
+    <!-- An exercise's own items: one next to the key, one between the groups. -->
+    <group visible="has_progression">
+      <gap width="small" grow="small_share"/>
+      <slot name="progression" width="progression"/>
+    </group>
     <gap width="large" grow="large_share"/>
+    <group visible="has_piano">
+      <slot name="piano" width="piano"/>
+      <gap width="large" grow="large_share"/>
+    </group>
 
     <!-- Chips naming the active practice options, only when there are any. -->
     <group visible="has_chips">

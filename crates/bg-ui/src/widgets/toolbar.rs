@@ -137,6 +137,12 @@ pub enum Item {
     Tempo,
     TimeSig,
     Key,
+    /// An exercise's item next to the key (Basic chords' progression); shown only when
+    /// filled, a frame late the first time.
+    Progression,
+    /// An exercise's item between the key and the practice options (Basic chords'
+    /// piano); shown only when filled, a frame late the first time.
+    Piano,
     /// Shown only when there are chips; a frame late when they appear.
     Chips,
     Practice,
@@ -152,6 +158,8 @@ struct Widths {
     tempo: f32,
     time_sig: f32,
     key: f32,
+    progression: Option<f32>,
+    piano: Option<f32>,
     chips: Option<f32>,
     practice: f32,
     click: f32,
@@ -167,6 +175,8 @@ impl Widths {
             Item::Tempo => self.tempo = w,
             Item::TimeSig => self.time_sig = w,
             Item::Key => self.key = w,
+            Item::Progression => self.progression = Some(w),
+            Item::Piano => self.piano = Some(w),
             Item::Chips => self.chips = Some(w),
             Item::Practice => self.practice = w,
             Item::Click => self.click = w,
@@ -176,14 +186,18 @@ impl Widths {
     /// Close enough not to lay out again.
     fn same(&self, o: &Widths) -> bool {
         let close = |a: f32, b: f32| (a - b).abs() <= 0.5;
+        let close_opt = |a: Option<f32>, b: Option<f32>| {
+            a.is_some() == b.is_some() && close(a.unwrap_or(0.0), b.unwrap_or(0.0))
+        };
         close(self.transport, o.transport)
             && close(self.results, o.results)
             && close(self.tap, o.tap)
             && close(self.tempo, o.tempo)
             && close(self.time_sig, o.time_sig)
             && close(self.key, o.key)
-            && self.chips.is_some() == o.chips.is_some()
-            && close(self.chips.unwrap_or(0.0), o.chips.unwrap_or(0.0))
+            && close_opt(self.progression, o.progression)
+            && close_opt(self.piano, o.piano)
+            && close_opt(self.chips, o.chips)
             && close(self.practice, o.practice)
             && close(self.click, o.click)
     }
@@ -201,6 +215,10 @@ impl Widths {
             tempo: self.tempo,
             time_sig: self.time_sig,
             key: self.key,
+            progression: self.progression.unwrap_or(0.0),
+            has_progression: self.progression.is_some(),
+            piano: self.piano.unwrap_or(0.0),
+            has_piano: self.piano.is_some(),
             chips: self.chips.unwrap_or(0.0),
             has_chips: self.chips.is_some(),
             practice: self.practice,
@@ -224,6 +242,8 @@ fn slot(slots: &ExerciseToolbarSlots, item: Item) -> Option<Rect> {
         Item::Tempo => Some(slots.tempo),
         Item::TimeSig => Some(slots.time_sig),
         Item::Key => Some(slots.key),
+        Item::Progression => slots.progression,
+        Item::Piano => slots.piano,
         Item::Chips => slots.chips,
         Item::Practice => Some(slots.practice),
         Item::Click => Some(slots.click),
@@ -275,7 +295,8 @@ impl Toolbar<'_> {
     }
 
     /// Shows `add` in `item`'s place, and measures it for the next frame. An item
-    /// without a place yet (chips that just appeared) is measured unseen.
+    /// without a place yet (chips that just appeared, an exercise's own item on its first
+    /// frame) is measured unseen.
     pub fn at<R>(&mut self, item: Item, add: impl FnOnce(&mut Toolbar) -> R) -> R {
         let place = slot(self.slots, item);
         let rect = place.unwrap_or_else(|| {
@@ -376,7 +397,7 @@ impl Toolbar<'_> {
         .inner
     }
 
-    /// − [large BPM readout] bpm +. The field steps by 5 with ↑ / ↓, the buttons by 1.
+    /// [large BPM readout] bpm . The field steps by 5 with ↑ / ↓
     pub fn bpm(&mut self, bpm: &mut f32) -> bool {
         let before = *bpm;
         let font = self.theme.bpm_font.clone();

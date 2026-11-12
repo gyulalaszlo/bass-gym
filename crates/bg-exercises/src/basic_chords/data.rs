@@ -88,6 +88,8 @@ impl ChordLength {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyboardOptions {
+    /// The keyboard is shown at all.
+    pub visible: bool,
     pub keys: u32,
     pub labels: KeyLabels,
     /// Outline the next chord shortly before it starts.
@@ -100,6 +102,7 @@ pub struct KeyboardOptions {
 impl Default for KeyboardOptions {
     fn default() -> Self {
         Self {
+            visible: true,
             keys: 49,
             labels: KeyLabels::Octaves,
             ghost_next: true,

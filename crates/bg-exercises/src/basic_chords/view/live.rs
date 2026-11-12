@@ -31,8 +31,10 @@ pub fn live(p: &props::Live, theme: &Theme, ui: &mut Ui) {
         bass,
         labels: k.labels,
     };
-    kit::show::<Keyboard>(ui, "keyboard", &props, &theme.keyboard);
-    ui.add_space(m.keyboard_gap);
+    if k.visible {
+        kit::show::<Keyboard>(ui, "keyboard", &props, &theme.keyboard);
+        ui.add_space(m.keyboard_gap);
+    }
 
     let strip = strip::Props {
         chords: &p.strip,

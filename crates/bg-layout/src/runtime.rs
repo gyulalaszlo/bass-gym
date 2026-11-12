@@ -51,6 +51,7 @@ impl Live {
     /// Lays out `rect`. A reloaded tree that doesn't parse, or names something the
     /// inputs or slots don't have, is logged and the last good one is kept.
     pub fn solve(&self, rect: Rect, inputs: &dyn Inputs, slots: &mut dyn Slots) {
+        #[allow(unused_mut)]
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         #[cfg(debug_assertions)]
         self.reload(&mut state, rect, inputs);

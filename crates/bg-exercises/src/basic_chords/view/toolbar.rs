@@ -48,12 +48,17 @@ pub fn toolbar(p: &props::Toolbar, theme: &Theme, tb: &mut Toolbar, out: &mut Em
 /// Width of the progression and piano menus.
 const MENU_WIDTH: f32 = 380.0;
 
+/// Fixed width of the progression menu's label, so new numerals (e.g. from Jazziness)
+/// don't move the piano menu.
+const PROGRESSION_LABEL_WIDTH: f32 = 150.0;
+
 /// The progression menu, next to the key, and the piano menu.
 fn menus(p: &props::Toolbar, theme: &Theme, tb: &mut Toolbar, out: &mut Emit<Msg>) {
     let d = p.data;
     let label = (
         p.progression_label.clone(),
-        tb.theme().menu_label_font.clone(),
+        // tb.theme().menu_label_font.clone(),
+        tb.theme().summary_font.clone(),
     );
     let msgs = tb.at(Item::Progression, |tb| {
         tb.menu_labelled(
@@ -61,6 +66,7 @@ fn menus(p: &props::Toolbar, theme: &Theme, tb: &mut Toolbar, out: &mut Emit<Msg
             label,
             "Progression",
             false,
+            Some(PROGRESSION_LABEL_WIDTH),
             MENU_WIDTH,
             |ui| {
                 let props = progression::Props {

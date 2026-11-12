@@ -426,17 +426,28 @@ impl Matcher {
                         notes: 0,
                         hits: 0,
                         counts: [0; 4],
+                        timing_ms: None,
                     })
                     .collect();
             }
         }
+        // Per bar: timing offsets' sum and count, for the mean.
+        let mut timing_sums = vec![(0.0f32, 0usize); s.per_bar.len()];
         for (e, o) in self.expected.iter().zip(&self.outcomes) {
             let Some(g) = o.grade else { continue };
             s.counts[g as usize] += 1;
             if let Ok(i) = s.per_bar.binary_search_by_key(&e.bar, |b| b.index) {
-                s.per_bar[i].notes += 1;
-                s.per_bar[i].hits += g.is_hit() as usize;
-                s.per_bar[i].counts[g as usize] += 1;
+                let b = &mut s.per_bar[i];
+                b.notes += 1;
+                b.hits += g.is_hit() as usize;
+                b.counts[g as usize] += 1;
+                if let Some(ms) = o.timing_ms {
+                    let (lo, _, hi) = b.timing_ms.unwrap_or((ms, 0.0, ms));
+                    let (sum, n) = &mut timing_sums[i];
+                    *sum += ms;
+                    *n += 1;
+                    b.timing_ms = Some((lo.min(ms), *sum / *n as f32, hi.max(ms)));
+                }
             }
             let tempo = match s.per_tempo.iter_mut().find(|t| t.bpm == e.bpm) {
                 Some(t) => t,
@@ -531,6 +542,8 @@ pub struct BarStats {
     pub hits: usize,
     /// Decided notes by grade, indexed by `Grade as usize`.
     pub counts: [usize; 4],
+    /// Lowest, mean and highest timing offset of the bar's played notes, in ms (late +).
+    pub timing_ms: Option<(f32, f32, f32)>,
 }
 
 impl BarStats {
@@ -687,6 +700,8 @@ mod tests {
         assert_eq!(s.per_bar[0].notes, 4);
         assert_eq!(s.per_bar[0].hits, 2);
         assert_eq!(s.per_bar[0].counts, [1, 1, 0, 2]);
+        let (lo, avg, hi) = s.per_bar[0].timing_ms.unwrap();
+        assert!(lo <= avg && avg <= hi && (avg - 12.5).abs() < 1e-3);
         m.update(10.0);
         let s = m.stats();
         assert_eq!(s.bars, 2);

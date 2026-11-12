@@ -526,6 +526,7 @@ impl Toolbar<'_> {
             label,
             "Time signature",
             false,
+            None,
             300.0,
             |ui| {
                 caption(ui, "Common");
@@ -557,7 +558,7 @@ impl Toolbar<'_> {
         let t = self.theme.clone();
         let label = (key.short_name(), t.menu_label_font.clone());
         let tip = "Key: sets the score's key signature (and the chords in Basic chords)";
-        self.menu_labelled("toolbar_key", label, tip, false, 340.0, |ui| {
+        self.menu_labelled("toolbar_key", label, tip, false, None, 340.0, |ui| {
             caption(ui, "Tonic");
             let roots: Vec<_> = (0..12u8).zip(ROOTS.map(String::from)).collect();
             choice_grid(ui, &t, "key_roots", 4, &roots, &mut key.root);
@@ -582,17 +583,21 @@ impl Toolbar<'_> {
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<R> {
         let label = (icon.to_owned(), self.theme.menu_icon_font.clone());
-        self.menu_labelled(id_salt, label, tooltip, active, width, add)
+        self.menu_labelled(id_salt, label, tooltip, active, None, width, add)
     }
 
     /// A [`Toolbar::menu`] whose button shows `label` (text and font) before the caret,
     /// for settings whose current value is worth seeing, like the time signature.
+    /// `label_width` fixes the label's width (text cut short with "…"), so a label that
+    /// changes doesn't move the items after it.
+    #[allow(clippy::too_many_arguments)]
     pub fn menu_labelled<R>(
         &mut self,
         id_salt: &str,
-        (text, text_font): (String, egui::FontId),
+        (mut text, text_font): (String, egui::FontId),
         tooltip: &str,
         active: bool,
+        label_width: Option<f32>,
         width: f32,
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<R> {
@@ -608,7 +613,7 @@ impl Toolbar<'_> {
         };
         // Drawn by hand so the label has a fixed horizontal margin (it becomes the tab).
         let ctx = ui.ctx().clone();
-        let label = |color| {
+        let label = |text: &str, color| {
             let mut job = egui::text::LayoutJob::default();
             let format = |font_id| egui::TextFormat {
                 font_id,
@@ -616,7 +621,7 @@ impl Toolbar<'_> {
                 valign: Align::Center,
                 ..Default::default()
             };
-            job.append(&text, 0.0, format(text_font.clone()));
+            job.append(text, 0.0, format(text_font.clone()));
             job.append(
                 &format!(" {}", icons::CARET_DOWN),
                 0.0,
@@ -624,15 +629,26 @@ impl Toolbar<'_> {
             );
             ctx.fonts_mut(|f| f.layout_job(job))
         };
-        let galley = label(color);
+        let mut galley = label(&text, color);
+        if let Some(w) = label_width {
+            let full = text.clone();
+            let mut keep = full.chars().count();
+            while galley.size().x > w && keep > 0 {
+                keep -= 1;
+                let cut: String = full.chars().take(keep).collect();
+                text = format!("{}…", cut.trim_end());
+                galley = label(&text, color);
+            }
+        }
+        let label_w = label_width.unwrap_or(galley.size().x);
         let (rect, resp) = ui.allocate_exact_size(
-            vec2(galley.size().x + 2.0 * t.menu_padding, t.button_height),
+            vec2(label_w + 2.0 * t.menu_padding, t.button_height),
             egui::Sense::click(),
         );
         let resp = resp.on_hover_text(tooltip);
         if ui.is_rect_visible(rect) {
             let galley = if resp.hovered() && ui.is_enabled() {
-                label(t.menu_hover)
+                label(&text, t.menu_hover)
             } else {
                 galley.clone()
             };

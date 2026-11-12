@@ -1,4 +1,4 @@
-//! Accuracy over time: hit rate per bar, with a trend line and tempo changes.
+//! Accuracy over time: hit rate per bar, with each bar's timing and tempo changes.
 
 use bg_core::{BarStats, Grade};
 use egui::{Align2, Pos2, Rect, RichText, Sense, Shape, Stroke, vec2};
@@ -6,10 +6,11 @@ use egui::{Align2, Pos2, Rect, RichText, Sense, Shape, Stroke, vec2};
 use super::format_duration;
 use super::theme::Theme;
 
-/// Bars averaged by the trend line of [`accuracy_timeline`].
-const TREND_BARS: usize = 4;
+/// Timing scales [`accuracy_timeline`] picks from: the smallest that fits every bar, in ms.
+const TIMING_SCALES: [f32; 9] = [10.0, 20.0, 30.0, 50.0, 75.0, 100.0, 150.0, 250.0, 500.0];
 
-/// Hit rate per bar over the session (bar width = bar duration), with a trend line and
+/// Hit rate per bar over the session (bar width = bar duration), with each bar's timing
+/// (earliest to latest note, and the mean, on a ± ms scale centred on the plot) and
 /// markers where the tempo changes. Hovering a bar shows its numbers.
 pub fn accuracy_timeline(ui: &mut egui::Ui, theme: &Theme, bars: &[BarStats]) {
     let tt = &theme.timeline;
@@ -27,7 +28,10 @@ pub fn accuracy_timeline(ui: &mut egui::Ui, theme: &Theme, bars: &[BarStats]) {
     let axis_font = tt.axis_font.clone();
     let plot = Rect::from_min_max(
         Pos2::new(rect.left() + tt.left, t.bottom() + tt.top),
-        Pos2::new(rect.right() - 4.0, rect.bottom() - axis_font.size - 6.0),
+        Pos2::new(
+            rect.right() - tt.right,
+            rect.bottom() - axis_font.size - 6.0,
+        ),
     );
     let (Some(first), Some(last)) = (bars.first(), bars.last()) else {
         return;
@@ -99,24 +103,50 @@ pub fn accuracy_timeline(ui: &mut egui::Ui, theme: &Theme, bars: &[BarStats]) {
         }
     }
 
-    // Trend: hit rate over the last few bars (weighted by notes).
-    if bars.len() > 1 {
-        let points: Vec<Pos2> = (0..bars.len())
-            .filter_map(|i| {
-                let win = &bars[i.saturating_sub(TREND_BARS - 1)..=i];
-                let notes: usize = win.iter().map(|b| b.notes).sum();
-                let hits: usize = win.iter().map(|b| b.hits).sum();
-                let b = &bars[i];
-                (notes > 0).then(|| {
-                    Pos2::new(
-                        x_of(b.start + b.duration / 2.0),
-                        y_of(hits as f32 / notes as f32),
-                    )
-                })
-            })
-            .collect();
-        p.add(Shape::line(points, tt.trend));
+    // Timing: late up, early down, around a zero line at mid-height.
+    let widest = bars
+        .iter()
+        .filter_map(|b| b.timing_ms)
+        .map(|(lo, _, hi)| lo.abs().max(hi.abs()))
+        .fold(0.0, f32::max);
+    let scale = TIMING_SCALES
+        .into_iter()
+        .find(|&s| s >= widest)
+        .unwrap_or(widest);
+    let y_ms = |ms: f32| plot.center().y - (ms / scale).clamp(-1.0, 1.0) * plot.height() / 2.0;
+    let range = tt.timing.color.gamma_multiply(tt.timing_range_alpha);
+    p.hline(plot.x_range(), y_ms(0.0), Stroke::new(1.0, range));
+    for (ms, align) in [
+        (scale, Align2::LEFT_TOP),
+        (0.0, Align2::LEFT_CENTER),
+        (-scale, Align2::LEFT_BOTTOM),
+    ] {
+        p.text(
+            Pos2::new(plot.right() + 4.0, y_ms(ms)),
+            align,
+            match ms {
+                0.0 => "0 ms".to_owned(),
+                ms => format!("{ms:+.0}"),
+            },
+            axis_font.clone(),
+            tt.label,
+        );
     }
+    let mut mean = Vec::new();
+    for b in bars {
+        let Some((lo, avg, hi)) = b.timing_ms else {
+            continue;
+        };
+        let x = x_of(b.start + b.duration / 2.0);
+        let w = ((x_of(b.start + b.duration) - x_of(b.start)) * 0.15).clamp(1.0, 4.0);
+        p.rect_filled(
+            Rect::from_x_y_ranges((x - w)..=(x + w), y_ms(hi)..=y_ms(lo)),
+            0.0,
+            range,
+        );
+        mean.push(Pos2::new(x, y_ms(avg)));
+    }
+    p.add(Shape::line(mean, tt.timing));
 
     // Tempo changes: a marker line and the new tempo above the plot.
     let mut label_end = f32::MIN;
@@ -184,7 +214,7 @@ pub fn accuracy_timeline(ui: &mut egui::Ui, theme: &Theme, bars: &[BarStats]) {
         resp.on_hover_ui_at_pointer(|ui| {
             ui.label(
                 RichText::new(format!(
-                    "Bar {}  {:.0} bpm  {}\n{}/{} hits\ngood {}  ok {}  poor {}  missed {}",
+                    "Bar {}  {:.0} bpm  {}\n{}/{} hits\ngood {}  ok {}  poor {}  missed {}{}",
                     b.index + 1,
                     b.bpm,
                     format_duration(b.start),
@@ -194,6 +224,9 @@ pub fn accuracy_timeline(ui: &mut egui::Ui, theme: &Theme, bars: &[BarStats]) {
                     b.counts[Grade::Ok as usize],
                     b.counts[Grade::Poor as usize],
                     b.counts[Grade::Missed as usize],
+                    b.timing_ms.map_or(String::new(), |(lo, avg, hi)| format!(
+                        "\ntiming {lo:+.0} … {hi:+.0} ms, mean {avg:+.0}"
+                    )),
                 ))
                 .font(tt.tooltip_font.clone()),
             );

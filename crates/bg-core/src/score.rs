@@ -671,7 +671,10 @@ fn bar_events(
         let continues = n.start + n.len > last;
         let parts = split(grid, bar, from, to);
         let count = parts.len();
-        let note = score_note(input, n.played, spelling);
+        // Judged under the chord where it's written (not where it was played), so a
+        // note played just before a chord change and written after it fits that chord.
+        let written = (n.start >= first).then(|| time(n.start));
+        let note = score_note(input, n.played, written, spelling);
         for (k, (tick, value, tuplet)) in parts.into_iter().enumerate() {
             let continuation = k > 0 || n.start < first;
             events.push(ScoreEvent {
@@ -756,15 +759,22 @@ pub fn build(input: &ScoreInput) -> Vec<ScoreBar> {
     out
 }
 
-fn score_note(input: &ScoreInput, played: usize, spelling: &Spelling) -> ScoreNote {
+/// `written`: the time the note is written at, when it starts in this bar.
+fn score_note(
+    input: &ScoreInput,
+    played: usize,
+    written: Option<f64>,
+    spelling: &Spelling,
+) -> ScoreNote {
     let m = input.matcher;
     let p: &Played = &m.played[played];
     let midi = p.freq.map(|f| freq_to_midi(f, input.a4).0);
     let pitch = midi.map(|n| spelling.pitch(n));
-    let at = p
-        .matched
-        .and_then(|e| m.expected.get(e))
-        .map_or(p.onset, |e| e.time);
+    let at = written.unwrap_or_else(|| {
+        p.matched
+            .and_then(|e| m.expected.get(e))
+            .map_or(p.onset, |e| e.time)
+    });
     let chord = input
         .chords
         .iter()
@@ -776,7 +786,11 @@ fn score_note(input: &ScoreInput, played: usize, spelling: &Spelling) -> ScoreNo
     ScoreNote {
         played,
         pitch,
-        clash: p.harmony.map(harmony_grade) == Some(Grade::Poor),
+        // A chord tone where it's written isn't a clash, whatever chord it was judged in.
+        clash: p.harmony.map(harmony_grade) == Some(Grade::Poor)
+            && !chord
+                .zip(midi)
+                .is_some_and(|(c, n)| c.tones.contains(&(n.rem_euclid(12) as u8))),
         chord_marks,
         tied: false,
         continuation: false,
@@ -1558,6 +1572,45 @@ mod tests {
         assert_eq!(note(&e[1]).chord_marks, [-2, 0, 2]);
         assert_eq!(note(&e[2]).pitch, None);
         assert!(note(&e[2]).chord_marks.is_empty());
+    }
+
+    #[test]
+    fn early_note_fits_the_chord_it_is_written_under() {
+        let b = bars(2, 1, &[]);
+        let mut m = matcher(&b);
+        let chords = [
+            ScoreChord {
+                start: 0.0,
+                end: 2.0,
+                tones: vec![4, 7, 11], // E minor.
+                label: "Em".into(),
+            },
+            ScoreChord {
+                start: 2.0,
+                end: 4.0,
+                tones: vec![5, 9, 0], // F major.
+                label: "F".into(),
+            },
+        ];
+        // F, played 40 ms before the change to F, so judged a clash under Em.
+        let early = play(&mut m, 1.96, 2.4, 29);
+        m.on_pitch(early, Some(0.0));
+        let s = build(&ScoreInput {
+            bars: &b,
+            matcher: &m,
+            chords: &chords,
+            scale: None,
+            a4: A4,
+            until: f64::INFINITY,
+        });
+        let e = s[1]
+            .events
+            .iter()
+            .find(|e| matches!(e.kind, ScoreKind::Note(_)));
+        let n = note(e.expect("written in the second bar"));
+        assert!(!n.clash);
+        assert_eq!(n.chord_marks.len(), 3);
+        assert_eq!(n.chord_marks[0], staff_pitch(29, false).pos); // From F, not E.
     }
 
     #[test]

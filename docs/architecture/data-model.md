@@ -166,9 +166,11 @@ rests. It's pure, so all notation rules are tested there and painters stay simpl
   `apply_key` writes a sign only where a note differs from the signature or an earlier
   sign on that line or space in the bar (naturals included); tied continuations
   carry none.
-- `clash` means the note's harmony score grades Poor. Without chords nothing clashes.
-- `chord_marks` stack the chord within an octave from the nearest root at or below the
-  note. `ScoreChord` is the neutral chord form, since bg-core can't name `ChordSpan`.
+- `clash` means the note's harmony score grades Poor and the note isn't a tone of the
+  chord where it's written. Without chords nothing clashes.
+- `chord_marks` stack the chord where the note is written within an octave from the
+  nearest root at or below the note. The written time can differ from the judged one
+  (`judge_time`): a note played just before a chord change may be written after it. `ScoreChord` is the neutral chord form, since bg-core can't name `ChordSpan`.
 - `until` stops rests at the current time for the live view.
 
 ## What survives a session

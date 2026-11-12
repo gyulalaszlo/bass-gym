@@ -106,12 +106,17 @@ pub struct TimelineTheme {
     pub guides: [Color32; 4],
     pub guide_alpha: f32,
     pub hover: Color32,
-    pub trend: Stroke,
+    /// The per-bar timing: the mean's line, and the early-to-late range (the same
+    /// colour, at `timing_range_alpha`).
+    pub timing: Stroke,
+    pub timing_range_alpha: f32,
     pub tempo: Color32,
     pub tempo_line_alpha: f32,
     pub tooltip_font: FontId,
-    /// Room left of the plot for the % labels, and above it for the tempo labels.
+    /// Room left of the plot for the % labels, right of it for the ms labels, and above
+    /// it for the tempo labels.
     pub left: f32,
+    pub right: f32,
     pub top: f32,
 }
 
@@ -167,11 +172,13 @@ impl From<&Tokens> for Theme {
                 guides: [t.grid(), t.green(), t.amber(), t.grid()],
                 guide_alpha: 0.4,
                 hover: t.raised(),
-                trend: Stroke::new(2.0, t.text()),
+                timing: Stroke::new(2.0, t.text()),
+                timing_range_alpha: 0.5,
                 tempo: t.cyan(),
                 tempo_line_alpha: 0.6,
                 tooltip_font: t.mono(13.0),
                 left: 36.0,
+                right: 44.0,
                 top: 22.0,
             },
             histogram: t.into(),

@@ -2,7 +2,7 @@
 //! display, as three captioned blocks. A tier-1 view.
 
 use bg_core::harmony::{self, comp};
-use bg_ui::egui::{self, RichText, Ui};
+use bg_ui::egui::{self, Ui};
 use bg_ui::kit::{Emit, View, edited, field};
 use bg_ui::theme::{FormTheme, caption};
 use bg_ui::views::keyboard::{self, KeyLabels};
@@ -48,14 +48,38 @@ fn jazz_description(j: f32) -> &'static str {
     JAZZ_LEVELS[((j * 4.0) as usize).min(3)]
 }
 
+const WIDTH_LEVELS: [&str; 5] = [
+    "One hand, close voicings",
+    "Mostly one hand, sometimes two",
+    "Two hands: bass and fifth below, chord above",
+    "Two hands, sometimes doubled in octaves",
+    "Two hands, doubled in octaves: big and full",
+];
+
 fn width_description(w: f32) -> &'static str {
-    match w {
-        w if w < 0.05 => "One hand, close voicings",
-        w if w < 0.95 => "Mostly one hand, sometimes two",
-        w if w < 1.05 => "Two hands: bass and fifth below, chord above",
-        w if w < 1.95 => "Two hands, sometimes doubled in octaves",
-        _ => "Two hands, doubled in octaves: big and full",
-    }
+    WIDTH_LEVELS[match w {
+        w if w < 0.05 => 0,
+        w if w < 0.95 => 1,
+        w if w < 1.05 => 2,
+        w if w < 1.95 => 3,
+        _ => 4,
+    }]
+}
+
+/// One of `all` as a small wrapped note, in a box sized for the largest of them, so
+/// dragging the slider above it never resizes (and so moves) the menu.
+fn steady_note(ui: &mut Ui, all: &[&str], text: &str, color: egui::Color32) {
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    let wrap = ui.available_width();
+    let layout =
+        |ui: &Ui, s: &str| ui.fonts_mut(|f| f.layout(s.to_owned(), font.clone(), color, wrap));
+    let size = all
+        .iter()
+        .map(|s| layout(ui, s).size())
+        .fold(egui::Vec2::ZERO, egui::Vec2::max);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let galley = layout(ui, text);
+    ui.painter().galley(rect.min, galley, color);
 }
 
 /// A 0..1 setting shown as a percentage, sending `msg` with the 0..1 value.
@@ -82,7 +106,6 @@ impl View for Piano {
     type Emission = Emission;
 
     fn view(p: &Props, theme: &FormTheme, ui: &mut Ui, out: &mut Emit<Emission>) {
-        let note = |text: &str| RichText::new(text).small().color(theme.note);
         caption(ui, "Comping");
         egui::Grid::new("bc_piano_comp")
             .num_columns(2)
@@ -109,8 +132,7 @@ impl View for Piano {
                 percent(ui, p.jazziness, 100.0, 5.0, out, Emission::Jazziness);
                 ui.end_row();
                 ui.label("");
-                let text = note(jazz_description(p.jazziness));
-                ui.add(egui::Label::new(text).wrap());
+                steady_note(ui, &JAZZ_LEVELS, jazz_description(p.jazziness), theme.note);
                 ui.end_row();
 
                 ui.label("Width");
@@ -119,8 +141,7 @@ impl View for Piano {
                 );
                 ui.end_row();
                 ui.label("");
-                let text = note(width_description(p.width));
-                ui.label(text);
+                steady_note(ui, &WIDTH_LEVELS, width_description(p.width), theme.note);
                 ui.end_row();
 
                 ui.label("Register");

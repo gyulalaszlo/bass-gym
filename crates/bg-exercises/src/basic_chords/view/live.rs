@@ -64,6 +64,7 @@ pub fn live(p: &props::Live, theme: &Theme, ui: &mut Ui) {
             scale: Some(p.key),
             a4: p.a4,
             size: p.prefs.score_size,
+            targets: &[],
         }),
         lane_height: LANE_HEIGHT,
         zoom: p.prefs.zoom_factor(),

@@ -43,11 +43,18 @@ fn paint_score(p: &Painter, props: &Props, theme: &Theme, live: LiveScore, rect:
         a4: live.a4,
         until: props.now,
     });
+    let ghosts: Vec<_> = live
+        .targets
+        .iter()
+        .filter(|t| t.0 >= props.now && t.0 <= l.t1)
+        .map(|&(time, midi)| (time, score::target_pitch(midi, live.scale)))
+        .collect();
     ScoreView {
         bars: &bars,
         axis: l.axis,
         layout: live.layout(),
         lead: None,
+        ghosts: &ghosts,
     }
     .paint(p, rect, &theme.score);
     let key = live.scale.map(|s| score::KeySignature::of(&s));

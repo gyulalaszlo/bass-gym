@@ -80,6 +80,7 @@ pub fn rows(p: &Props, theme: &Theme, ui: &mut Ui, playhead: Option<f64>, out: &
                 key,
                 sig: Some(first.sig),
             }),
+            ghosts: &[],
         }
         .paint(&painter, staff, &theme.score);
         paint_wave(

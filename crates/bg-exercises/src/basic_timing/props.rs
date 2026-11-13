@@ -94,6 +94,8 @@ pub struct Main<'a> {
     pub neck: Option<Neck>,
     /// Basic scales' notes, for the grid's chord band: (start, end, name).
     pub grid_notes: Vec<(f64, f64, String)>,
+    /// Basic scales' notes, for the live score: (time, MIDI note).
+    pub score_targets: Vec<(f64, i32)>,
 }
 
 pub struct Neck {
@@ -150,6 +152,7 @@ pub fn main(m: &Model) -> Main<'_> {
             )
         })
         .collect();
+    let score_targets = targets.iter().map(|t| (t.time, t.midi as i32)).collect();
     let neck = m.scales().zip(seq).map(|(s, seq)| {
         let (target, next) = basic_scales::at(&targets, grid_now);
         let root = key.root % 12;
@@ -178,6 +181,7 @@ pub fn main(m: &Model) -> Main<'_> {
         session: &m.data.session,
         neck,
         grid_notes,
+        score_targets,
     }
 }
 

@@ -177,7 +177,8 @@ A tier-1 view for Basic scales: strings (lowest at the bottom, as in tab) of a `
 string's 12th, spaced evenly (not to scale), the scale's pitch classes (`tones`) named
 by the key's `Spelling::name` (so notes outside the key take its signature's signs: E
 blues has an A#), roots green, the note to play magenta and the next one ringed.
-Basic scales' Scale menu (`basic_scales/menu.rs`) sits in the toolbar's `progression`
+The same targets go to the live score (`LiveScore.targets`) as magenta ghost noteheads
+ahead of the playhead. Basic scales' Scale menu (`basic_scales/menu.rs`) sits in the toolbar's `progression`
 slot: scale, span, start octave, step and tuning. `basic_scales::at` picks both from the targets at the grid's time. The same
 targets fill the beat grid's chord band with note names, so the lane is 108 tall there.
 

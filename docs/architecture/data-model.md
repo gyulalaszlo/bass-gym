@@ -187,6 +187,10 @@ rests. It's pure, so all notation rules are tested there and painters stay simpl
   nearest root at or below the note. The written time can differ from the judged one
   (`judge_time`): a note played just before a chord change may be written after it. `ScoreChord` is the neutral chord form, since bg-core can't name `ChordSpan`.
 - `until` stops rests at the current time for the live view.
+- Upcoming targets (Basic scales, `LiveScore.targets`) aren't part of `build`: the live
+  view draws those at or after now as ghost noteheads (`ScoreView.ghosts`, no stems or
+  rhythm) at their target time. `target_pitch` gives each its own sign against the key
+  signature, a natural included, since nothing carries through the bar for them.
 
 ## What survives a session
 

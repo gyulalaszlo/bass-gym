@@ -52,6 +52,7 @@ pub fn editor(p: &Props, theme: &Theme, ui: &mut Ui, playhead: Option<f64>, out:
             axis,
             layout,
             lead: None,
+            ghosts: &[],
         }
         .paint(painter, rect, &theme.score);
         paint_fixed_lead(painter, rect, layout, key, &theme.score);

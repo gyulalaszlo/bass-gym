@@ -58,6 +58,8 @@ pub struct LiveScore<'a> {
     pub a4: f32,
     /// Distance between staff lines.
     pub size: f32,
+    /// Notes to play, (time, MIDI note): those after now are shown ahead of the playhead.
+    pub targets: &'a [(f64, i32)],
 }
 
 impl LiveScore<'_> {

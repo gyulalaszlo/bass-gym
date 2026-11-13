@@ -3,7 +3,8 @@
 
 use bg_core::TimeSignature;
 use bg_core::score::{
-    Accidental, KeySignature, MIDDLE_LINE, ScoreBar, ScoreEvent, ScoreKind, ScoreNote, TOP_LINE,
+    Accidental, KeySignature, MIDDLE_LINE, ScoreBar, ScoreEvent, ScoreKind, ScoreNote, StaffPitch,
+    TOP_LINE,
 };
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rangef, Rect, Shape, Stroke, pos2};
 
@@ -57,6 +58,8 @@ pub struct Theme {
     pub ledger: Color32,
     pub label_font: FontId,
     pub label: Color32,
+    /// Notes still to be played.
+    pub ghost: Color32,
 }
 
 impl From<&Tokens> for Theme {
@@ -76,6 +79,7 @@ impl From<&Tokens> for Theme {
             ledger: t.dim(),
             label_font: t.mono(10.0),
             label: t.dim(),
+            ghost: t.magenta().gamma_multiply(0.7),
         }
     }
 }
@@ -175,6 +179,8 @@ pub struct ScoreView<'a> {
     pub layout: StaffLayout,
     /// Draw the clef and/or time signature at the left end of the staff.
     pub lead: Option<Lead>,
+    /// Notes still to be played, at their times: faint noteheads, no stems.
+    pub ghosts: &'a [(f64, StaffPitch)],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -204,6 +210,9 @@ impl ScoreView<'_> {
             d.bar(bar, rect, i == 0, self.layout.labels);
             let next = self.bars.get(i + 1);
             d.events(bar, next, rect);
+        }
+        for &(time, pitch) in self.ghosts {
+            d.ghost(time, pitch);
         }
     }
 }
@@ -342,6 +351,36 @@ impl Draw<'_> {
 
     fn head_x(&self, e: &ScoreEvent) -> f32 {
         self.axis.x(e.time) + 1.0
+    }
+
+    /// An upcoming note: notehead, ledger lines and accidental in the ghost colour.
+    fn ghost(&self, time: f64, pitch: StaffPitch) {
+        let (x, pos, w, color) = (
+            self.axis.x(time) + 1.0,
+            pitch.pos,
+            self.head_width(),
+            self.t.ghost,
+        );
+        for ledger in (2..=-pos)
+            .step_by(2)
+            .map(|l| -l)
+            .chain((TOP_LINE + 2..=pos).step_by(2))
+        {
+            self.p.hline(
+                (x - 0.3 * w)..=(x + 1.3 * w),
+                self.y(ledger),
+                Stroke::new(1.0, color),
+            );
+        }
+        self.glyph(HEAD_BLACK, x, self.y(pos), color);
+        if let Some(a) = pitch.accidental {
+            let glyph = match a {
+                Accidental::Sharp => SHARP,
+                Accidental::Flat => FLAT,
+                Accidental::Natural => NATURAL,
+            };
+            self.glyph(glyph, x - 1.1 * self.sp, self.y(pos), color);
+        }
     }
 
     fn head_width(&self) -> f32 {

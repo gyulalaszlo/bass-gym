@@ -206,6 +206,7 @@ mod tests {
             scale: None,
             a4: 440.0,
             size: 8.0,
+            targets: &[],
         };
         let p = Props {
             score: Some(live),

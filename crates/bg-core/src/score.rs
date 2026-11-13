@@ -158,6 +158,20 @@ impl Spelling {
     }
 }
 
+/// Where a note still to be played (Basic scales' upcoming targets) is written: alone,
+/// so it carries the sign it needs against the key signature (a natural included) when
+/// it isn't one of the key's notes, and none when it is.
+pub fn target_pitch(sounding_midi: i32, scale: Option<Scale>) -> StaffPitch {
+    let mut p = Spelling::new(scale).pitch(sounding_midi);
+    let in_key = scale.is_some_and(|s| s.contains(sounding_midi.rem_euclid(12) as u8));
+    p.accidental = match scale {
+        Some(_) if in_key => None,
+        Some(_) => Accidental::of(p.alter),
+        None => (p.alter != 0).then(|| Accidental::of(p.alter)).flatten(),
+    };
+    p
+}
+
 /// Where a sounding MIDI note is written, every altered note with its accidental;
 /// `flats` picks the spelling.
 pub fn staff_pitch(sounding_midi: i32, flats: bool) -> StaffPitch {
@@ -1129,6 +1143,20 @@ mod tests {
         assert_eq!(f_locrian.name(11), "Cb");
         assert_eq!(e_flat.name(8), "Ab");
         assert_eq!(Spelling::new(None).name(6), "F#");
+    }
+
+    #[test]
+    fn targets_carry_only_the_signs_the_key_lacks() {
+        let e = Some(Scale {
+            root: 4,
+            mode: Mode::Ionian,
+        });
+        // F sharp is in E major: no sign. D natural (E blues' b7) needs one.
+        assert_eq!(target_pitch(30, e).accidental, None);
+        assert_eq!(target_pitch(38, e).accidental, Some(Accidental::Natural));
+        assert_eq!(target_pitch(34, e).accidental, Some(Accidental::Sharp));
+        assert_eq!(target_pitch(30, None).accidental, Some(Accidental::Sharp));
+        assert_eq!(target_pitch(31, None).accidental, None);
     }
 
     #[test]

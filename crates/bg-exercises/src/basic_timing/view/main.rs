@@ -57,6 +57,7 @@ pub fn live(p: &props::Main, theme: &Theme, ui: &mut Ui) {
             scale: Some(p.session.key),
             a4: p.a4,
             size: p.prefs.score_size,
+            targets: &p.score_targets,
         }),
         lane_height: if p.grid_notes.is_empty() {
             LANE_HEIGHT

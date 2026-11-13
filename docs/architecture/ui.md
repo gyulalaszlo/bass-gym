@@ -13,6 +13,18 @@ egui and eframe 0.36 with the `glow` backend, plus `egui-phosphor` icons (re-exp
   the preferences page list (`prefs.rs`) send `Msg`s, and `BassGymApp::update` carries
   them out. `state.rs` is what survives a restart, and `theme.rs` the shell's theme root.
 - Preferences open in a separate viewport.
+- Presets (`presets/`): `PresetStore` (`bg-core/src/preset.rs`) scans a list of preset
+  dirs recursively. Each `<uuid>.json` belongs to the exercise named in its envelope, and
+  its folder is just where it sits, so a downloaded folder can be dropped into any dir.
+  `roots[0]` is the user's own `<config dir>/presets`, and the rest come from the Presets
+  page (`pages/presets.rs`, settings id `presets`). The page asks the app to rescan
+  through a shared `Rc<Cell<bool>>`, because `PrefsCtx` can't reach the store.
+- The preset bar has a column folder browser (`presets/browser.rs`, a view in a
+  `dropdown_panel` that stays open while you click through it) and a preset dropdown for
+  the selected folder. `ExerciseSlot.folder` is the selected folder: loading a preset
+  selects its folder, and New saves into it. Edit changes the name, description and tags
+  in the envelope, and lists `ExerciseSlot::changes` (`preset::diff` of the baseline
+  against the working data). It doesn't save the settings themselves.
 - `persist_egui_memory` is false.
 
 ## How state reaches widgets
@@ -262,8 +274,8 @@ Files:
   the preset. Note length is a checkbox in the groove panel (`SessionConfig.score_length`).
   Basic chords' "Scoring" section has the target sources (groove, piano hits), chord
   fit and the checker.
-- Other stores: presets in `<config dir>/presets` (exercise config only) and
-  `state.json` for `AppState`.
+- Other stores: presets (exercise config only, in the preset dirs; see the app shell
+  section) and `state.json` for `AppState`, which remembers the selected preset by uuid.
 - Changing anything in `AudioConfig` reopens the devices, so unrelated settings should
   get their own table.
 

@@ -588,6 +588,23 @@ pub fn dropdown_sized<R>(
     (resp, inner.map(|i| i.inner))
 }
 
+/// A [`dropdown_sized`] that stays open on clicks inside it, for contents you browse
+/// through (like a column browser). The contents do their own scrolling.
+pub fn dropdown_panel<R>(
+    ui: &mut Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    selected: impl Into<WidgetText>,
+    width: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> (Response, Option<R>) {
+    let id = ui.make_persistent_id(id_salt);
+    let resp = dropdown_field(ui, id, selected.into(), width);
+    let inner = egui::Popup::menu(&resp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(add_contents);
+    (resp, inner.map(|i| i.inner))
+}
+
 /// A dropdown choosing one of `options`. The response is marked changed on a new pick.
 pub fn dropdown_value<T: PartialEq + Clone>(
     ui: &mut Ui,

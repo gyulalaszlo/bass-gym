@@ -16,7 +16,9 @@ mod sidebar;
 mod state;
 mod theme;
 
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use bg_audio::{AnalysisConfig, AudioConfig, AudioEngine, SoundConfig};
 use bg_core::ScoringThresholds;
@@ -29,6 +31,7 @@ use bg_ui::{ExerciseCtx, PreferencePage, PrefsCtx, SettingsStore, egui};
 
 use crate::menu::{AppMenu, MenuAction};
 use crate::pages;
+use crate::pages::presets::{self as presets_page, PresetDirs, PresetsPage};
 use crate::presets::{self, ExerciseSlot, PresetBar, bar};
 use screenshot::Screenshot;
 use sidebar::Sidebar;
@@ -41,6 +44,9 @@ pub struct BassGymApp {
     engine: AudioEngine,
     settings: SettingsStore,
     store: PresetStore,
+    /// The user's own preset dir, and the flag the Presets page sets to ask for a rescan.
+    user_presets: PathBuf,
+    rescan: Rc<Cell<bool>>,
     state_path: Option<PathBuf>,
     data_dir: Option<PathBuf>,
     slots: Vec<ExerciseSlot>,
@@ -80,10 +86,13 @@ impl BassGymApp {
             log::info!("settings and presets in {}", d.display());
         }
         let settings = SettingsStore::load(config_dir.as_ref().map(|d| d.join("settings.toml")));
-        let store = PresetStore::new(config_dir.as_ref().map_or_else(
+        let user_presets = config_dir.as_ref().map_or_else(
             || std::env::temp_dir().join("bass-gym-presets"),
             |d| d.join("presets"),
-        ));
+        );
+        let preset_dirs: PresetDirs = settings.get(pages::PRESETS);
+        let store = PresetStore::new(preset_dirs.all(&user_presets));
+        let rescan = Rc::new(Cell::new(false));
         let state_path = config_dir.as_ref().map(|d| d.join("state.json"));
 
         crate::soundfonts::register();
@@ -99,6 +108,10 @@ impl BassGymApp {
             .map(|et| ExerciseSlot::new(et, &store))
             .collect();
         let mut pages = pages::builtin();
+        pages.push(Box::new(PresetsPage::new(
+            user_presets.clone(),
+            rescan.clone(),
+        )));
         for slot in &mut slots {
             let id = slot.et.id();
             match state.presets.get(id) {
@@ -120,6 +133,8 @@ impl BassGymApp {
             engine,
             settings,
             store,
+            user_presets,
+            rescan,
             state_path,
             data_dir: dirs.as_ref().map(|d| d.data_dir().to_path_buf()),
             slots,
@@ -176,6 +191,15 @@ impl BassGymApp {
                 self.theme = Some(t);
             }
             self.settings.flush();
+        }
+    }
+
+    /// Rebuilds the store from the Presets page's dirs and rescans every exercise.
+    fn rescan_presets(&mut self) {
+        let dirs: PresetDirs = self.settings.get(pages::PRESETS);
+        self.store = PresetStore::new(dirs.all(&self.user_presets));
+        for slot in &mut self.slots {
+            slot.refresh(&self.store);
         }
     }
 
@@ -373,10 +397,28 @@ impl eframe::App for BassGymApp {
                 kit::show::<Tuner>(ui, "tuner", &props, &theme.tuner);
                 ui.add_space(theme.tuner_gap);
                 if let Some(slot) = self.slots.get_mut(self.selected) {
+                    let roots: Vec<String> = self
+                        .store
+                        .roots()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, d)| presets_page::root_name(i, d))
+                        .collect();
+                    let changes = slot.changes();
+                    let (description, tags) = slot
+                        .current_preset()
+                        .map(|p| (p.envelope.description.clone(), p.envelope.tags.clone()))
+                        .unwrap_or_default();
                     let props = bar::Props {
                         name: slot.current_name(),
                         current: slot.current,
                         presets: &slot.presets,
+                        roots: &roots,
+                        folders: &slot.folders,
+                        folder: &slot.folder,
+                        description: &description,
+                        tags: &tags,
+                        changes: &changes,
                         dirty: slot.is_dirty(),
                         locked: slot.et.is_running(),
                         message: self.preset_message.as_ref(),
@@ -424,6 +466,9 @@ impl eframe::App for BassGymApp {
         }
         if self.prefs_open {
             self.preferences(&ctx, &theme);
+        }
+        if self.rescan.take() {
+            self.rescan_presets();
         }
         // Keyboard zoom (Cmd/Ctrl +/-/0) changes egui's zoom directly; keep the setting in sync.
         if let Some(t) = &self.theme {

@@ -2,9 +2,11 @@
 //!
 //! - `slot.rs`: an exercise type with its presets, and the store operations.
 //! - `bar.rs`: the preset bar, a kit component that emits what to do.
+//! - `browser.rs`: the bar's column folder browser, a view.
 //! - [`run`] carries out the bar's emissions on a slot and the store.
 
 pub mod bar;
+mod browser;
 mod slot;
 
 use bg_core::preset::PresetStore;
@@ -23,7 +25,15 @@ pub fn run(slot: &mut ExerciseSlot, store: &PresetStore, e: bar::Emission) -> Re
         Pick(Some(id)) => slot.load(id),
         Save => slot.save(store),
         SaveAs(name) => slot.save_as(store, &name),
-        Rename(name) => slot.rename(store, &name),
+        Folder(root, folder) => {
+            slot.open_folder(root, &folder);
+            Ok(())
+        }
+        Edit {
+            name,
+            description,
+            tags,
+        } => slot.edit(store, &name, &description, tags),
         Delete => slot.delete(store),
         Revert => match slot.current {
             Some(id) => slot.load(id),

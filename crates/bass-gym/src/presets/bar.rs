@@ -1,15 +1,19 @@
-//! The preset bar: the selector, Save / New / Revert / Defaults, the more menu, and the
-//! New / Rename / Delete dialogs. A tier-2 component: the open dialog is its state, and
+//! The preset bar: the folder browser and preset selector, Save / New / Edit / Revert /
+//! Defaults, the more menu, and the New / Edit / Delete dialogs. A tier-2 component: the open dialog is its state, and
 //! every preset operation is an [`Emission`] its owner carries out on the store.
+
+use std::path::PathBuf;
 
 use bg_core::preset::StoredPreset;
 use bg_ui::egui::{self, Color32, RichText, Ui};
 use bg_ui::icons;
-use bg_ui::kit::{Component, Emit};
+use bg_ui::kit::{self, Component, Emit};
 use bg_ui::theme::Tokens;
 use bg_ui::widgets::button::{button, selectable};
 use bg_ui::widgets::controls::dropdown_sized;
 use uuid::Uuid;
+
+use super::browser::{self, Browser};
 
 pub struct PresetBar;
 
@@ -18,8 +22,16 @@ pub enum State {
     #[default]
     Closed,
     New(String),
-    Rename(String),
+    Edit(Draft),
     Delete,
+}
+
+/// The Edit dialog's fields; tags as typed, comma separated.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Draft {
+    pub name: String,
+    pub description: String,
+    pub tags: String,
 }
 
 pub struct Props<'a> {
@@ -27,6 +39,15 @@ pub struct Props<'a> {
     pub name: String,
     pub current: Option<Uuid>,
     pub presets: &'a [StoredPreset],
+    /// The preset dirs' names, every folder in them, and the one shown.
+    pub roots: &'a [String],
+    pub folders: &'a [(usize, PathBuf)],
+    pub folder: &'a (usize, PathBuf),
+    /// The selected preset's description and tags.
+    pub description: &'a str,
+    pub tags: &'a [String],
+    /// What changed since the last load or save, one line each.
+    pub changes: &'a [String],
     /// The working settings differ from the selected preset.
     pub dirty: bool,
     /// A session is running: presets can't be switched.
@@ -50,7 +71,13 @@ pub enum Emission {
     Pick(Option<Uuid>),
     Save,
     SaveAs(String),
-    Rename(String),
+    /// Show a folder: `(preset dir, relative path)`.
+    Folder(usize, PathBuf),
+    Edit {
+        name: String,
+        description: String,
+        tags: Vec<String>,
+    },
     Delete,
     Revert,
     Defaults,
@@ -67,6 +94,10 @@ pub struct Theme {
     /// The selector's narrowest, and its guess of the buttons' width before measuring.
     pub min_selector: f32,
     pub buttons_guess: f32,
+    /// The browser's share of the selector width.
+    pub browser_share: f32,
+    pub changes_height: f32,
+    pub browser: browser::Theme,
 }
 
 impl From<&Tokens> for Theme {
@@ -79,7 +110,10 @@ impl From<&Tokens> for Theme {
             danger: t.red(),
             dialog_width: 340.0,
             min_selector: 140.0,
-            buttons_guess: 560.0,
+            buttons_guess: 640.0,
+            browser_share: 0.4,
+            changes_height: 160.0,
+            browser: browser::Theme::default(),
         }
     }
 }
@@ -105,13 +139,27 @@ impl Component for PresetBar {
                 let buttons_w: f32 = ui
                     .data(|d| d.get_temp(buttons_id))
                     .unwrap_or(theme.buttons_guess);
-                let width = (ui.available_width() - buttons_w - ui.spacing().item_spacing.x)
-                    .max(theme.min_selector);
-                dropdown_sized(ui, "preset_select", text, width, |ui| {
+                let width = (ui.available_width() - buttons_w - 2.0 * ui.spacing().item_spacing.x)
+                    .max(2.0 * theme.min_selector);
+                let browser_w = (width * theme.browser_share).max(theme.min_selector);
+                let props = browser::Props {
+                    roots: p.roots,
+                    folders: p.folders,
+                    selected: p.folder,
+                    width: browser_w,
+                };
+                for (root, folder) in kit::show::<Browser>(ui, "browser", &props, &theme.browser) {
+                    out.send(do_(Emission::Folder(root, folder)));
+                }
+                let in_folder = p
+                    .presets
+                    .iter()
+                    .filter(|x| (x.root, &x.folder) == (p.folder.0, &p.folder.1));
+                dropdown_sized(ui, "preset_select", text, width - browser_w, |ui| {
                     if ui.add(selectable(p.current.is_none(), "Default")).clicked() {
                         out.send(do_(Emission::Pick(None)));
                     }
-                    for preset in p.presets {
+                    for preset in in_folder {
                         let selected = p.current == Some(preset.envelope.id);
                         match &preset.incompatible {
                             None => {
@@ -149,7 +197,7 @@ impl Component for PresetBar {
         match msg {
             Msg::Open(s) => *state = s,
             Msg::Name(n) => {
-                if let State::New(name) | State::Rename(name) = state {
+                if let State::New(name) = state {
                     *name = n;
                 }
             }
@@ -180,6 +228,20 @@ fn buttons(p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
     }
     if ui
         .add_enabled(
+            p.current.is_some(),
+            button(format!("{} Edit", icons::PENCIL_SIMPLE)),
+        )
+        .on_hover_text("Edit the name, description and tags, and see what changed")
+        .clicked()
+    {
+        out.send(Msg::Open(State::Edit(Draft {
+            name: p.name.clone(),
+            description: p.description.to_owned(),
+            tags: p.tags.join(", "),
+        })));
+    }
+    if ui
+        .add_enabled(
             p.dirty,
             button(format!("{} Revert", icons::ARROW_COUNTER_CLOCKWISE)),
         )
@@ -202,12 +264,6 @@ fn buttons(p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
         egui::Popup::menu(&more).show(|ui| {
             let wide = [ui.available_width(), 0.0];
             if ui
-                .add(button(format!("{} Rename…", icons::PENCIL_SIMPLE)).min_size(wide))
-                .clicked()
-            {
-                out.send(Msg::Open(State::Rename(p.name.clone())));
-            }
-            if ui
                 .add(
                     button(format!("{} Delete…", icons::TRASH))
                         .color(theme.danger)
@@ -228,13 +284,8 @@ fn dialog(state: &State, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<M
     egui::Modal::new(egui::Id::new("preset_dialog")).show(ui.ctx(), |ui| {
         ui.set_width(theme.dialog_width);
         match state {
-            State::New(name) | State::Rename(name) => {
-                let is_new = matches!(state, State::New(_));
-                ui.heading(if is_new {
-                    "New preset"
-                } else {
-                    "Rename preset"
-                });
+            State::New(name) => {
+                ui.heading("New preset");
                 let mut edit = name.clone();
                 let resp = ui.text_edit_singleline(&mut edit);
                 resp.request_focus();
@@ -246,17 +297,14 @@ fn dialog(state: &State, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<M
                 ui.horizontal(|ui| {
                     if ui.add_enabled(valid, button("Save")).clicked() || (enter && valid) {
                         let name = edit.trim().to_owned();
-                        out.send(Msg::Do(if is_new {
-                            Emission::SaveAs(name)
-                        } else {
-                            Emission::Rename(name)
-                        }));
+                        out.send(Msg::Do(Emission::SaveAs(name)));
                     }
                     if ui.add(button("Cancel")).clicked() {
                         out.send(Msg::Close);
                     }
                 });
             }
+            State::Edit(draft) => edit_dialog(draft, p, theme, ui, out),
             State::Delete => {
                 ui.heading("Delete preset");
                 ui.label(format!("Delete “{}”? This can't be undone.", p.name));
@@ -277,6 +325,72 @@ fn dialog(state: &State, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<M
     });
 }
 
+fn edit_dialog(draft: &Draft, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
+    ui.heading("Edit preset");
+    let mut d = draft.clone();
+    egui::Grid::new("preset_edit")
+        .num_columns(2)
+        .show(ui, |ui| {
+            ui.label("Name");
+            ui.text_edit_singleline(&mut d.name);
+            ui.end_row();
+            ui.label("Description");
+            ui.text_edit_multiline(&mut d.description);
+            ui.end_row();
+            ui.label("Tags");
+            ui.add(egui::TextEdit::singleline(&mut d.tags).hint_text("comma separated"));
+            ui.end_row();
+        });
+    if d != *draft {
+        out.send(Msg::Open(State::Edit(d.clone())));
+    }
+    ui.separator();
+    if p.changes.is_empty() {
+        ui.label(RichText::new("No unsaved changes").small());
+    } else {
+        ui.label(
+            RichText::new(format!(
+                "Unsaved changes (use Save to keep them): {}",
+                p.changes.len()
+            ))
+            .small()
+            .color(theme.dirty),
+        );
+        egui::ScrollArea::vertical()
+            .max_height(theme.changes_height)
+            .show(ui, |ui| {
+                for c in p.changes {
+                    ui.label(RichText::new(c).small().monospace());
+                }
+            });
+    }
+    ui.separator();
+    let valid = !d.name.trim().is_empty();
+    ui.horizontal(|ui| {
+        if ui.add_enabled(valid, button("Save")).clicked() {
+            out.send(Msg::Do(Emission::Edit {
+                name: d.name.trim().to_owned(),
+                description: d.description.trim().to_owned(),
+                tags: parse_tags(&d.tags),
+            }));
+        }
+        if ui.add(button("Cancel")).clicked() {
+            out.send(Msg::Close);
+        }
+    });
+}
+
+/// `"jazz, slow ,, jazz"` → `["jazz", "slow"]`.
+fn parse_tags(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for t in text.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        if !tags.iter().any(|x| x == t) {
+            tags.push(t.to_owned());
+        }
+    }
+    tags
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,6 +400,12 @@ mod tests {
             name: "Default".into(),
             current: None,
             presets: &[],
+            roots: &[],
+            folders: &[],
+            folder: &(0, PathBuf::new()),
+            description: "",
+            tags: &[],
+            changes: &[],
             dirty: false,
             locked: false,
             message: None,
@@ -304,5 +424,18 @@ mod tests {
         let out = send(&mut s, Msg::Do(Emission::SaveAs("slow".into())));
         assert_eq!(out, vec![Emission::SaveAs("slow".into())]);
         assert_eq!(s, State::Closed);
+    }
+
+    #[test]
+    fn edit_keeps_its_draft_and_tags_are_cleaned() {
+        let mut s = State::default();
+        let draft = Draft {
+            name: "slow".into(),
+            description: "Half time".into(),
+            tags: "jazz, slow ,, jazz".into(),
+        };
+        send(&mut s, Msg::Open(State::Edit(draft.clone())));
+        assert_eq!(s, State::Edit(draft));
+        assert_eq!(parse_tags("jazz, slow ,, jazz"), ["jazz", "slow"]);
     }
 }

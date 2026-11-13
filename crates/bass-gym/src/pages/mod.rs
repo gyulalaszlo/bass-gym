@@ -9,6 +9,7 @@
 mod audio;
 mod display;
 mod latency;
+pub mod presets;
 mod scoring;
 mod tuner;
 
@@ -18,6 +19,7 @@ use bg_ui::theme::{FormTheme, Tokens};
 
 pub use bg_ui::settings::{ANALYSIS, AUDIO, SOUNDS};
 pub const SCORING: &str = "scoring";
+pub const PRESETS: &str = "presets";
 
 pub fn builtin() -> Vec<Box<dyn PreferencePage>> {
     vec![

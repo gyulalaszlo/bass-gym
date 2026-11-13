@@ -19,6 +19,11 @@ pub struct PresetEnvelope {
     pub format: u32,
     pub id: Uuid,
     pub name: String,
+    /// Longer notes on the exercise; free text.
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub exercise: String,
     pub version: u32,
     pub created: DateTime<Utc>,
@@ -33,6 +38,8 @@ impl PresetEnvelope {
             format: ENVELOPE_FORMAT,
             id: Uuid::new_v4(),
             name: name.to_owned(),
+            description: String::new(),
+            tags: Vec::new(),
             exercise: exercise.to_owned(),
             version,
             created: now,
@@ -90,81 +97,192 @@ pub fn migrate(
 #[derive(Clone, Debug)]
 pub struct StoredPreset {
     pub path: PathBuf,
+    /// Index of the preset dir it was found in, and its folder relative to that dir.
+    pub root: usize,
+    pub folder: PathBuf,
     pub envelope: PresetEnvelope,
     /// Set when the preset can't be used by this version of the app.
     pub incompatible: Option<String>,
 }
 
-/// File-system preset store: `<root>/<exercise id>/<preset uuid>.json`.
+/// What a scan of the preset dirs found for one exercise.
+#[derive(Clone, Debug, Default)]
+pub struct Scan {
+    /// Sorted by name.
+    pub presets: Vec<StoredPreset>,
+    /// Every subfolder of every dir (empty ones too), as `(root, relative path)`, sorted.
+    pub folders: Vec<(usize, PathBuf)>,
+}
+
+/// File-system preset store: any number of preset dirs, each a free tree of folders
+/// holding `<uuid>.json` files. A file belongs to the exercise named in its envelope.
 #[derive(Clone, Debug)]
 pub struct PresetStore {
-    root: PathBuf,
+    roots: Vec<PathBuf>,
 }
 
 impl PresetStore {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    /// `roots[0]` is the user's own dir, where the app saves by default.
+    pub fn new(roots: Vec<PathBuf>) -> Self {
+        assert!(!roots.is_empty(), "a preset store needs at least one dir");
+        Self { roots }
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.roots
     }
 
-    fn dir(&self, exercise: &str) -> PathBuf {
-        self.root.join(exercise)
+    /// Lists the presets of one exercise and all folders. Unreadable files are reported as
+    /// incompatible entries (when their envelope parses) or skipped. When two files share
+    /// an id, the first found wins.
+    pub fn scan(&self, exercise: &str, schema: &dyn PresetSchema) -> Scan {
+        let mut scan = Scan::default();
+        for (root, dir) in self.roots.iter().enumerate() {
+            walk(dir, dir, root, exercise, schema, &mut scan);
+        }
+        let mut seen = std::collections::HashSet::new();
+        scan.presets.retain(|p| {
+            let fresh = seen.insert(p.envelope.id);
+            if !fresh {
+                log::warn!("skipping duplicate preset {}", p.path.display());
+            }
+            fresh
+        });
+        scan.presets.sort_by_key(|p| p.envelope.name.to_lowercase());
+        scan.folders.sort();
+        scan
     }
 
-    /// Lists the presets of one exercise, sorted by name. Unreadable files are reported as
-    /// incompatible entries (when their envelope parses) or skipped.
-    pub fn list(&self, exercise: &str, schema: &dyn PresetSchema) -> Vec<StoredPreset> {
-        let Ok(entries) = std::fs::read_dir(self.dir(exercise)) else {
-            return Vec::new();
+    /// Where a new preset goes: `<root>/<folder>/<uuid>.json`.
+    pub fn new_path(&self, root: usize, folder: &Path, envelope: &PresetEnvelope) -> PathBuf {
+        let root = self.roots.get(root).unwrap_or(&self.roots[0]);
+        root.join(folder).join(format!("{}.json", envelope.id))
+    }
+}
+
+fn walk(
+    root_dir: &Path,
+    dir: &Path,
+    root: usize,
+    exercise: &str,
+    schema: &dyn PresetSchema,
+    scan: &mut Scan,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|e| e.path()) {
+        if path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
+        let folder = dir
+            .strip_prefix(root_dir)
+            .unwrap_or(Path::new(""))
+            .to_path_buf();
+        if path.is_dir() {
+            if let Ok(rel) = path.strip_prefix(root_dir) {
+                scan.folders.push((root, rel.to_path_buf()));
+            }
+            walk(root_dir, &path, root, exercise, schema, scan);
+            continue;
+        }
+        if !path.extension().is_some_and(|e| e == "json") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
         };
-        let mut out: Vec<StoredPreset> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "json"))
-            .filter_map(|path| {
-                let text = std::fs::read_to_string(&path).ok()?;
-                let envelope: PresetEnvelope = match serde_json::from_str(&text) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        log::warn!("skipping unreadable preset {}: {e}", path.display());
-                        return None;
-                    }
-                };
-                let incompatible = migrate(schema, envelope.version, envelope.data.clone())
-                    .err()
-                    .map(|e| e.to_string());
-                Some(StoredPreset {
-                    path,
-                    envelope,
-                    incompatible,
-                })
-            })
-            .collect();
-        out.sort_by_key(|p| p.envelope.name.to_lowercase());
-        out
+        let envelope: PresetEnvelope = match serde_json::from_str(&text) {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("skipping unreadable preset {}: {e}", path.display());
+                continue;
+            }
+        };
+        if envelope.exercise != exercise {
+            continue;
+        }
+        let incompatible = migrate(schema, envelope.version, envelope.data.clone())
+            .err()
+            .map(|e| e.to_string());
+        scan.presets.push(StoredPreset {
+            path,
+            root,
+            folder,
+            envelope,
+            incompatible,
+        });
     }
+}
 
-    pub fn path_for(&self, envelope: &PresetEnvelope) -> PathBuf {
-        self.dir(&envelope.exercise)
-            .join(format!("{}.json", envelope.id))
+/// Writes atomically (temp file + rename), creating the folder.
+pub fn save(path: &Path, envelope: &PresetEnvelope) -> Result<(), PresetError> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
     }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(envelope)?)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
 
-    /// Writes atomically (temp file + rename).
-    pub fn save(&self, envelope: &PresetEnvelope) -> Result<PathBuf, PresetError> {
-        let path = self.path_for(envelope);
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(envelope)?)?;
-        std::fs::rename(&tmp, &path)?;
-        Ok(path)
+pub fn delete(path: &Path) -> Result<(), PresetError> {
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+/// What differs between two preset data trees, one line per changed leaf:
+/// `groove.tempo: 90 → 100`.
+pub fn diff(old: &Value, new: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    diff_into("", old, new, &mut out);
+    out
+}
+
+fn diff_into(at: &str, old: &Value, new: &Value, out: &mut Vec<String>) {
+    let key = |k: &str| {
+        if at.is_empty() {
+            k.to_owned()
+        } else {
+            format!("{at}.{k}")
+        }
+    };
+    match (old, new) {
+        (Value::Object(a), Value::Object(b)) => {
+            let mut keys: Vec<&String> = a.keys().chain(b.keys()).collect();
+            keys.sort();
+            keys.dedup();
+            for k in keys {
+                let (x, y) = (
+                    a.get(k).unwrap_or(&Value::Null),
+                    b.get(k).unwrap_or(&Value::Null),
+                );
+                diff_into(&key(k), x, y, out);
+            }
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => {
+            for (i, (x, y)) in a.iter().zip(b).enumerate() {
+                diff_into(&key(&i.to_string()), x, y, out);
+            }
+        }
+        _ if old != new => {
+            let name = if at.is_empty() { "(all)" } else { at };
+            out.push(format!("{name}: {} → {}", short(old), short(new)));
+        }
+        _ => {}
     }
+}
 
-    pub fn delete(&self, envelope: &PresetEnvelope) -> Result<(), PresetError> {
-        std::fs::remove_file(self.path_for(envelope))?;
-        Ok(())
+/// A value, cut short so a whole changed list stays on one line.
+fn short(v: &Value) -> String {
+    let s = v.to_string();
+    if s.chars().count() > 40 {
+        format!("{}…", s.chars().take(40).collect::<String>())
+    } else {
+        s
     }
 }
 
@@ -207,22 +325,66 @@ mod tests {
     }
 
     #[test]
-    fn store_roundtrip_and_incompatible() {
+    fn store_scans_nested_folders_and_roots() {
         let dir = std::env::temp_dir().join(format!("bg-preset-test-{}", Uuid::new_v4()));
-        let store = PresetStore::new(&dir);
+        let (user, pack) = (dir.join("user"), dir.join("pack"));
+        let store = PresetStore::new(vec![user.clone(), pack.clone()]);
         let a = PresetEnvelope::new("ex", 3, "Bravo", json!({"tempo": 1}));
         let b = PresetEnvelope::new("ex", 9, "alpha", json!({}));
-        store.save(&a).unwrap();
-        store.save(&b).unwrap();
-        std::fs::write(dir.join("ex/garbage.json"), "{nope").unwrap();
-        let list = store.list("ex", &V3);
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].envelope.name, "alpha");
-        assert!(list[0].incompatible.is_some());
-        assert_eq!(list[1].envelope, a);
-        assert!(list[1].incompatible.is_none());
-        store.delete(&a).unwrap();
-        assert_eq!(store.list("ex", &V3).len(), 1);
+        let other = PresetEnvelope::new("other", 3, "Other", json!({}));
+        let pa = store.new_path(0, Path::new("slow/swing"), &a);
+        save(&pa, &a).unwrap();
+        save(&store.new_path(1, Path::new(""), &b), &b).unwrap();
+        save(&store.new_path(1, Path::new(""), &other), &other).unwrap();
+        // The same preset copied into the pack: the user dir's copy wins.
+        save(&store.new_path(1, Path::new("dup"), &a), &a).unwrap();
+        std::fs::create_dir_all(user.join("empty")).unwrap();
+        std::fs::write(user.join("garbage.json"), "{nope").unwrap();
+
+        let scan = store.scan("ex", &V3);
+        assert_eq!(scan.presets.len(), 2);
+        assert_eq!(scan.presets[0].envelope.name, "alpha");
+        assert!(scan.presets[0].incompatible.is_some());
+        assert_eq!(
+            (scan.presets[0].root, scan.presets[0].folder.as_path()),
+            (1, Path::new(""))
+        );
+        assert_eq!(scan.presets[1].envelope, a);
+        assert_eq!(scan.presets[1].path, pa);
+        assert_eq!(scan.presets[1].folder, Path::new("slow/swing"));
+        assert!(scan.presets[1].incompatible.is_none());
+        let folders: Vec<_> = scan
+            .folders
+            .iter()
+            .map(|(r, p)| (*r, p.to_str().unwrap()))
+            .collect();
+        assert_eq!(
+            folders,
+            [(0, "empty"), (0, "slow"), (0, "slow/swing"), (1, "dup")]
+        );
+
+        delete(&pa).unwrap();
+        assert_eq!(
+            store.scan("ex", &V3).presets.len(),
+            2,
+            "the pack's copy shows again"
+        );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn diff_lists_changed_leaves() {
+        let old = json!({"groove": {"tempo": 90, "swing": 0.0}, "bars": [1, 2], "gone": true});
+        let new = json!({"groove": {"tempo": 100, "swing": 0.0}, "bars": [1, 3], "added": "x"});
+        assert_eq!(
+            diff(&old, &new),
+            [
+                "added: null → \"x\"",
+                "bars.1: 2 → 3",
+                "gone: true → null",
+                "groove.tempo: 90 → 100",
+            ]
+        );
+        assert!(diff(&old, &old).is_empty());
     }
 }

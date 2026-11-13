@@ -1,7 +1,9 @@
 //! An exercise type with its presets: what's stored, what's selected, and whether the
 //! working settings differ from it.
 
-use bg_core::preset::{PresetEnvelope, PresetStore, StoredPreset, migrate};
+use std::path::{Path, PathBuf};
+
+use bg_core::preset::{self, PresetEnvelope, PresetStore, StoredPreset, migrate};
 use bg_ui::ExerciseType;
 use chrono::Utc;
 use serde_json::Value;
@@ -11,6 +13,10 @@ use uuid::Uuid;
 pub struct ExerciseSlot {
     pub et: Box<dyn ExerciseType>,
     pub presets: Vec<StoredPreset>,
+    /// Every folder of every preset dir, as `(root, relative path)`.
+    pub folders: Vec<(usize, PathBuf)>,
+    /// The folder shown in the browser; new presets are saved here.
+    pub folder: (usize, PathBuf),
     /// Selected stored preset; `None` = factory default.
     pub current: Option<Uuid>,
     /// Data as last loaded/saved; the working state is dirty when it differs.
@@ -23,6 +29,8 @@ impl ExerciseSlot {
         let mut slot = Self {
             et,
             presets: Vec::new(),
+            folders: Vec::new(),
+            folder: (0, PathBuf::new()),
             current: None,
             baseline,
         };
@@ -31,14 +39,33 @@ impl ExerciseSlot {
     }
 
     pub fn refresh(&mut self, store: &PresetStore) {
-        self.presets = store.list(self.et.id(), self.et.as_ref());
+        let scan = store.scan(self.et.id(), self.et.as_ref());
+        self.presets = scan.presets;
+        self.folders = scan.folders;
+        // A folder that vanished (or a removed dir) falls back to the user dir.
+        let (root, dir) = &self.folder;
+        let exists = *root < store.roots().len()
+            && (dir.as_os_str().is_empty() || self.folders.iter().any(|f| f == &self.folder));
+        if !exists {
+            self.folder = (0, PathBuf::new());
+        }
+        // A selected preset that's gone leaves its settings as unsaved work.
+        if self.current.is_some() && self.current_preset().is_none() {
+            self.current = None;
+            self.baseline = Value::Null;
+        }
+    }
+
+    /// What changed since the last load or save, one line per setting.
+    pub fn changes(&self) -> Vec<String> {
+        preset::diff(&self.baseline, &self.et.save_preset())
     }
 
     pub fn is_dirty(&self) -> bool {
         self.et.save_preset() != self.baseline
     }
 
-    fn current_preset(&self) -> Option<&StoredPreset> {
+    pub fn current_preset(&self) -> Option<&StoredPreset> {
         self.current
             .and_then(|id| self.presets.iter().find(|p| p.envelope.id == id))
     }
@@ -58,6 +85,11 @@ impl ExerciseSlot {
         self.baseline = self.et.save_preset();
     }
 
+    /// Shows a folder in the browser.
+    pub fn open_folder(&mut self, root: usize, folder: &Path) {
+        self.folder = (root, folder.to_path_buf());
+    }
+
     pub fn load(&mut self, id: Uuid) -> Result<(), String> {
         let p = self
             .presets
@@ -70,7 +102,9 @@ impl ExerciseSlot {
             p.envelope.data.clone(),
         )
         .map_err(|e| e.to_string())?;
+        let folder = (p.root, p.folder.clone());
         self.et.load_preset(data).map_err(|e| format!("{e:#}"))?;
+        self.folder = folder;
         self.current = Some(id);
         self.baseline = self.et.save_preset();
         Ok(())
@@ -93,7 +127,8 @@ impl ExerciseSlot {
             name,
             self.et.save_preset(),
         );
-        store.save(&env).map_err(|e| e.to_string())?;
+        let path = store.new_path(self.folder.0, &self.folder.1, &env);
+        preset::save(&path, &env).map_err(|e| e.to_string())?;
         let id = env.id;
         self.refresh(store);
         self.current = Some(id);
@@ -109,20 +144,29 @@ impl ExerciseSlot {
         env.data = self.et.save_preset();
         env.version = self.et.current_version();
         env.modified = Utc::now();
-        store.save(&env).map_err(|e| e.to_string())?;
+        preset::save(&p.path, &env).map_err(|e| e.to_string())?;
         self.refresh(store);
         self.baseline = self.et.save_preset();
         Ok(())
     }
 
-    pub fn rename(&mut self, store: &PresetStore, name: &str) -> Result<(), String> {
+    /// Changes the selected preset's name, description and tags, leaving its settings.
+    pub fn edit(
+        &mut self,
+        store: &PresetStore,
+        name: &str,
+        description: &str,
+        tags: Vec<String>,
+    ) -> Result<(), String> {
         let Some(p) = self.current_preset() else {
             return Err("no preset selected".into());
         };
         let mut env = p.envelope.clone();
         env.name = name.to_owned();
+        env.description = description.to_owned();
+        env.tags = tags;
         env.modified = Utc::now();
-        store.save(&env).map_err(|e| e.to_string())?;
+        preset::save(&p.path, &env).map_err(|e| e.to_string())?;
         self.refresh(store);
         Ok(())
     }
@@ -131,7 +175,7 @@ impl ExerciseSlot {
         let Some(p) = self.current_preset() else {
             return Err("no preset selected".into());
         };
-        store.delete(&p.envelope).map_err(|e| e.to_string())?;
+        preset::delete(&p.path).map_err(|e| e.to_string())?;
         self.current = None;
         self.refresh(store);
         // Keep the working state; it is now unsaved.

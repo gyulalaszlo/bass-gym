@@ -125,13 +125,17 @@ pub fn main(m: &Model) -> Main<'_> {
         &f.scoring,
     );
     let key = m.data.session.key;
-    let preview = (!m.has_results).then(|| preview(&m.data.session));
-    let seq = m.sequence();
+    let walker = m.walker();
+    let highest = walker.as_ref().map_or(0, |w| w.highest());
     // Scale targets before the timing lock: never hold both.
-    let targets = match (&seq, &preview) {
-        (None, _) => Vec::new(),
-        (Some(seq), Some((bars, _))) => basic_scales::preview(bars, seq),
-        (Some(_), None) => lock_scale(&m.scale).targets.clone(),
+    let (preview, targets) = match (m.has_results, walker) {
+        (true, None) => (None, Vec::new()),
+        (true, Some(_)) => (None, lock_scale(&m.scale).targets.clone()),
+        (false, None) => (Some(preview(&m.data.session)), Vec::new()),
+        (false, Some(w)) => {
+            let (p, t) = basic_scales::preview(&m.data.session, w);
+            (Some(p), t)
+        }
     };
     let (grid, grid_now) = match preview {
         None => (Grid::Session(lock(&m.shared)), now),
@@ -153,7 +157,7 @@ pub fn main(m: &Model) -> Main<'_> {
         })
         .collect();
     let score_targets = targets.iter().map(|t| (t.time, t.midi as i32)).collect();
-    let neck = m.scales().zip(seq).map(|(s, seq)| {
+    let neck = m.scales().map(|s| {
         let (target, next) = basic_scales::at(&targets, grid_now);
         let root = key.root % 12;
         let mut tones = [false; 12];
@@ -162,7 +166,7 @@ pub fn main(m: &Model) -> Main<'_> {
         }
         Neck {
             tuning: s.tuning,
-            frets: frets(s.tuning, &seq),
+            frets: frets(s.tuning, highest),
             root,
             tones,
             target,
@@ -186,9 +190,8 @@ pub fn main(m: &Model) -> Main<'_> {
 }
 
 /// Frets the neck shows: 12, or 24 when the notes go higher.
-fn frets(tuning: Tuning, seq: &[u8]) -> u8 {
+fn frets(tuning: Tuning, high: u8) -> u8 {
     let top = tuning.strings().last().copied().unwrap_or(0);
-    let high = seq.iter().max().copied().unwrap_or(0);
     if high > top + 12 { 24 } else { 12 }
 }
 

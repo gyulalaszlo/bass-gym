@@ -6,8 +6,8 @@ use bg_ui::kit::Emit;
 use bg_ui::views::review;
 
 use super::msg::Msg;
-use crate::basic_scales::{ScaleTargets, SharedScale};
-use crate::timing_session::{AccompanimentScoring, SharedTiming, TimingSession};
+use crate::basic_scales::{self, ScaleTargets, SharedScale, Walker};
+use crate::timing_session::{SharedTiming, TimingSession};
 
 pub enum Effect {
     Start(Box<Start>),
@@ -29,7 +29,7 @@ pub struct Start {
 /// tuning to judge by.
 pub struct ScaleStart {
     pub shared: SharedScale,
-    pub seq: Vec<u8>,
+    pub walker: Walker,
     pub a4: f32,
 }
 
@@ -38,13 +38,13 @@ pub fn run(effect: Effect, engine: &mut AudioEngine, out: &mut Emit<Msg>) {
         Effect::Start(s) => {
             let logic = match s.scale {
                 Some(sc) => {
-                    let targets = ScaleTargets::new(sc.seq, sc.a4, sc.shared);
+                    let targets = ScaleTargets::new(sc.walker, sc.a4, sc.shared);
                     TimingSession::with_accompaniment(
                         s.cfg,
                         s.scoring,
                         s.shared,
                         Box::new(targets),
-                        AccompanimentScoring::default(),
+                        basic_scales::scoring(),
                     )
                 }
                 None => TimingSession::new(s.cfg, s.scoring, s.shared),

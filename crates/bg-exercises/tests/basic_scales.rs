@@ -9,8 +9,10 @@ use bg_core::harmony::{Mode, Scale};
 use bg_core::session::{AutoStop, Span, StopCondition, Trigger};
 use bg_core::{Grade, Planner, ScoringThresholds, SessionConfig};
 use bg_dsp::{NoteDetector, NoteDetectorConfig, NoteEvent};
-use bg_exercises::basic_scales::{ScaleSettings, ScaleTargets, SharedScale, lock_scale};
-use bg_exercises::timing_session::{AccompanimentScoring, SharedTiming, TimingSession, lock};
+use bg_exercises::basic_scales::{
+    ScaleSettings, ScaleTargets, SharedScale, Walker, lock_scale, scoring,
+};
+use bg_exercises::timing_session::{SharedTiming, TimingSession, lock};
 
 const SR: f32 = 48_000.0;
 
@@ -56,7 +58,7 @@ fn scale_session_grades_pitch() {
     let scale = SharedScale::default();
     let timing = SharedTiming::default();
     let targets = ScaleTargets::new(
-        ScaleSettings::default().sequence(&cfg.key, 0),
+        Walker::new(&ScaleSettings::default(), &cfg.key),
         440.0,
         scale.clone(),
     );
@@ -65,7 +67,7 @@ fn scale_session_grades_pitch() {
         ScoringThresholds::default(),
         timing.clone(),
         Box::new(targets),
-        AccompanimentScoring::default(),
+        scoring(),
     );
     let mut planner = Planner::new(cfg, 0.3);
     let times: Vec<f64> = std::iter::from_fn(|| planner.next_bar(&()))

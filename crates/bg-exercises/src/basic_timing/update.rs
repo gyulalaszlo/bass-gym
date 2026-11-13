@@ -50,9 +50,9 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
                     scoring: m.frame.scoring.clone(),
                     shared: m.shared.clone(),
                     max_recording_bytes: m.frame.max_recording_bytes,
-                    scale: m.sequence().map(|seq| ScaleStart {
+                    scale: m.walker().map(|walker| ScaleStart {
                         shared: m.scale.clone(),
-                        seq,
+                        walker,
                         a4: m.frame.a4,
                     }),
                 })));

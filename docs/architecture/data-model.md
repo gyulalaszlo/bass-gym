@@ -126,20 +126,25 @@ using `accompaniment::preview_targets`, which leaves out the random anticipation
   `Accompaniment`: in Basic chords against the current chord, in Basic scales against
   the scale note given to each groove note.
 - Basic scales (`basic_scales/`) is Basic timing with `Kind::Scales`: its
-  `ScaleTargets` is an accompaniment that plays nothing and returns no hits. It gives
-  the groove's notes (count-in excluded) the next note of a sequence, and logs them as
-  `Target { time, len, midi }` in `ScaleShared` (trimmed at stop). `judge` scores
-  against the nearest target: 1 the note, 0.5 another octave, 0 otherwise, so a wrong
-  note grades Poor through the harmony path.
-- The sequence is `ScaleSettings::sequence` (`BasicTimingData.scales`, absent in Basic
-  timing's presets): the scale's intervals on the key's root, starting at the root at or
-  above open E plus `start` octaves, over `octaves` octaves with the top root, every
-  `step`th note up, then back down without repeating the ends. With `whole_bars` it
-  goes root to root (the top root added if `step` skips it, the bottom one repeated)
-  and pads with the root to a multiple of `groove.notes.len()`, so every round starts on
-  a bar line. `scale: Option<ScaleDef>` is the preset's own copy (name and intervals,
-  cleaned up by `intervals()` since files can say anything); `None` is the key's mode.
-  The menu copies one in from `BUILT_IN` or the user's `ScaleLibrary` (settings id
+  `ScaleTargets` is an accompaniment that plays nothing. Its `Walker` gives the groove's
+  notes (count-in excluded) their pitches bar by bar, and they're returned as hits:
+  the session runs with `basic_scales::scoring()` (`groove: false, hits: true`), so the
+  walker, not the groove, decides what's scored. Targets are logged as
+  `Target { time, len, accent, midi }` in `ScaleShared` (trimmed at stop). `judge`
+  scores against the nearest target: 1 the note, 0.5 another octave, 0 otherwise, so a
+  wrong note grades Poor through the harmony path.
+- `ScaleSettings` (`BasicTimingData.scales`, absent in Basic timing's presets):
+  `up()` is every `step`th note of the scale on the key's root, from the root at or
+  above open E plus `start` octaves, over `octaves` octaves to the top root. `runs()`
+  turns it into the runs played in turn by `direction` (Up, Down, UpDown). Without
+  `whole_bars` that's one run looped (UpDown doesn't repeat the turning notes). With
+  `whole_bars` ("root to root") each run is one pass root to root (the top root added
+  if `step` skips it), UpDown alternates an up and a down run, and the walker holds a
+  run's last note to its bar's end (a long target; the groove notes after it aren't
+  targets) and starts the next run on the next bar. The groove click still sounds them.
+  `scale: Option<ScaleDef>` is the preset's own copy (name and intervals, cleaned up by
+  `intervals()` since files can say anything); `None` is the key's mode. The menu
+  copies one in from `BUILT_IN` or the user's `ScaleLibrary` (settings id
   `basic_scales`, edited on the Basic scales preferences page) and can change its
   degrees for that preset alone. Changing anything but the tuning drops the results.
 - `Played.freq` is the only pitch data. It's stored as soon as early pitch detection

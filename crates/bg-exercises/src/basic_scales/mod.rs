@@ -7,28 +7,31 @@
 pub mod menu;
 pub mod prefs;
 
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bg_audio::SessionIo;
-use bg_core::BarPlan;
 use bg_core::harmony::Scale;
 use bg_core::music::freq_to_midi;
 use bg_core::plan::PlannedNote;
+use bg_core::{BarPlan, Matcher, SessionConfig};
 use bg_ui::views::neck::Tuning;
 use serde::{Deserialize, Serialize};
 
 pub use prefs::{ScaleDef, ScaleLibrary};
 
-use crate::timing_session::Accompaniment;
+use crate::timing_session::{self, Accompaniment, AccompanimentScoring};
 
 /// The lowest note a scale starts on: open E.
 const LOWEST: u8 = 28;
 
-/// A note to play: a groove note's time and length, and its pitch.
+/// A note to play: a groove note's time, accent and length (to the bar's end when it's
+/// held), and its pitch.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Target {
     pub time: f64,
     pub len: f64,
+    pub accent: bool,
     pub midi: u8,
 }
 
@@ -66,11 +69,33 @@ pub struct ScaleSettings {
     pub start: u8,
     /// Every how-manyth note of the scale is played: 1 all, 2 every other, ...
     pub step: u8,
-    /// Root to root in whole bars: up to the top root even when `step` skips it, down to
-    /// the bottom root, then the root again until the groove's notes are filled, so every
-    /// round starts on a bar line.
+    pub direction: Direction,
+    /// Root to root: every run ends on its root (the top one added when `step` skips
+    /// it), held to the end of the bar; the next run starts on the next bar line.
     pub whole_bars: bool,
     pub tuning: Tuning,
+}
+
+/// Which way the scale runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Direction {
+    Up,
+    Down,
+    /// Up, then down, then up again, ...
+    #[default]
+    UpDown,
+}
+
+impl Direction {
+    pub const ALL: [Direction; 3] = [Self::Up, Self::Down, Self::UpDown];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Up => "Ascending",
+            Self::Down => "Descending",
+            Self::UpDown => "Both",
+        }
+    }
 }
 
 impl Default for ScaleSettings {
@@ -80,6 +105,7 @@ impl Default for ScaleSettings {
             octaves: 1,
             start: 0,
             step: 1,
+            direction: Direction::default(),
             whole_bars: false,
             tuning: Tuning::default(),
         }
@@ -116,10 +142,9 @@ impl ScaleSettings {
             .map_or_else(|| key.mode.label().to_owned(), |s| s.name.clone())
     }
 
-    /// The notes played in turn on `key`'s root, ready to repeat: every `step`th note up
-    /// over `octaves` (the top root included), then back down. `groove_notes` is the
-    /// groove's notes per round, which [`whole_bars`](Self::whole_bars) fills.
-    pub fn sequence(&self, key: &Scale, groove_notes: usize) -> Vec<u8> {
+    /// Every `step`th note on `key`'s root over `octaves`, ascending, up to the top root
+    /// (always ending on it when [`whole_bars`](Self::whole_bars)).
+    pub fn up(&self, key: &Scale) -> Vec<u8> {
         let intervals = self.intervals(key);
         let root_pc = key.root % 12;
         let root = LOWEST + (root_pc + 12 - LOWEST % 12) % 12 + 12 * self.start;
@@ -129,48 +154,118 @@ impl ScaleSettings {
             .flat_map(|o| intervals.iter().map(move |&i| root + 12 * o + i))
             .chain([top]);
         let mut up: Vec<u8> = notes.step_by(self.step.max(1) as usize).collect();
-        if self.whole_bars {
-            if up.last() != Some(&top) {
-                up.push(top);
-            }
-            let mut seq = up.clone();
-            seq.extend(up.iter().rev().skip(1));
-            if groove_notes > 0 {
-                while !seq.len().is_multiple_of(groove_notes) {
-                    seq.push(root);
+        if self.whole_bars && up.last() != Some(&top) {
+            up.push(top);
+        }
+        up
+    }
+
+    /// The runs played in turn, over and over. With [`whole_bars`](Self::whole_bars) each
+    /// is one pass root to root and a bar line follows it; otherwise there's one run,
+    /// looped without a break (up and down doesn't repeat the turning notes).
+    pub fn runs(&self, key: &Scale) -> Vec<Vec<u8>> {
+        let up = self.up(key);
+        let down: Vec<u8> = up.iter().rev().copied().collect();
+        match (self.whole_bars, self.direction) {
+            (_, Direction::Up) => vec![up],
+            (_, Direction::Down) => vec![down],
+            (true, Direction::UpDown) => vec![up, down],
+            (false, Direction::UpDown) => {
+                let mut run = up.clone();
+                if up.len() > 2 {
+                    run.extend(&down[1..down.len() - 1]);
                 }
+                vec![run]
             }
-            return seq;
         }
-        let mut seq = up.clone();
-        if up.len() > 2 {
-            seq.extend(up[1..up.len() - 1].iter().rev());
-        }
-        seq
     }
 }
 
-/// The targets of `bar`'s notes, continuing `seq` from step `*next`.
-pub fn targets(bar: &BarPlan, seq: &[u8], next: &mut usize) -> Vec<Target> {
-    bar.notes
-        .iter()
-        .map(|n| {
-            let midi = seq[*next % seq.len()];
-            *next += 1;
-            Target {
-                time: n.time,
-                len: n.len,
-                midi,
-            }
-        })
-        .collect()
+/// Gives a session's groove notes their pitches, bar by bar.
+pub struct Walker {
+    runs: Vec<Vec<u8>>,
+    whole_bars: bool,
+    run: usize,
+    pos: usize,
 }
 
-/// The targets of `bars` (a preview: no count-in).
-pub fn preview(bars: &[BarPlan], seq: &[u8]) -> Vec<Target> {
-    let mut next = 0;
-    bars.iter()
-        .flat_map(|b| targets(b, seq, &mut next))
+impl Walker {
+    pub fn new(settings: &ScaleSettings, key: &Scale) -> Self {
+        Self {
+            runs: settings.runs(key),
+            whole_bars: settings.whole_bars,
+            run: 0,
+            pos: 0,
+        }
+    }
+
+    /// The highest note played.
+    pub fn highest(&self) -> u8 {
+        self.runs.iter().flatten().copied().max().unwrap_or(0)
+    }
+
+    /// The targets of `bar` (none in a count-in). A run's last note ends the bar when
+    /// runs are root to root: it's held to the bar line, and the groove notes after it
+    /// aren't played.
+    pub fn bar(&mut self, bar: &BarPlan) -> Vec<Target> {
+        let mut out = Vec::new();
+        if bar.is_count_in() {
+            return out;
+        }
+        for n in &bar.notes {
+            let run = &self.runs[self.run % self.runs.len()];
+            let midi = run[self.pos];
+            self.pos += 1;
+            let last = self.pos >= run.len();
+            if last {
+                (self.pos, self.run) = (0, self.run + 1);
+            }
+            let held = last && self.whole_bars;
+            out.push(Target {
+                time: n.time,
+                len: if held { bar.end() - n.time } else { n.len },
+                accent: n.accent,
+                midi,
+            });
+            if held {
+                break;
+            }
+        }
+        out
+    }
+}
+
+/// What Basic scales scores: the walker's targets (handed to the session as hits), not
+/// the groove's notes, which a held root can leave out; and their pitches.
+pub fn scoring() -> AccompanimentScoring {
+    AccompanimentScoring {
+        groove: false,
+        hits: true,
+        ..Default::default()
+    }
+}
+
+/// A preview of `cfg` (bars and matcher, as [`timing_session::preview`]) with `walker`'s
+/// targets, which it also returns.
+pub fn preview(cfg: &SessionConfig, walker: Walker) -> ((Vec<BarPlan>, Matcher), Vec<Target>) {
+    let walker = RefCell::new(walker);
+    let targets = RefCell::new(Vec::new());
+    let p = timing_session::preview_targets(cfg, false, |b| {
+        let t = walker.borrow_mut().bar(b);
+        targets.borrow_mut().extend(&t);
+        planned(&t)
+    });
+    (p, targets.into_inner())
+}
+
+fn planned(targets: &[Target]) -> Vec<PlannedNote> {
+    targets
+        .iter()
+        .map(|t| PlannedNote {
+            time: t.time,
+            len: t.len,
+            accent: t.accent,
+        })
         .collect()
 }
 
@@ -193,37 +288,27 @@ pub fn pitch_score(want: u8, played: i32) -> f32 {
     }
 }
 
-/// The scale as an accompaniment that plays nothing: it gives each groove note its
-/// pitch, and judges what's played against the nearest one.
+/// The scale as an accompaniment that plays nothing: its targets are the session's (run
+/// with [`scoring`]), and it judges what's played against the nearest one.
 pub struct ScaleTargets {
-    seq: Vec<u8>,
-    next: usize,
+    walker: Walker,
     a4: f32,
     shared: SharedScale,
 }
 
 impl ScaleTargets {
-    /// Plays `seq` over and over (see [`ScaleSettings::sequence`]). Clears `shared` for
-    /// the new session.
-    pub fn new(seq: Vec<u8>, a4: f32, shared: SharedScale) -> Self {
-        assert!(!seq.is_empty(), "a scale with no notes");
+    /// Clears `shared` for the new session.
+    pub fn new(walker: Walker, a4: f32, shared: SharedScale) -> Self {
         lock_scale(&shared).targets.clear();
-        Self {
-            seq,
-            next: 0,
-            a4,
-            shared,
-        }
+        Self { walker, a4, shared }
     }
 }
 
 impl Accompaniment for ScaleTargets {
     fn plan_bar(&mut self, bar: &BarPlan, _io: &mut SessionIo) -> Vec<PlannedNote> {
-        if !bar.is_count_in() {
-            let t = targets(bar, &self.seq, &mut self.next);
-            lock_scale(&self.shared).targets.extend(t);
-        }
-        Vec::new()
+        let t = self.walker.bar(bar);
+        lock_scale(&self.shared).targets.extend(&t);
+        planned(&t)
     }
 
     fn judge(&self, time: f64, freq: f32) -> Option<f32> {
@@ -250,8 +335,11 @@ mod tests {
         mode: Mode::Ionian,
     };
 
+    /// The single looped run (not root to root).
     fn seq(s: ScaleSettings, key: &Scale) -> Vec<u8> {
-        s.sequence(key, 4)
+        let mut runs = s.runs(key);
+        assert_eq!(runs.len(), 1);
+        runs.remove(0)
     }
 
     fn def(name: &str, intervals: &[u8]) -> Option<ScaleDef> {
@@ -297,24 +385,66 @@ mod tests {
     }
 
     #[test]
-    fn whole_bars_go_root_to_root_and_fill_the_groove() {
-        let whole = |step| ScaleSettings {
-            step,
+    fn directions_loop_one_way_or_turn() {
+        let dir = |direction| ScaleSettings {
+            scale: def("Major pentatonic", &[0, 2, 4, 7, 9]),
+            direction,
+            ..Default::default()
+        };
+        assert_eq!(seq(dir(Direction::Up), &C), [36, 38, 40, 43, 45, 48]);
+        assert_eq!(seq(dir(Direction::Down), &C), [48, 45, 43, 40, 38, 36]);
+        assert_eq!(
+            seq(dir(Direction::UpDown), &C),
+            [36, 38, 40, 43, 45, 48, 45, 43, 40, 38]
+        );
+    }
+
+    /// The targets of the first `n` bars of a quarter-note groove at 120 BPM (2 s bars).
+    fn walk(s: &ScaleSettings, n: usize) -> Vec<Vec<(f64, f64, u8)>> {
+        let cfg = SessionConfig {
+            tempo: 120.0,
+            ..Default::default()
+        };
+        let (bars, _) = timing_session::preview(&cfg);
+        let mut w = Walker::new(s, &C);
+        let start = bars[0].start;
+        bars.iter()
+            .take(n)
+            .map(|b| {
+                w.bar(b)
+                    .iter()
+                    .map(|t| (t.time - start, t.len, t.midi))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn root_to_root_holds_the_root_and_restarts_on_the_bar_line() {
+        let whole = |direction| ScaleSettings {
+            scale: def("Major pentatonic", &[0, 2, 4, 7, 9]),
+            direction,
             whole_bars: true,
             ..Default::default()
         };
-        // C major: 15 notes root to root, one more C fills four bars of four.
-        let s = seq(whole(1), &C);
-        assert_eq!(s.len(), 16);
-        assert_eq!(s[7], 48);
-        assert_eq!(s[14..], [36, 36]);
-        // Every other note skips the top C: it's added. C E G B C' B G E C, then C to 12.
-        let s = seq(whole(2), &C);
-        assert_eq!(s[..9], [36, 40, 43, 47, 48, 47, 43, 40, 36]);
-        assert_eq!(s.len(), 12);
-        assert!(s[9..].iter().all(|&n| n == 36));
-        // No groove notes: nothing to fill.
-        assert_eq!(whole(1).sequence(&C, 0).len(), 15);
+        // C D E G | A C'(held 1.5 s) | C D E G ...
+        let up = walk(&whole(Direction::Up), 3);
+        assert_eq!(
+            up[0].iter().map(|t| t.2).collect::<Vec<_>>(),
+            [36, 38, 40, 43]
+        );
+        assert_eq!(up[1], [(2.0, 0.5, 45), (2.5, 1.5, 48)]);
+        assert_eq!(up[2][0], (4.0, 0.5, 36));
+        // Both: the next bar runs down from the top root.
+        let both = walk(&whole(Direction::UpDown), 4);
+        assert_eq!(both[2][0].2, 48);
+        assert_eq!(both[3], [(6.0, 0.5, 38), (6.5, 1.5, 36)]);
+        // Every other note skips the top C: it's added. C E A C'.
+        let skip = ScaleSettings {
+            step: 2,
+            ..whole(Direction::Up)
+        };
+        assert_eq!(skip.up(&C), [36, 40, 45, 48]);
     }
 
     #[test]
@@ -345,6 +475,7 @@ mod tests {
         let t = |time, midi| Target {
             time,
             len: 0.5,
+            accent: false,
             midi,
         };
         let ts = [t(0.0, 36), t(0.5, 38), t(1.0, 40)];

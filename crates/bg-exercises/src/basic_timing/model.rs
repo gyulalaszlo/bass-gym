@@ -9,7 +9,7 @@ use bg_ui::views::review::Review;
 use bg_ui::views::tap_tempo;
 use serde::{Deserialize, Serialize};
 
-use crate::basic_scales::{ScaleDef, ScaleSettings, SharedScale};
+use crate::basic_scales::{ScaleDef, ScaleSettings, SharedScale, Walker};
 use crate::timing_session::SharedTiming;
 
 /// Which exercise this is: Basic timing, or Basic scales (the same, with a pitch for
@@ -105,10 +105,8 @@ impl Model {
         (self.kind == Kind::Scales).then(|| self.data.scales.clone().unwrap_or_default())
     }
 
-    /// The notes Basic scales plays in turn.
-    pub fn sequence(&self) -> Option<Vec<u8>> {
-        let s = self.scales()?;
-        let groove_notes = self.data.session.groove.notes.len();
-        Some(s.sequence(&self.data.session.key, groove_notes))
+    /// What gives Basic scales' notes their pitches.
+    pub fn walker(&self) -> Option<Walker> {
+        Some(Walker::new(&self.scales()?, &self.data.session.key))
     }
 }

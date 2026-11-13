@@ -11,7 +11,7 @@ use bg_ui::widgets::button::{selectable, selectable_value};
 use bg_ui::widgets::controls::{checkbox, number_field, text_field};
 
 use super::prefs::{DEGREES, toggle};
-use super::{BUILT_IN, ScaleDef, ScaleSettings, mode_intervals};
+use super::{BUILT_IN, Direction, ScaleDef, ScaleSettings, mode_intervals};
 
 pub struct ScaleMenu;
 
@@ -84,9 +84,14 @@ impl View for ScaleMenu {
             ui.label(note(
                 "1 plays every note, 2 every other (a scale in thirds), ...",
             ));
-            checkbox(ui, &mut s.whole_bars, "Root to root, in whole bars");
+            ui.horizontal_wrapped(|ui| {
+                for d in Direction::ALL {
+                    selectable_value(ui, &mut s.direction, d, d.label());
+                }
+            });
+            checkbox(ui, &mut s.whole_bars, "Root to root");
             ui.label(note(
-                "Ends on the top root and back on the bottom one, then repeats the root until the bar is full, so every round starts on a bar line.",
+                "Each run ends on its root, held to the end of the bar; the next starts on the next bar line.",
             ));
             ui.add_space(theme.group_gap);
             ui.horizontal_wrapped(|ui| {

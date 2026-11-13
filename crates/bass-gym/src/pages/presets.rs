@@ -1,7 +1,8 @@
 //! The Presets page: which dirs are scanned for presets, and a Rescan button.
 //!
 //! The user's own dir always comes first and can't be removed. The page tells the app to
-//! rescan through a shared flag, since `PrefsCtx` has no way to reach the preset store.
+//! rescan through a shared [`Rescan`], since `PrefsCtx` has no way to reach the preset
+//! store, and the app reports back what it found.
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -42,16 +43,24 @@ pub fn root_name(i: usize, dir: &Path) -> String {
     )
 }
 
+/// Shared by the page and the app: the page asks, the app scans and says what it found.
+#[derive(Default)]
+pub struct Rescan {
+    pub requested: Cell<bool>,
+    /// The last scan's preset and folder counts, over all exercises.
+    pub found: Cell<Option<(usize, usize)>>,
+}
+
 pub struct PresetsPage {
     user: PathBuf,
     /// The path being typed.
     draft: String,
-    rescan: Rc<Cell<bool>>,
+    rescan: Rc<Rescan>,
     theme: ThemeCache<PageTheme>,
 }
 
 impl PresetsPage {
-    pub fn new(user: PathBuf, rescan: Rc<Cell<bool>>) -> Self {
+    pub fn new(user: PathBuf, rescan: Rc<Rescan>) -> Self {
         Self {
             user,
             draft: String::new(),
@@ -67,6 +76,7 @@ struct Props<'a> {
     dirs: &'a PresetDirs,
     user: &'a Path,
     draft: &'a str,
+    found: Option<(usize, usize)>,
 }
 
 enum Emission {
@@ -91,7 +101,7 @@ impl View for Dirs {
         let mut remove = None;
         // The remove button comes first, so a long path can't push it out of view.
         grid("preset_dirs", theme).show(ui, |ui| {
-            ui.label(theme.note("yours"));
+            ui.label(theme.note("User library:"));
             path_label(ui, RichText::new(p.user.display().to_string()), p.user);
             ui.end_row();
             for (i, dir) in p.dirs.extra.iter().enumerate() {
@@ -145,6 +155,18 @@ impl View for Dirs {
         {
             out.send(Emission::Rescan);
         }
+        if let Some((presets, folders)) = p.found {
+            let s = |n: usize| if n == 1 { "" } else { "s" };
+            ui.label(
+                RichText::new(format!(
+                    "Found {presets} preset{} in {folders} folder{}.",
+                    s(presets),
+                    s(folders)
+                ))
+                .small()
+                .color(theme.ok),
+            );
+        }
     }
 }
 
@@ -177,15 +199,16 @@ impl PreferencePage for PresetsPage {
             dirs: &dirs,
             user: &self.user,
             draft: &self.draft,
+            found: self.rescan.found.get(),
         };
         for e in kit::show::<Dirs>(ui, "presets", &props, &theme) {
             match e {
                 Emission::Dirs(d) => {
                     ctx.settings.set(PRESETS, &d);
-                    self.rescan.set(true);
+                    self.rescan.requested.set(true);
                 }
                 Emission::Draft(s) => self.draft = s,
-                Emission::Rescan => self.rescan.set(true),
+                Emission::Rescan => self.rescan.requested.set(true),
             }
         }
     }

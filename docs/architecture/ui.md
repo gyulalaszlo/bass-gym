@@ -18,7 +18,8 @@ egui and eframe 0.36 with the `glow` backend, plus `egui-phosphor` icons (re-exp
   its folder is just where it sits, so a downloaded folder can be dropped into any dir.
   `roots[0]` is the user's own `<config dir>/presets`, and the rest come from the Presets
   page (`pages/presets.rs`, settings id `presets`). The page asks the app to rescan
-  through a shared `Rc<Cell<bool>>`, because `PrefsCtx` can't reach the store.
+  through a shared `Rc<presets::Rescan>`, because `PrefsCtx` can't reach the store. The
+  app writes back the preset and folder counts it found, and the page shows them.
 - The preset bar has a column folder browser (`presets/browser.rs`, a view in a
   `dropdown_panel` that stays open while you click through it) and a preset dropdown for
   the selected folder. `ExerciseSlot.folder` is the selected folder: loading a preset

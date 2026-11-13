@@ -16,7 +16,6 @@ mod sidebar;
 mod state;
 mod theme;
 
-use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -44,9 +43,9 @@ pub struct BassGymApp {
     engine: AudioEngine,
     settings: SettingsStore,
     store: PresetStore,
-    /// The user's own preset dir, and the flag the Presets page sets to ask for a rescan.
+    /// The user's own preset dir, and how the Presets page asks for a rescan.
     user_presets: PathBuf,
-    rescan: Rc<Cell<bool>>,
+    rescan: Rc<presets_page::Rescan>,
     state_path: Option<PathBuf>,
     data_dir: Option<PathBuf>,
     slots: Vec<ExerciseSlot>,
@@ -92,7 +91,7 @@ impl BassGymApp {
         );
         let preset_dirs: PresetDirs = settings.get(pages::PRESETS);
         let store = PresetStore::new(preset_dirs.all(&user_presets));
-        let rescan = Rc::new(Cell::new(false));
+        let rescan = Rc::new(presets_page::Rescan::default());
         let state_path = config_dir.as_ref().map(|d| d.join("state.json"));
 
         crate::soundfonts::register();
@@ -194,13 +193,19 @@ impl BassGymApp {
         }
     }
 
-    /// Rebuilds the store from the Presets page's dirs and rescans every exercise.
+    /// Rebuilds the store from the Presets page's dirs and rescans every exercise,
+    /// telling the page how many presets and folders it found.
     fn rescan_presets(&mut self) {
         let dirs: PresetDirs = self.settings.get(pages::PRESETS);
         self.store = PresetStore::new(dirs.all(&self.user_presets));
         for slot in &mut self.slots {
             slot.refresh(&self.store);
         }
+        let presets = self.slots.iter().map(|s| s.presets.len()).sum();
+        // Folders don't depend on the exercise: every slot lists the same ones.
+        let folders = self.slots.first().map_or(0, |s| s.folders.len());
+        self.rescan.found.set(Some((presets, folders)));
+        self.ctx.request_repaint();
     }
 
     fn save_state(&self) {
@@ -467,7 +472,7 @@ impl eframe::App for BassGymApp {
         if self.prefs_open {
             self.preferences(&ctx, &theme);
         }
-        if self.rescan.take() {
+        if self.rescan.requested.take() {
             self.rescan_presets();
         }
         // Keyboard zoom (Cmd/Ctrl +/-/0) changes egui's zoom directly; keep the setting in sync.

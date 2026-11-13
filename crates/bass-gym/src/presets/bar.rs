@@ -91,6 +91,9 @@ pub struct Theme {
     pub error: Color32,
     pub danger: Color32,
     pub dialog_width: f32,
+    pub edit_width: f32,
+    pub dialog_margin: i8,
+    pub field_gap: f32,
     /// The selector's narrowest, and its guess of the buttons' width before measuring.
     pub min_selector: f32,
     pub buttons_guess: f32,
@@ -109,6 +112,9 @@ impl From<&Tokens> for Theme {
             error: t.red(),
             danger: t.red(),
             dialog_width: 340.0,
+            edit_width: 520.0,
+            dialog_margin: 20,
+            field_gap: 8.0,
             min_selector: 140.0,
             buttons_guess: 640.0,
             browser_share: 0.4,
@@ -281,13 +287,21 @@ fn dialog(state: &State, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<M
     if *state == State::Closed {
         return;
     }
-    egui::Modal::new(egui::Id::new("preset_dialog")).show(ui.ctx(), |ui| {
-        ui.set_width(theme.dialog_width);
+    let frame = egui::Frame::popup(&ui.ctx().global_style()).inner_margin(theme.dialog_margin);
+    let modal = egui::Modal::new(egui::Id::new("preset_dialog")).frame(frame);
+    modal.show(ui.ctx(), |ui| {
+        let wide = matches!(state, State::Edit(_));
+        ui.set_width(if wide {
+            theme.edit_width
+        } else {
+            theme.dialog_width
+        });
         match state {
             State::New(name) => {
                 ui.heading("New preset");
                 let mut edit = name.clone();
-                let resp = ui.text_edit_singleline(&mut edit);
+                let resp =
+                    ui.add(egui::TextEdit::singleline(&mut edit).desired_width(f32::INFINITY));
                 resp.request_focus();
                 if edit != *name {
                     out.send(Msg::Name(edit.clone()));
@@ -328,19 +342,26 @@ fn dialog(state: &State, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<M
 fn edit_dialog(draft: &Draft, p: &Props, theme: &Theme, ui: &mut Ui, out: &mut Emit<Msg>) {
     ui.heading("Edit preset");
     let mut d = draft.clone();
-    egui::Grid::new("preset_edit")
-        .num_columns(2)
-        .show(ui, |ui| {
-            ui.label("Name");
-            ui.text_edit_singleline(&mut d.name);
-            ui.end_row();
-            ui.label("Description");
-            ui.text_edit_multiline(&mut d.description);
-            ui.end_row();
-            ui.label("Tags");
-            ui.add(egui::TextEdit::singleline(&mut d.tags).hint_text("comma separated"));
-            ui.end_row();
-        });
+    // Labels above full-width fields, so long names and descriptions fit.
+    let field = |ui: &mut Ui, label: &str| {
+        ui.add_space(theme.field_gap);
+        ui.label(RichText::new(label).small());
+    };
+    field(ui, "Name");
+    ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(f32::INFINITY));
+    field(ui, "Description");
+    ui.add(
+        egui::TextEdit::multiline(&mut d.description)
+            .desired_width(f32::INFINITY)
+            .desired_rows(4),
+    );
+    field(ui, "Tags");
+    ui.add(
+        egui::TextEdit::singleline(&mut d.tags)
+            .hint_text("comma separated")
+            .desired_width(f32::INFINITY),
+    );
+    ui.add_space(theme.field_gap);
     if d != *draft {
         out.send(Msg::Open(State::Edit(d.clone())));
     }

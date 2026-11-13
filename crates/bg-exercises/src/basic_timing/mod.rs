@@ -1,5 +1,5 @@
 //! Basic Timing: play the selected groove on time against the click. Also Basic scales
-//! ([`BasicTiming::scales`]): the same, with every note a step of the key's scale.
+//! ([`BasicTiming::scales`]): the same, with every note a step of a scale.
 //!
 //! A tier-3 kit program (see `docs/architecture/ui-components.md`):
 //! - `model.rs`: the model. `msg.rs`: what can happen to it.
@@ -27,7 +27,7 @@ use bg_core::preset::{PresetError, PresetSchema};
 use bg_ui::kit::{self, Emit, ThemeCache};
 use bg_ui::views::tuner::TunerPrefs;
 use bg_ui::widgets::toolbar::Toolbar;
-use bg_ui::{ExerciseCtx, ExerciseType, egui, icons};
+use bg_ui::{ExerciseCtx, ExerciseType, PreferencePage, egui, icons};
 use serde_json::Value;
 
 pub use model::{BasicTimingData, Kind, ViewOptions};
@@ -37,6 +37,7 @@ use model::Model;
 use msg::Msg;
 use theme::Theme;
 
+use crate::basic_scales::prefs::ScalesPage;
 use crate::fake_session;
 use crate::timing_session::{TimingSession, lock};
 
@@ -148,6 +149,13 @@ impl ExerciseType for BasicTiming {
         let data: BasicTimingData = serde_json::from_value(data)?;
         self.update_only(Msg::Load(Box::new(data)));
         Ok(())
+    }
+
+    fn preference_pages(&self) -> Vec<Box<dyn PreferencePage>> {
+        match self.model.kind {
+            Kind::Timing => Vec::new(),
+            Kind::Scales => vec![Box::new(ScalesPage::default())],
+        }
     }
 
     fn is_running(&self) -> bool {

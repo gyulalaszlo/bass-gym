@@ -1,7 +1,7 @@
 //! The root of Basic timing's theme tree.
 
 use bg_ui::egui::Color32;
-use bg_ui::theme::Tokens;
+use bg_ui::theme::{FormTheme, Tokens};
 use bg_ui::views::{beatgrid, neck, performance, results, review, tap_tempo};
 use bg_ui::widgets::session_panel;
 
@@ -16,6 +16,7 @@ pub struct Theme {
     pub tap: tap_tempo::Theme,
     pub performance: performance::Theme,
     pub status: status::Theme,
+    pub form: FormTheme,
     /// The "no audio output" warning.
     pub warning: Color32,
     /// Space below the neck, below the performance strip, and below the grid.
@@ -35,6 +36,7 @@ impl Theme {
             tap: t.into(),
             performance: t.into(),
             status: status::Theme::new(t),
+            form: FormTheme::new(t),
             warning: t.amber(),
             neck_gap: 8.0,
             meter_gap: 4.0,

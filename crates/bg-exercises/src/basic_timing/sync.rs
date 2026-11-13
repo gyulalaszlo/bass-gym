@@ -9,6 +9,7 @@ use bg_ui::views::tuner::TunerPrefs;
 
 use super::model::{Frame, Model};
 use super::msg::Msg;
+use crate::basic_scales::ScaleLibrary;
 use crate::timing_session::lock;
 
 /// This frame's reading, and the recording if it just arrived.
@@ -26,6 +27,7 @@ pub fn sync(m: &Model, ctx: &ExerciseCtx) -> Vec<Msg> {
             .settings
             .get::<RecordingPrefs>(RecordingPrefs::ID)
             .max_bytes(),
+        library: ctx.settings.get::<ScaleLibrary>(ScaleLibrary::ID).scales,
     })];
     if let Some(id) = m.capture.pending()
         && let Some(r) = engine.take_recording(id)

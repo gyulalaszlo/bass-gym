@@ -3,7 +3,6 @@
 
 use std::convert::Infallible;
 
-use bg_core::harmony::Scale;
 use egui::{Align2, Color32, FontId, Pos2, Sense, Stroke, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +47,9 @@ pub struct Neck;
 pub struct Props<'a> {
     pub tuning: Tuning,
     pub frets: u8,
-    pub scale: Scale,
+    /// The root's pitch class, and which pitch classes are in the scale.
+    pub root: u8,
+    pub tones: [bool; 12],
     /// The note to play now, filled wherever it can be played.
     pub target: Option<u8>,
     /// The note after it, outlined.
@@ -164,19 +165,18 @@ impl View for Neck {
             p.line_segment([Pos2::new(nut_x, y), Pos2::new(rect.right(), y)], t.string);
         }
 
-        let root = n.scale.root % 12;
         for (s, &open) in strings.iter().enumerate() {
             for f in 0..=n.frets {
                 let midi = open + f;
                 let pc = midi % 12;
-                if !n.scale.contains(pc) {
+                if !n.tones[pc as usize] {
                     continue;
                 }
                 let c = Pos2::new(note_x(f), string_y(s));
                 let on = n.target == Some(midi);
                 let fill = if on {
                     Some(t.target)
-                } else if pc == root {
+                } else if pc == n.root {
                     Some(t.root)
                 } else {
                     None

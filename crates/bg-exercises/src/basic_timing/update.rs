@@ -5,9 +5,10 @@ use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, Review};
 use bg_ui::views::tap_tempo::{self, TapTempo};
 
-use super::effects::{Effect, Start};
-use super::model::{Kind, Model};
+use super::effects::{Effect, ScaleStart, Start};
+use super::model::Model;
 use super::msg::Msg;
+use crate::basic_scales::ScaleSettings;
 
 pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
     match msg {
@@ -49,7 +50,11 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
                     scoring: m.frame.scoring.clone(),
                     shared: m.shared.clone(),
                     max_recording_bytes: m.frame.max_recording_bytes,
-                    scale: (m.kind == Kind::Scales).then(|| (m.scale.clone(), m.frame.a4)),
+                    scale: m.sequence().map(|seq| ScaleStart {
+                        shared: m.scale.clone(),
+                        seq,
+                        a4: m.frame.a4,
+                    }),
                 })));
             }
         }
@@ -82,7 +87,17 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
                 m.has_results = false;
             }
         }
-        Msg::Tuning(t) => m.data.tuning = Some(t),
+        Msg::Scales(s) => {
+            // Only the notes matter to the results, not the neck.
+            let notes = |s: &ScaleSettings| ScaleSettings {
+                tuning: Default::default(),
+                ..s.clone()
+            };
+            if m.scales().is_some_and(|old| notes(&old) != notes(&s)) {
+                m.has_results = false;
+            }
+            m.data.scales = Some(*s);
+        }
         Msg::ResultsOpen(open) => m.show_results = open && m.has_results,
         Msg::ResultsTab(tab) => m.results_tab = tab,
         Msg::Load(data) => {
@@ -109,7 +124,7 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_timing::model::Frame;
+    use crate::basic_timing::model::{Frame, Kind};
 
     fn send(m: &mut Model, msg: Msg) -> Vec<Effect> {
         let mut fx = Emit::new();

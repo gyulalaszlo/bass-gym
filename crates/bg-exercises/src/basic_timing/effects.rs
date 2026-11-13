@@ -22,16 +22,23 @@ pub struct Start {
     pub scoring: ScoringThresholds,
     pub shared: SharedTiming,
     pub max_recording_bytes: usize,
-    /// Basic scales: where its targets go, and the reference tuning to judge by.
-    pub scale: Option<(SharedScale, f32)>,
+    pub scale: Option<ScaleStart>,
+}
+
+/// Basic scales' part of a start: where its targets go, the notes and the reference
+/// tuning to judge by.
+pub struct ScaleStart {
+    pub shared: SharedScale,
+    pub seq: Vec<u8>,
+    pub a4: f32,
 }
 
 pub fn run(effect: Effect, engine: &mut AudioEngine, out: &mut Emit<Msg>) {
     match effect {
         Effect::Start(s) => {
             let logic = match s.scale {
-                Some((scale, a4)) => {
-                    let targets = ScaleTargets::new(&s.cfg.key, a4, scale);
+                Some(sc) => {
+                    let targets = ScaleTargets::new(sc.seq, sc.a4, sc.shared);
                     TimingSession::with_accompaniment(
                         s.cfg,
                         s.scoring,

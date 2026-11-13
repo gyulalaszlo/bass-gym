@@ -125,12 +125,20 @@ using `accompaniment::preview_targets`, which leaves out the random anticipation
 - **`Expected` has no pitch.** It is rhythm only. Pitches are judged by an
   `Accompaniment`: in Basic chords against the current chord, in Basic scales against
   the scale note given to each groove note.
-- Basic scales (`basic_scales.rs`) is Basic timing with `Kind::Scales`: its
+- Basic scales (`basic_scales/`) is Basic timing with `Kind::Scales`: its
   `ScaleTargets` is an accompaniment that plays nothing and returns no hits. It gives
-  the groove's notes (count-in excluded) the scale up and down one octave from the root
-  at or above open E, and logs them as `Target { time, len, midi }` in `ScaleShared`
-  (trimmed at stop). `judge` scores against the nearest target: 1 the note, 0.5 another
-  octave, 0 otherwise, so a wrong note grades Poor through the harmony path.
+  the groove's notes (count-in excluded) the next note of a sequence, and logs them as
+  `Target { time, len, midi }` in `ScaleShared` (trimmed at stop). `judge` scores
+  against the nearest target: 1 the note, 0.5 another octave, 0 otherwise, so a wrong
+  note grades Poor through the harmony path.
+- The sequence is `ScaleSettings::sequence` (`BasicTimingData.scales`, absent in Basic
+  timing's presets): the scale's intervals on the key's root, starting at the root at or
+  above open E plus `start` octaves, over `octaves` octaves with the top root, every
+  `step`th note up, then back down without repeating the ends. The scale is named:
+  `None` is the key's mode, otherwise `BUILT_IN` or the user's `ScaleLibrary` (settings
+  id `basic_scales`, edited on the Basic scales preferences page). A name that isn't
+  found falls back to the key's mode, so presets sharing a custom scale lose it.
+  Changing anything but the tuning drops the results.
 - `Played.freq` is the only pitch data. It's stored as soon as early pitch detection
   reports, with or without an accompaniment. Convert with `music.rs::freq_to_midi(freq, a4)`.
   `a4` comes from `TunerPrefs`. `freq` can stay `None`.

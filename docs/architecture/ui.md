@@ -173,10 +173,12 @@ Culling relies on time-sorted vectors.
 ## Bass neck (`bg-ui/src/views/neck.rs`)
 
 A tier-1 view for Basic scales: strings (lowest at the bottom, as in tab) of a `Tuning`
-(4 or 5 strings, serde, stored in the preset as `BasicTimingData.tuning`, absent in
-Basic timing's), 12 frets spaced evenly (not to scale), the scale's notes named by the
-key's `Spelling::name`, roots green, the note to play magenta and the next one
-ringed. `basic_scales::at` picks both from the targets at the grid's time. The same
+(4 or 5 strings, in `ScaleSettings`), 12 frets, or 24 when the notes go past the top
+string's 12th, spaced evenly (not to scale), the scale's pitch classes (`tones`) named
+by the key's `Spelling::name` (so notes outside the key take its signature's signs: E
+blues has an A#), roots green, the note to play magenta and the next one ringed.
+Basic scales' Scale menu (`basic_scales/menu.rs`) sits in the toolbar's `progression`
+slot: scale, span, start octave, step and tuning. `basic_scales::at` picks both from the targets at the grid's time. The same
 targets fill the beat grid's chord band with note names, so the lane is 108 tall there.
 
 ## Score, waveform and marker editor

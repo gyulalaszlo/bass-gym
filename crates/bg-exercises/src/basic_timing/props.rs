@@ -2,17 +2,18 @@
 
 use std::sync::MutexGuard;
 
-use bg_core::harmony::Scale;
 use bg_core::score::Spelling;
 use bg_core::{BarPlan, Matcher, ScoringThresholds, SessionConfig, SessionStats};
 use bg_ui::view::ViewPrefs;
 use bg_ui::views::neck::Tuning;
+
+use crate::basic_scales::{CustomScale, ScaleSettings};
 use bg_ui::views::performance::TimingMeter;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
 use bg_ui::views::tap_tempo;
 
-use super::model::{Kind, Model, ViewOptions};
+use super::model::{Model, ViewOptions};
 use super::view::status::Status;
 use crate::basic_scales::{self, lock_scale};
 use crate::timing_session::{TimingShared, last_time, lock, preview, timing_meter};
@@ -23,6 +24,8 @@ pub struct Toolbar<'a> {
     pub has_results: bool,
     pub status: Status,
     pub session: &'a SessionConfig,
+    /// Basic scales' menu: its settings and the user's scales.
+    pub scales: Option<(ScaleSettings, &'a [CustomScale])>,
 }
 
 pub fn toolbar(m: &Model) -> Toolbar<'_> {
@@ -40,6 +43,7 @@ pub fn toolbar(m: &Model) -> Toolbar<'_> {
         has_results: m.has_results,
         status,
         session: &m.data.session,
+        scales: m.scales().map(|s| (s, m.frame.library.as_slice())),
     }
 }
 
@@ -94,7 +98,10 @@ pub struct Main<'a> {
 
 pub struct Neck {
     pub tuning: Tuning,
-    pub scale: Scale,
+    pub frets: u8,
+    /// The root's pitch class, and the scale's.
+    pub root: u8,
+    pub tones: [bool; 12],
     pub target: Option<u8>,
     pub next: Option<u8>,
     pub names: [String; 12],
@@ -117,11 +124,12 @@ pub fn main(m: &Model) -> Main<'_> {
     );
     let key = m.data.session.key;
     let preview = (!m.has_results).then(|| preview(&m.data.session));
+    let seq = m.sequence();
     // Scale targets before the timing lock: never hold both.
-    let targets = match (m.kind, &preview) {
-        (Kind::Timing, _) => Vec::new(),
-        (Kind::Scales, Some((bars, _))) => basic_scales::preview(bars, &key),
-        (Kind::Scales, None) => lock_scale(&m.scale).targets.clone(),
+    let targets = match (&seq, &preview) {
+        (None, _) => Vec::new(),
+        (Some(seq), Some((bars, _))) => basic_scales::preview(bars, seq),
+        (Some(_), None) => lock_scale(&m.scale).targets.clone(),
     };
     let (grid, grid_now) = match preview {
         None => (Grid::Session(lock(&m.shared)), now),
@@ -142,11 +150,18 @@ pub fn main(m: &Model) -> Main<'_> {
             )
         })
         .collect();
-    let neck = (m.kind == Kind::Scales).then(|| {
+    let neck = m.scales().zip(seq).map(|(s, seq)| {
         let (target, next) = basic_scales::at(&targets, grid_now);
+        let root = key.root % 12;
+        let mut tones = [false; 12];
+        for i in s.intervals(&key, &f.library) {
+            tones[((root + i) % 12) as usize] = true;
+        }
         Neck {
-            tuning: m.data.tuning.unwrap_or_default(),
-            scale: key,
+            tuning: s.tuning,
+            frets: frets(s.tuning, &seq),
+            root,
+            tones,
             target,
             next,
             names,
@@ -166,18 +181,22 @@ pub fn main(m: &Model) -> Main<'_> {
     }
 }
 
+/// Frets the neck shows: 12, or 24 when the notes go higher.
+fn frets(tuning: Tuning, seq: &[u8]) -> u8 {
+    let top = tuning.strings().last().copied().unwrap_or(0);
+    let high = seq.iter().max().copied().unwrap_or(0);
+    if high > top + 12 { 24 } else { 12 }
+}
+
 pub struct Settings<'a> {
     pub session: &'a SessionConfig,
     pub editable: bool,
-    /// Basic scales' neck tuning.
-    pub tuning: Option<Tuning>,
 }
 
 pub fn settings(m: &Model) -> Settings<'_> {
     Settings {
         session: &m.data.session,
         editable: !m.frame.running,
-        tuning: (m.kind == Kind::Scales).then(|| m.data.tuning.unwrap_or_default()),
     }
 }
 

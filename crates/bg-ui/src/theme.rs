@@ -452,6 +452,12 @@ pub struct FormTheme {
     pub field_width: f32,
 }
 
+impl From<&Tokens> for FormTheme {
+    fn from(t: &Tokens) -> Self {
+        Self::new(t)
+    }
+}
+
 impl FormTheme {
     pub fn new(t: &Tokens) -> Self {
         Self {

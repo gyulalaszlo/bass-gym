@@ -4,13 +4,12 @@
 use bg_core::{ScoringThresholds, SessionConfig};
 use bg_ui::recording::SessionCapture;
 use bg_ui::view::ViewPrefs;
-use bg_ui::views::neck::Tuning;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
 use bg_ui::views::tap_tempo;
 use serde::{Deserialize, Serialize};
 
-use crate::basic_scales::SharedScale;
+use crate::basic_scales::{CustomScale, ScaleSettings, SharedScale};
 use crate::timing_session::SharedTiming;
 
 /// Which exercise this is: Basic timing, or Basic scales (the same, with a pitch for
@@ -38,9 +37,9 @@ impl Kind {
 pub struct BasicTimingData {
     pub session: SessionConfig,
     pub view: ViewOptions,
-    /// The neck shown by Basic scales (none in Basic timing's presets).
+    /// What Basic scales plays (none in Basic timing's presets).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tuning: Option<Tuning>,
+    pub scales: Option<ScaleSettings>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,6 +73,8 @@ pub struct Frame {
     pub scoring: ScoringThresholds,
     /// Most audio a session's recording keeps.
     pub max_recording_bytes: usize,
+    /// The user's own scales (Basic scales).
+    pub library: Vec<CustomScale>,
 }
 
 #[derive(Default)]
@@ -96,4 +97,17 @@ pub struct Model {
     pub results_tab: ResultsTab,
     /// The toolbar's tap-tempo button (its messages are routed: `Msg::Tap`).
     pub tap: tap_tempo::State,
+}
+
+impl Model {
+    /// Basic scales' settings; `None` in Basic timing.
+    pub fn scales(&self) -> Option<ScaleSettings> {
+        (self.kind == Kind::Scales).then(|| self.data.scales.clone().unwrap_or_default())
+    }
+
+    /// The notes Basic scales plays in turn.
+    pub fn sequence(&self) -> Option<Vec<u8>> {
+        let s = self.scales()?;
+        Some(s.sequence(&self.data.session.key, &self.frame.library))
+    }
 }

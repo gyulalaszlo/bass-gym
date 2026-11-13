@@ -9,7 +9,7 @@ use bg_ui::views::review::Review;
 use bg_ui::views::tap_tempo;
 use serde::{Deserialize, Serialize};
 
-use crate::basic_scales::{CustomScale, ScaleSettings, SharedScale};
+use crate::basic_scales::{ScaleDef, ScaleSettings, SharedScale};
 use crate::timing_session::SharedTiming;
 
 /// Which exercise this is: Basic timing, or Basic scales (the same, with a pitch for
@@ -74,7 +74,7 @@ pub struct Frame {
     /// Most audio a session's recording keeps.
     pub max_recording_bytes: usize,
     /// The user's own scales (Basic scales).
-    pub library: Vec<CustomScale>,
+    pub library: Vec<ScaleDef>,
 }
 
 #[derive(Default)]
@@ -108,6 +108,7 @@ impl Model {
     /// The notes Basic scales plays in turn.
     pub fn sequence(&self) -> Option<Vec<u8>> {
         let s = self.scales()?;
-        Some(s.sequence(&self.data.session.key, &self.frame.library))
+        let groove_notes = self.data.session.groove.notes.len();
+        Some(s.sequence(&self.data.session.key, groove_notes))
     }
 }

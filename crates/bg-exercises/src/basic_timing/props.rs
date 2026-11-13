@@ -7,7 +7,7 @@ use bg_core::{BarPlan, Matcher, ScoringThresholds, SessionConfig, SessionStats};
 use bg_ui::view::ViewPrefs;
 use bg_ui::views::neck::Tuning;
 
-use crate::basic_scales::{CustomScale, ScaleSettings};
+use crate::basic_scales::{ScaleDef, ScaleSettings};
 use bg_ui::views::performance::TimingMeter;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
@@ -25,7 +25,7 @@ pub struct Toolbar<'a> {
     pub status: Status,
     pub session: &'a SessionConfig,
     /// Basic scales' menu: its settings and the user's scales.
-    pub scales: Option<(ScaleSettings, &'a [CustomScale])>,
+    pub scales: Option<(ScaleSettings, &'a [ScaleDef])>,
 }
 
 pub fn toolbar(m: &Model) -> Toolbar<'_> {
@@ -157,7 +157,7 @@ pub fn main(m: &Model) -> Main<'_> {
         let (target, next) = basic_scales::at(&targets, grid_now);
         let root = key.root % 12;
         let mut tones = [false; 12];
-        for i in s.intervals(&key, &f.library) {
+        for i in s.intervals(&key) {
             tones[((root + i) % 12) as usize] = true;
         }
         Neck {

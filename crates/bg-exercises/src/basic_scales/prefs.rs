@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// A scale of the user's: its name and semitones above the root (0 first, ascending).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CustomScale {
+pub struct ScaleDef {
     pub name: String,
     pub intervals: Vec<u8>,
 }
@@ -17,7 +17,7 @@ pub struct CustomScale {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScaleLibrary {
-    pub scales: Vec<CustomScale>,
+    pub scales: Vec<ScaleDef>,
 }
 
 impl ScaleLibrary {
@@ -25,7 +25,7 @@ impl ScaleLibrary {
 }
 
 /// Degree names of the semitones above the root.
-const DEGREES: [&str; 12] = [
+pub const DEGREES: [&str; 12] = [
     "1", "b2", "2", "b3", "3", "4", "b5", "5", "b6", "6", "b7", "7",
 ];
 
@@ -44,7 +44,7 @@ pub fn toggle(intervals: &[u8], semitone: u8, on: bool) -> Vec<u8> {
 }
 
 /// A name for a new scale that no other has.
-pub fn new_name(scales: &[CustomScale]) -> String {
+pub fn new_name(scales: &[ScaleDef]) -> String {
     (1..)
         .map(|n| format!("My scale {n}"))
         .find(|name| !scales.iter().any(|s| &s.name == name))
@@ -73,7 +73,7 @@ impl View for Editor {
         let mut edit = lib.clone();
         section(ui, "Custom scales", |ui| {
             ui.label(note(
-                "Shown in Basic scales' Scale menu, on the key's root. Presets name the scale they use, so renaming one leaves those presets on the key's mode.",
+                "Offered in Basic scales' Scale menu, on the key's root. A preset keeps its own copy of the scale it uses, so changes here reach it only when it is picked again.",
             ));
             ui.add_space(theme.gap);
             let mut remove = None;
@@ -115,7 +115,7 @@ impl View for Editor {
                 .add(button(format!("{} Add scale", icons::PLUS)))
                 .clicked()
             {
-                edit.scales.push(CustomScale {
+                edit.scales.push(ScaleDef {
                     name: new_name(&edit.scales),
                     intervals: vec![0, 2, 4, 7, 9],
                 });
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn new_scales_get_a_free_name() {
-        let s = |n: &str| CustomScale {
+        let s = |n: &str| ScaleDef {
             name: n.into(),
             intervals: vec![0],
         };

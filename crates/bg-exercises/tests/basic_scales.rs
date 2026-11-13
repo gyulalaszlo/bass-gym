@@ -56,7 +56,7 @@ fn scale_session_grades_pitch() {
     let scale = SharedScale::default();
     let timing = SharedTiming::default();
     let targets = ScaleTargets::new(
-        ScaleSettings::default().sequence(&cfg.key, &[]),
+        ScaleSettings::default().sequence(&cfg.key, 0),
         440.0,
         scale.clone(),
     );

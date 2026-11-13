@@ -134,11 +134,14 @@ using `accompaniment::preview_targets`, which leaves out the random anticipation
 - The sequence is `ScaleSettings::sequence` (`BasicTimingData.scales`, absent in Basic
   timing's presets): the scale's intervals on the key's root, starting at the root at or
   above open E plus `start` octaves, over `octaves` octaves with the top root, every
-  `step`th note up, then back down without repeating the ends. The scale is named:
-  `None` is the key's mode, otherwise `BUILT_IN` or the user's `ScaleLibrary` (settings
-  id `basic_scales`, edited on the Basic scales preferences page). A name that isn't
-  found falls back to the key's mode, so presets sharing a custom scale lose it.
-  Changing anything but the tuning drops the results.
+  `step`th note up, then back down without repeating the ends. With `whole_bars` it
+  goes root to root (the top root added if `step` skips it, the bottom one repeated)
+  and pads with the root to a multiple of `groove.notes.len()`, so every round starts on
+  a bar line. `scale: Option<ScaleDef>` is the preset's own copy (name and intervals,
+  cleaned up by `intervals()` since files can say anything); `None` is the key's mode.
+  The menu copies one in from `BUILT_IN` or the user's `ScaleLibrary` (settings id
+  `basic_scales`, edited on the Basic scales preferences page) and can change its
+  degrees for that preset alone. Changing anything but the tuning drops the results.
 - `Played.freq` is the only pitch data. It's stored as soon as early pitch detection
   reports, with or without an accompaniment. Convert with `music.rs::freq_to_midi(freq, a4)`.
   `a4` comes from `TunerPrefs`. `freq` can stay `None`.

@@ -7,7 +7,7 @@ use bg_ui::widgets::toolbar::{Item, Toolbar};
 
 use super::status::StatusLine;
 use crate::basic_scales::menu::{self, ScaleMenu};
-use crate::basic_scales::{CustomScale, ScaleSettings};
+use crate::basic_scales::{ScaleDef, ScaleSettings};
 use crate::basic_timing::msg::Msg;
 use crate::basic_timing::props;
 use crate::basic_timing::theme::Theme;
@@ -52,7 +52,7 @@ const LABEL_WIDTH: f32 = 170.0;
 /// Basic scales' Scale menu, next to the key.
 fn scale_menu(
     s: &ScaleSettings,
-    library: &[CustomScale],
+    library: &[ScaleDef],
     session: &SessionConfig,
     theme: &Theme,
     tb: &mut Toolbar,

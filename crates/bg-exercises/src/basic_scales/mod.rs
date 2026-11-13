@@ -1,7 +1,8 @@
 //! Basic scales: Basic timing's groove, each note the next step of a scale on the key's
 //! root, up and back down. [`ScaleTargets`] hands out the notes and judges the pitches
 //! played; the rest of the exercise is Basic timing's (`basic_timing::Kind::Scales`).
-//! `menu.rs` is its toolbar menu, `prefs.rs` the custom scale editor.
+//! `menu.rs` is its toolbar menu (which also edits the preset's own copy of the scale),
+//! `prefs.rs` the library of the user's scales to pick from.
 
 pub mod menu;
 pub mod prefs;
@@ -16,7 +17,7 @@ use bg_core::plan::PlannedNote;
 use bg_ui::views::neck::Tuning;
 use serde::{Deserialize, Serialize};
 
-pub use prefs::{CustomScale, ScaleLibrary};
+pub use prefs::{ScaleDef, ScaleLibrary};
 
 use crate::timing_session::Accompaniment;
 
@@ -57,16 +58,18 @@ pub const BUILT_IN: [(&str, &[u8]); 6] = [
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScaleSettings {
-    /// A scale's name from [`BUILT_IN`] or the user's library; `None` is the key's mode.
-    // shortcut: custom scales are referred to by name, so a shared preset loses one the
-    // other user doesn't have (falls back to the key's mode); copy the intervals into the
-    // preset if presets get shared.
-    pub scale: Option<String>,
+    /// The scale itself, copied from [`BUILT_IN`] or the user's library so the preset
+    /// keeps it and can change it for itself; `None` is the key's mode.
+    pub scale: Option<ScaleDef>,
     /// Octaves the scale spans, and how many octaves above the lowest root it starts.
     pub octaves: u8,
     pub start: u8,
     /// Every how-manyth note of the scale is played: 1 all, 2 every other, ...
     pub step: u8,
+    /// Root to root in whole bars: up to the top root even when `step` skips it, down to
+    /// the bottom root, then the root again until the groove's notes are filled, so every
+    /// round starts on a bar line.
+    pub whole_bars: bool,
     pub tuning: Tuning,
 }
 
@@ -77,53 +80,68 @@ impl Default for ScaleSettings {
             octaves: 1,
             start: 0,
             step: 1,
+            whole_bars: false,
             tuning: Tuning::default(),
         }
     }
 }
 
+/// The key's mode as semitones above its root.
+pub fn mode_intervals(key: &Scale) -> Vec<u8> {
+    let root = key.root % 12;
+    key.pitch_classes()
+        .iter()
+        .map(|&pc| (pc + 12 - root) % 12)
+        .collect()
+}
+
 impl ScaleSettings {
-    /// The scale's semitones above the root: the named one, or the key's mode when it
-    /// isn't named or can't be found.
-    pub fn intervals(&self, key: &Scale, library: &[CustomScale]) -> Vec<u8> {
-        let name = self.scale.as_deref();
-        let built_in = BUILT_IN
-            .iter()
-            .find(|s| Some(s.0) == name)
-            .map(|s| s.1.to_vec());
-        let custom = || {
-            library
-                .iter()
-                .find(|s| Some(s.name.as_str()) == name)
-                .map(|s| s.intervals.clone())
+    /// The scale's semitones above the root, ascending from 0: the preset's scale (as
+    /// read from a file it may be out of order or range), or the key's mode.
+    pub fn intervals(&self, key: &Scale) -> Vec<u8> {
+        let Some(def) = &self.scale else {
+            return mode_intervals(key);
         };
-        built_in.or_else(custom).unwrap_or_else(|| {
-            let root = key.root % 12;
-            key.pitch_classes()
-                .iter()
-                .map(|&pc| (pc + 12 - root) % 12)
-                .collect()
-        })
+        let mut v: Vec<u8> = def.intervals.iter().copied().filter(|&i| i < 12).collect();
+        v.push(0);
+        v.sort_unstable();
+        v.dedup();
+        v
     }
 
     /// The scale's name, for the menu label.
     pub fn name(&self, key: &Scale) -> String {
         self.scale
-            .clone()
-            .unwrap_or_else(|| key.mode.label().to_owned())
+            .as_ref()
+            .map_or_else(|| key.mode.label().to_owned(), |s| s.name.clone())
     }
 
     /// The notes played in turn on `key`'s root, ready to repeat: every `step`th note up
-    /// over `octaves` (the top root included), then back down.
-    pub fn sequence(&self, key: &Scale, library: &[CustomScale]) -> Vec<u8> {
-        let intervals = self.intervals(key, library);
+    /// over `octaves` (the top root included), then back down. `groove_notes` is the
+    /// groove's notes per round, which [`whole_bars`](Self::whole_bars) fills.
+    pub fn sequence(&self, key: &Scale, groove_notes: usize) -> Vec<u8> {
+        let intervals = self.intervals(key);
         let root_pc = key.root % 12;
         let root = LOWEST + (root_pc + 12 - LOWEST % 12) % 12 + 12 * self.start;
         let span = self.octaves.max(1);
+        let top = root + 12 * span;
         let notes = (0..span)
             .flat_map(|o| intervals.iter().map(move |&i| root + 12 * o + i))
-            .chain([root + 12 * span]);
-        let up: Vec<u8> = notes.step_by(self.step.max(1) as usize).collect();
+            .chain([top]);
+        let mut up: Vec<u8> = notes.step_by(self.step.max(1) as usize).collect();
+        if self.whole_bars {
+            if up.last() != Some(&top) {
+                up.push(top);
+            }
+            let mut seq = up.clone();
+            seq.extend(up.iter().rev().skip(1));
+            if groove_notes > 0 {
+                while !seq.len().is_multiple_of(groove_notes) {
+                    seq.push(root);
+                }
+            }
+            return seq;
+        }
         let mut seq = up.clone();
         if up.len() > 2 {
             seq.extend(up[1..up.len() - 1].iter().rev());
@@ -233,7 +251,14 @@ mod tests {
     };
 
     fn seq(s: ScaleSettings, key: &Scale) -> Vec<u8> {
-        s.sequence(key, &[])
+        s.sequence(key, 4)
+    }
+
+    fn def(name: &str, intervals: &[u8]) -> Option<ScaleDef> {
+        Some(ScaleDef {
+            name: name.into(),
+            intervals: intervals.to_vec(),
+        })
     }
 
     #[test]
@@ -253,7 +278,7 @@ mod tests {
     #[test]
     fn patterns_span_octaves_start_higher_and_skip_notes() {
         let pent = |octaves, start, step| ScaleSettings {
-            scale: Some("Minor pentatonic".into()),
+            scale: def("Minor pentatonic", &[0, 3, 5, 7, 10]),
             octaves,
             start,
             step,
@@ -272,18 +297,39 @@ mod tests {
     }
 
     #[test]
-    fn unknown_scales_fall_back_to_the_key() {
-        let custom = [CustomScale {
-            name: "Mine".into(),
-            intervals: vec![0, 7],
-        }];
-        let named = |n: &str| ScaleSettings {
-            scale: Some(n.into()),
+    fn whole_bars_go_root_to_root_and_fill_the_groove() {
+        let whole = |step| ScaleSettings {
+            step,
+            whole_bars: true,
             ..Default::default()
         };
-        assert_eq!(named("Mine").intervals(&C, &custom), [0, 7]);
-        assert_eq!(named("Gone").intervals(&C, &custom), [0, 2, 4, 5, 7, 9, 11]);
-        assert_eq!(named("Blues").intervals(&C, &custom), [0, 3, 5, 6, 7, 10]);
+        // C major: 15 notes root to root, one more C fills four bars of four.
+        let s = seq(whole(1), &C);
+        assert_eq!(s.len(), 16);
+        assert_eq!(s[7], 48);
+        assert_eq!(s[14..], [36, 36]);
+        // Every other note skips the top C: it's added. C E G B C' B G E C, then C to 12.
+        let s = seq(whole(2), &C);
+        assert_eq!(s[..9], [36, 40, 43, 47, 48, 47, 43, 40, 36]);
+        assert_eq!(s.len(), 12);
+        assert!(s[9..].iter().all(|&n| n == 36));
+        // No groove notes: nothing to fill.
+        assert_eq!(whole(1).sequence(&C, 0).len(), 15);
+    }
+
+    #[test]
+    fn preset_scales_are_cleaned_up() {
+        let named = |iv: &[u8]| ScaleSettings {
+            scale: def("Mine", iv),
+            ..Default::default()
+        };
+        assert_eq!(named(&[7, 0]).intervals(&C), [0, 7]);
+        assert_eq!(named(&[]).intervals(&C), [0]);
+        assert_eq!(named(&[4, 4, 15]).intervals(&C), [0, 4]);
+        assert_eq!(
+            ScaleSettings::default().intervals(&C),
+            [0, 2, 4, 5, 7, 9, 11]
+        );
     }
 
     #[test]

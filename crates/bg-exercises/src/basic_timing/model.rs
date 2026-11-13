@@ -4,12 +4,33 @@
 use bg_core::{ScoringThresholds, SessionConfig};
 use bg_ui::recording::SessionCapture;
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::neck::Tuning;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
 use bg_ui::views::tap_tempo;
 use serde::{Deserialize, Serialize};
 
+use crate::basic_scales::SharedScale;
 use crate::timing_session::SharedTiming;
+
+/// Which exercise this is: Basic timing, or Basic scales (the same, with a pitch for
+/// every note: see `basic_scales`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Kind {
+    #[default]
+    Timing,
+    Scales,
+}
+
+impl Kind {
+    /// The exercise's id. Never change these: presets and settings are stored under them.
+    pub fn id(self) -> &'static str {
+        match self {
+            Kind::Timing => "basic_timing",
+            Kind::Scales => "basic_scales",
+        }
+    }
+}
 
 /// The preset data.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -17,6 +38,9 @@ use crate::timing_session::SharedTiming;
 pub struct BasicTimingData {
     pub session: SessionConfig,
     pub view: ViewOptions,
+    /// The neck shown by Basic scales (none in Basic timing's presets).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<Tuning>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,9 +78,12 @@ pub struct Frame {
 
 #[derive(Default)]
 pub struct Model {
+    pub kind: Kind,
     pub data: BasicTimingData,
     /// Written by the session on the worker thread; read through `lock`.
     pub shared: SharedTiming,
+    /// Basic scales' targets, written by its session.
+    pub scale: SharedScale,
     pub frame: Frame,
     /// A session ran since the last configuration change, so its results are shown.
     pub has_results: bool,

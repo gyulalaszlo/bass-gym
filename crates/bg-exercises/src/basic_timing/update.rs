@@ -6,7 +6,7 @@ use bg_ui::views::review::{self, Review};
 use bg_ui::views::tap_tempo::{self, TapTempo};
 
 use super::effects::{Effect, Start};
-use super::model::Model;
+use super::model::{Kind, Model};
 use super::msg::Msg;
 
 pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
@@ -49,6 +49,7 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
                     scoring: m.frame.scoring.clone(),
                     shared: m.shared.clone(),
                     max_recording_bytes: m.frame.max_recording_bytes,
+                    scale: (m.kind == Kind::Scales).then(|| (m.scale.clone(), m.frame.a4)),
                 })));
             }
         }
@@ -81,6 +82,7 @@ pub fn update(m: &mut Model, msg: Msg, fx: &mut Emit<Effect>) {
                 m.has_results = false;
             }
         }
+        Msg::Tuning(t) => m.data.tuning = Some(t),
         Msg::ResultsOpen(open) => m.show_results = open && m.has_results,
         Msg::ResultsTab(tab) => m.results_tab = tab,
         Msg::Load(data) => {
@@ -131,6 +133,22 @@ mod tests {
         send(&mut m, frame(false, true));
         let fx = send(&mut m, Msg::Transport);
         assert!(matches!(fx.as_slice(), [Effect::Start(_)]));
+    }
+
+    #[test]
+    fn only_basic_scales_starts_with_scale_targets() {
+        for (kind, scales) in [(Kind::Timing, false), (Kind::Scales, true)] {
+            let mut m = Model {
+                kind,
+                ..Model::default()
+            };
+            send(&mut m, frame(false, true));
+            let fx = send(&mut m, Msg::Transport);
+            let [Effect::Start(s)] = fx.as_slice() else {
+                panic!("no start")
+            };
+            assert_eq!(s.scale.is_some(), scales);
+        }
     }
 
     #[test]

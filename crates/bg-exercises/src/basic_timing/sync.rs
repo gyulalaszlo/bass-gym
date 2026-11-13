@@ -7,7 +7,6 @@ use bg_ui::view::ViewPrefs;
 use bg_ui::views::review::{self, ReviewInput, report_settings};
 use bg_ui::views::tuner::TunerPrefs;
 
-use super::ID;
 use super::model::{Frame, Model};
 use super::msg::Msg;
 use crate::timing_session::lock;
@@ -53,7 +52,7 @@ pub fn review(m: &Model, ctx: &ExerciseCtx) -> Option<Msg> {
         scale: Some(m.data.session.key),
         a4: m.frame.a4,
         recording: recording.clone(),
-        exercise: ID.to_owned(),
+        exercise: m.kind.id().to_owned(),
         settings,
     })))
 }

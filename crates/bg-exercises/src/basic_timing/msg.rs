@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bg_audio::{Recording, SessionId};
 use bg_core::SessionConfig;
+use bg_ui::views::neck::Tuning;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::{self, ReviewInput};
 use bg_ui::views::tap_tempo;
@@ -27,6 +28,8 @@ pub enum Msg {
     OpenResults,
     /// The session settings were edited.
     Session(Box<SessionConfig>),
+    /// Basic scales' neck was set to another tuning.
+    Tuning(Tuning),
     /// For the tap-tempo button (its own messages, routed here).
     Tap(tap_tempo::Msg),
     /// The results dialog opened or closed itself.

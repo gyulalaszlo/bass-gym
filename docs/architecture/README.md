@@ -31,7 +31,7 @@ Dependencies point one way:
 | `bg-report` | Bug reports: WAV, JSON, MIDI and zip of a recording's region | bg-core, bg-audio, bg-sound |
 | `bg-layout` | The layout DSL: XML layout trees, their solver, hot reload, and the build-script code generator | egui, quick-xml |
 | `bg-ui` | Themes, the component kit, `ExerciseType` / `PreferencePage` traits, `SettingsStore`, views and widgets | bg-core, bg-audio, bg-report, bg-layout |
-| `bg-exercises` | Basic timing, Basic chords, `TimingSession`, `Accompaniment` | bg-core, bg-audio, bg-sound, bg-ui |
+| `bg-exercises` | Basic timing, Basic scales, Basic chords, `TimingSession`, `Accompaniment` | bg-core, bg-audio, bg-sound, bg-ui |
 | `bass-gym` | App shell, preference pages, directories | all of the above |
 | `sf2pack` | FLAC to SF2 packing tool | standalone (dev-dep of bg-sound) |
 
@@ -57,7 +57,7 @@ Handled in `bass-gym/src/app/` (`mod.rs`, `screenshot.rs`) and `main.rs`:
 |---|---|
 | `BASS_GYM_SCREENSHOT=<file.ppm>` | Saves the window after 2 s and quits |
 | `BASS_GYM_SIZE=<w>x<h>` | Fixed window size |
-| `BASS_GYM_EXERCISE=<id>` | Exercise shown (`basic_timing`, `diatonic_chords`) |
+| `BASS_GYM_EXERCISE=<id>` | Exercise shown (`basic_timing`, `basic_scales`, `diatonic_chords`) |
 | `BASS_GYM_PREFS=<page id>` | Opens a preferences page (drawn in the main window in screenshot mode) |
 | `BASS_GYM_FAKE_SESSION=1` | Runs `bg-exercises/src/fake_session.rs` and opens the Score + Audio tab; `=editor` opens the marker editor too, `=stats` the Statistics tab, `=grid` leaves the results closed to show the beat grid |
 
@@ -72,7 +72,7 @@ untouched: the fake session changes the exercise's session settings.
 - Keep logic in pure functions outside painters, because that's what's easiest to test.
   Interaction can be tested too, with `kit::Rig` (see `ui-components.md`).
 - Tests: `#[cfg(test)]` modules, plus offline end-to-end tests in
-  `crates/bg-exercises/tests/` (`pipeline.rs`, `basic_chords.rs`). These synthesise a
+  `crates/bg-exercises/tests/` (`pipeline.rs`, `basic_chords.rs`, `basic_scales.rs`). These synthesise a
   `pluck`, run it through `NoteDetector` and `TimingSession` using `SessionIo::offline`,
   and assert on `Matcher`. They re-implement the worker loop; `worker.rs` and
   `clock.rs` have no tests of their own.

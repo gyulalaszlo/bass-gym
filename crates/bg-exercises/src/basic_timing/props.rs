@@ -2,15 +2,19 @@
 
 use std::sync::MutexGuard;
 
+use bg_core::harmony::Scale;
+use bg_core::score::Spelling;
 use bg_core::{BarPlan, Matcher, ScoringThresholds, SessionConfig, SessionStats};
 use bg_ui::view::ViewPrefs;
+use bg_ui::views::neck::Tuning;
 use bg_ui::views::performance::TimingMeter;
 use bg_ui::views::results::ResultsTab;
 use bg_ui::views::review::Review;
 use bg_ui::views::tap_tempo;
 
-use super::model::{Model, ViewOptions};
+use super::model::{Kind, Model, ViewOptions};
 use super::view::status::Status;
+use crate::basic_scales::{self, lock_scale};
 use crate::timing_session::{TimingShared, last_time, lock, preview, timing_meter};
 
 pub struct Toolbar<'a> {
@@ -82,6 +86,18 @@ pub struct Main<'a> {
     pub prefs: &'a ViewPrefs,
     pub a4: f32,
     pub session: &'a SessionConfig,
+    /// Basic scales' neck.
+    pub neck: Option<Neck>,
+    /// Basic scales' notes, for the grid's chord band: (start, end, name).
+    pub grid_notes: Vec<(f64, f64, String)>,
+}
+
+pub struct Neck {
+    pub tuning: Tuning,
+    pub scale: Scale,
+    pub target: Option<u8>,
+    pub next: Option<u8>,
+    pub names: [String; 12],
 }
 
 pub fn main(m: &Model) -> Main<'_> {
@@ -99,13 +115,43 @@ pub fn main(m: &Model) -> Main<'_> {
         f.view.indicator_bars,
         &f.scoring,
     );
-    let (grid, grid_now) = if m.has_results {
-        (Grid::Session(lock(&m.shared)), now)
-    } else {
-        let (bars, matcher) = preview(&m.data.session);
-        let start = bars.first().map_or(0.0, |b| b.start);
-        (Grid::Preview(bars, matcher), start)
+    let key = m.data.session.key;
+    let preview = (!m.has_results).then(|| preview(&m.data.session));
+    // Scale targets before the timing lock: never hold both.
+    let targets = match (m.kind, &preview) {
+        (Kind::Timing, _) => Vec::new(),
+        (Kind::Scales, Some((bars, _))) => basic_scales::preview(bars, &key),
+        (Kind::Scales, None) => lock_scale(&m.scale).targets.clone(),
     };
+    let (grid, grid_now) = match preview {
+        None => (Grid::Session(lock(&m.shared)), now),
+        Some((bars, matcher)) => {
+            let start = bars.first().map_or(0.0, |b| b.start);
+            (Grid::Preview(bars, matcher), start)
+        }
+    };
+    let spelling = Spelling::new(Some(key));
+    let names: [String; 12] = std::array::from_fn(|pc| spelling.name(pc as u8));
+    let grid_notes = targets
+        .iter()
+        .map(|t| {
+            (
+                t.time,
+                t.time + t.len,
+                names[(t.midi % 12) as usize].clone(),
+            )
+        })
+        .collect();
+    let neck = (m.kind == Kind::Scales).then(|| {
+        let (target, next) = basic_scales::at(&targets, grid_now);
+        Neck {
+            tuning: m.data.tuning.unwrap_or_default(),
+            scale: key,
+            target,
+            next,
+            names,
+        }
+    });
     Main {
         running: f.running,
         meter,
@@ -115,18 +161,23 @@ pub fn main(m: &Model) -> Main<'_> {
         prefs: &f.view,
         a4: f.a4,
         session: &m.data.session,
+        neck,
+        grid_notes,
     }
 }
 
 pub struct Settings<'a> {
     pub session: &'a SessionConfig,
     pub editable: bool,
+    /// Basic scales' neck tuning.
+    pub tuning: Option<Tuning>,
 }
 
 pub fn settings(m: &Model) -> Settings<'_> {
     Settings {
         session: &m.data.session,
         editable: !m.frame.running,
+        tuning: (m.kind == Kind::Scales).then(|| m.data.tuning.unwrap_or_default()),
     }
 }
 

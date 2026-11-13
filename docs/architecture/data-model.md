@@ -122,8 +122,15 @@ using `accompaniment::preview_targets`, which leaves out the random anticipation
 
 ## Pitch and harmony
 
-- **There are no expected pitches.** `Expected` is rhythm only, so a wrong note can only
-  mean a clash with the current chord, which exists only in Basic chords.
+- **`Expected` has no pitch.** It is rhythm only. Pitches are judged by an
+  `Accompaniment`: in Basic chords against the current chord, in Basic scales against
+  the scale note given to each groove note.
+- Basic scales (`basic_scales.rs`) is Basic timing with `Kind::Scales`: its
+  `ScaleTargets` is an accompaniment that plays nothing and returns no hits. It gives
+  the groove's notes (count-in excluded) the scale up and down one octave from the root
+  at or above open E, and logs them as `Target { time, len, midi }` in `ScaleShared`
+  (trimmed at stop). `judge` scores against the nearest target: 1 the note, 0.5 another
+  octave, 0 otherwise, so a wrong note grades Poor through the harmony path.
 - `Played.freq` is the only pitch data. It's stored as soon as early pitch detection
   reports, with or without an accompaniment. Convert with `music.rs::freq_to_midi(freq, a4)`.
   `a4` comes from `TunerPrefs`. `freq` can stay `None`.

@@ -2,6 +2,7 @@
 //! list it in [`all`].
 
 pub mod basic_chords;
+pub mod basic_scales;
 pub mod basic_timing;
 mod fake_session;
 pub mod timing_session;
@@ -12,6 +13,7 @@ use bg_ui::ExerciseType;
 pub fn all() -> Vec<Box<dyn ExerciseType>> {
     vec![
         Box::new(basic_timing::BasicTiming::default()),
+        Box::new(basic_timing::BasicTiming::scales()),
         Box::new(basic_chords::BasicChords::default()),
     ]
 }

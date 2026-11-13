@@ -145,6 +145,17 @@ impl Spelling {
             accidental: (alter != 0).then(|| Accidental::of(alter)).flatten(),
         }
     }
+
+    /// The name of pitch class `pc` as spelled: "C", "F#", "Bb", "Cb".
+    pub fn name(&self, pc: u8) -> String {
+        let (letter, alter) = self.names[(pc % 12) as usize];
+        let sign = match alter {
+            1 => "#",
+            -1 => "b",
+            _ => "",
+        };
+        format!("{}{sign}", "CDEFGAB".as_bytes()[letter as usize] as char)
+    }
 }
 
 /// Where a sounding MIDI note is written, every altered note with its accidental;
@@ -1115,6 +1126,9 @@ mod tests {
             mode: Mode::Ionian,
         }));
         assert_eq!(e_flat.pitch(32).alter, -1);
+        assert_eq!(f_locrian.name(11), "Cb");
+        assert_eq!(e_flat.name(8), "Ab");
+        assert_eq!(Spelling::new(None).name(6), "F#");
     }
 
     #[test]

@@ -1,4 +1,5 @@
-//! Basic Timing: play the selected groove on time against the click.
+//! Basic Timing: play the selected groove on time against the click. Also Basic scales
+//! ([`BasicTiming::scales`]): the same, with every note a step of the key's scale.
 //!
 //! A tier-3 kit program (see `docs/architecture/ui-components.md`):
 //! - `model.rs`: the model. `msg.rs`: what can happen to it.
@@ -29,7 +30,7 @@ use bg_ui::widgets::toolbar::Toolbar;
 use bg_ui::{ExerciseCtx, ExerciseType, egui, icons};
 use serde_json::Value;
 
-pub use model::{BasicTimingData, ViewOptions};
+pub use model::{BasicTimingData, Kind, ViewOptions};
 
 use effects::Effect;
 use model::Model;
@@ -38,9 +39,6 @@ use theme::Theme;
 
 use crate::fake_session;
 use crate::timing_session::{TimingSession, lock};
-
-/// The exercise's id. Never change it: presets and settings are stored under it.
-const ID: &str = "basic_timing";
 
 #[derive(Default)]
 pub struct BasicTiming {
@@ -67,6 +65,13 @@ impl kit::Program for Screen {
 }
 
 impl BasicTiming {
+    /// Basic scales.
+    pub fn scales() -> Self {
+        let mut s = Self::default();
+        s.model.kind = Kind::Scales;
+        s
+    }
+
     /// Handles `msgs`, then repaints `ui` if there were any, since the views showed the
     /// state before them.
     fn dispatch(
@@ -103,19 +108,32 @@ impl PresetSchema for BasicTiming {
 
 impl ExerciseType for BasicTiming {
     fn id(&self) -> &'static str {
-        ID
+        self.model.kind.id()
     }
 
     fn name(&self) -> &'static str {
-        "Basic timing"
+        match self.model.kind {
+            Kind::Timing => "Basic timing",
+            Kind::Scales => "Basic scales",
+        }
     }
 
     fn icon(&self) -> &'static str {
-        icons::METRONOME
+        match self.model.kind {
+            Kind::Timing => icons::METRONOME,
+            Kind::Scales => icons::STAIRS,
+        }
     }
 
     fn description(&self) -> &'static str {
-        "Play the groove in time with the click. Timing, length and level of every note are scored."
+        match self.model.kind {
+            Kind::Timing => {
+                "Play the groove in time with the click. Timing, length and level of every note are scored."
+            }
+            Kind::Scales => {
+                "Play the key's scale up and down, one note per groove note. Pitch and timing of every note are scored."
+            }
+        }
     }
 
     fn default_preset(&self) -> Value {

@@ -6,7 +6,8 @@ use bg_ui::kit::Emit;
 use bg_ui::views::review;
 
 use super::msg::Msg;
-use crate::timing_session::{SharedTiming, TimingSession};
+use crate::basic_scales::{ScaleTargets, SharedScale};
+use crate::timing_session::{AccompanimentScoring, SharedTiming, TimingSession};
 
 pub enum Effect {
     Start(Box<Start>),
@@ -21,12 +22,26 @@ pub struct Start {
     pub scoring: ScoringThresholds,
     pub shared: SharedTiming,
     pub max_recording_bytes: usize,
+    /// Basic scales: where its targets go, and the reference tuning to judge by.
+    pub scale: Option<(SharedScale, f32)>,
 }
 
 pub fn run(effect: Effect, engine: &mut AudioEngine, out: &mut Emit<Msg>) {
     match effect {
         Effect::Start(s) => {
-            let logic = TimingSession::new(s.cfg, s.scoring, s.shared);
+            let logic = match s.scale {
+                Some((scale, a4)) => {
+                    let targets = ScaleTargets::new(&s.cfg.key, a4, scale);
+                    TimingSession::with_accompaniment(
+                        s.cfg,
+                        s.scoring,
+                        s.shared,
+                        Box::new(targets),
+                        AccompanimentScoring::default(),
+                    )
+                }
+                None => TimingSession::new(s.cfg, s.scoring, s.shared),
+            };
             let id = engine.start_recorded(Box::new(logic), s.max_recording_bytes);
             out.send(Msg::Started(id));
         }
